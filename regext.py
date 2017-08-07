@@ -52,3 +52,14 @@ Helper function for reverse engineering
 rprog("revs", "Reverse engineering helper",
       "-h    - list available options",
       help)
+
+
+help = '''
+cgroup information
+
+--tg    - task group details
+'''
+
+rprog("cgroupinfo", "cgroup information",
+      "-h    - list available options",
+      help)
