@@ -43,3 +43,12 @@ CPU lock check
 rprog("lockup", "LOCKUP check",
       "-h   - list available options",
       help)
+
+
+help = '''
+Helper function for reverse engineering
+'''
+
+rprog("revs", "Reverse engineering helper",
+      "-h    - list available options",
+      help)
