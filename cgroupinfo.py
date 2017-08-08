@@ -22,7 +22,7 @@ def show_cgroup_tree():
     rootnode = readSymbol("rootnode")
     if (rootnode == 0):
         return
-    print ("** cgroup subsystem **")
+    print ("** cgroup subsystems **")
     for cgroup_subsys in readSUListFromHead(rootnode.subsys_list,
                                              'sibling',
                                              'struct cgroup_subsys'):
@@ -32,11 +32,13 @@ def show_cgroup_tree():
     print ("** cgroup tree **")
     top_cgroup = rootnode.top_cgroup
     curlimit = sys.getrecursionlimit()
-    sys.setrecursionlimit(30)
+    sys.setrecursionlimit(100)
     print_cgroup_entry(top_cgroup, top_cgroup, 0)
     sys.setrecursionlimit(curlimit)
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
+    if (idx > 0 and top_cgroup == cur_cgroup):
+        return
     if (cur_cgroup == 0):
         return
     for css_addr in cur_cgroup.subsys:
@@ -48,10 +50,10 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         if (subsys.cgroup == 0):
             continue
         cgroup = subsys.cgroup
-        cgroup_name = ""
+        cgroup_name = "<default>"
         if (cgroup.dentry != 0):
             cgroup_name = dentry_to_filename(cgroup.dentry)
-        print ("%s %s %s at 0x%x" %
+        print ("%s%s%s at 0x%x" %
                ("  " * idx, "+--" if idx > 0 else "", cgroup_name, cgroup))
         if (cgroup.parent == 0):
             top_cgroup = cgroup
@@ -62,6 +64,8 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
             cgroup = readSU('struct cgroup', childaddr)
             print_cgroup_entry(top_cgroup, cgroup, idx + 1)
 
+#        if (idx == 0):
+#            print ("")
         if (cgroup == top_cgroup):
             continue
 
