@@ -40,13 +40,13 @@ def show_task_group():
 
 def cgroupinfo():
     op = OptionParser()
-    op.add_option("--tg", dest="Taskgroup", default=0,
+    op.add_option("--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
-                  help="Taskgroup list")
+                  help="task_group list")
 
     (o, args) = op.parse_args()
 
-    if (o.Taskgroup):
+    if (o.taskgroup_list):
         show_task_group()
         sys.exit(0)
 
