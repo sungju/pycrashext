@@ -6,6 +6,9 @@ import sys
 from optparse import OptionParser
 
 def dentry_to_filename (dentry) :
+    if (dentry == 0):
+        return "<>"
+
     try:
         crashout = exec_crash_command ("files -d {:#x}".format(dentry))
         filename = crashout.split()[-1]

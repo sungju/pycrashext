@@ -60,7 +60,7 @@ rprog("revs", "Reverse engineering helper",
 help = '''
 cgroup information
 
---tg    - task group details
+--tglist    - task group list with details
 '''
 
 rprog("cgroupinfo", "cgroup information",
