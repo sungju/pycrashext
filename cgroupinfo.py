@@ -96,7 +96,7 @@ def cgroupinfo():
 
     op.add_option("--tree", dest="cgroup_tree", default=0,
                   action="store_true",
-                  help="display cgroup list in tree format")
+                  help="hierarchial display of cgroups")
 
     (o, args) = op.parse_args()
 

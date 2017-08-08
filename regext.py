@@ -61,6 +61,7 @@ help = '''
 cgroup information
 
 --tglist    - task group list with details
+--tree      - hierarchial display of cgroups
 '''
 
 rprog("cgroupinfo", "cgroup information",
