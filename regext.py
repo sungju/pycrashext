@@ -47,6 +47,9 @@ rprog("lockup", "LOCKUP check",
 
 help = '''
 Helper function for reverse engineering
+
+--regs  - register details
+--asm <instruction> - details about an instruction
 '''
 
 rprog("revs", "Reverse engineering helper",
