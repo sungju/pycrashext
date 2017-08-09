@@ -1,4 +1,5 @@
 from __future__ import print_function
+from __future__ import division
 
 from pykdump.API import *
 
@@ -10,11 +11,14 @@ def vmw_mem():
         return
 
     print ("allocated size (pages)     = %d" % pa.size)
-    print ("allocated size (bytes)     = %d" %
-           (pa.size / crash.PAGESIZE))
+    print ("allocated size (bytes)     = %d, (%.2fGB)" %
+           (pa.size * crash.PAGESIZE,
+           ((pa.size * crash.PAGESIZE)/1024/1024/1024)))
     print ("required target (pages)    = %d" % pa.target)
-    print ("required target (bytes)    = %d" %
-           (pa.target / crash.PAGESIZE))
+    print ("required target (bytes)    = %d, (%.2fGB)" %
+           (pa.target * crash.PAGESIZE,
+           ((pa.target * crash.PAGESIZE)/1024/1024/1024)))
+
     print ("")
     print ("refuesed pages             = %d" %
            pa.n_refused_pages)
