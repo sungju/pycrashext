@@ -6,6 +6,10 @@ from pykdump.API import *
 import sys
 
 def vmw_mem():
+    baddr = sym2addr('balloon')
+    balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
+    print ('%s' % (balloon_result))
+
     pa = readSymbol('balloon');
     if (pa == 0):
         return
@@ -20,17 +24,25 @@ def vmw_mem():
            ((pa.target * crash.PAGESIZE)/1024/1024/1024)))
 
     print ("")
-    print ("refuesed pages             = %d" %
-           pa.n_refused_pages)
+
+    if (member_offset(pa, "n_refused_pages") > -1):
+        print ("refuesed pages             = %d" %
+               pa.n_refused_pages)
     print ("rate_alloc                 = %d" % pa.rate_alloc)
-    print ("rate_free                  = %d" % pa.rate_free)
+
+    if (member_offset(pa, "rate_free") > -1):
+        print ("rate_free                  = %d" % pa.rate_free)
 
     print ("\n")
+    """
     print ("** vmballoon_stats **")
     print ("timer = %d" % pa.stats.timer)
-    print ("alloc = %d" % pa.stats.alloc)
-    print ("free = %d" % pa.stats.free)
-    print ("alloc_fail = %d" % pa.stats.alloc_fail)
+    if (member_offset(pa.stats, "alloc") > -1):
+        print ("alloc = %d" % pa.stats.alloc)
+    if (member_offset(pa.stats, "free") > -1):
+        print ("free = %d" % pa.stats.free)
+    if (member_offset(pa.stats, "alloc_fail") > -1):
+        print ("alloc_fail = %d" % pa.stats.alloc_fail)
 
     print ("sleep_alloc = %d" % pa.stats.sleep_alloc)
     print ("sleepalloc_fail = %d" % pa.stats.sleep_alloc_fail)
@@ -40,6 +52,8 @@ def vmw_mem():
 
     print ("target = %d" % pa.stats.target)
     print ("target_fail = %d" % pa.stats.target_fail)
+    """
+
 
 if ( __name__ == '__main__'):
     vmw_mem()
