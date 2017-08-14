@@ -69,3 +69,17 @@ cgroup information
 rprog("cgroupinfo", "cgroup information",
       "-h    - list available options",
       help)
+
+
+help = '''
+scheduling information
+
+--classes    - Show scheduling classes
+--details    - Show details
+'''
+
+rprog("sched", "scheduling information",
+      "-h    - list available options",
+      help)
+
+
