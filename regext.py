@@ -38,6 +38,8 @@ if (symbol_exists('balloon')):
 
 help = '''
 CPU lock check
+
+-r     - Show longest holder at top
 '''
 
 rprog("lockup", "LOCKUP check",
