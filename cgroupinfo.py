@@ -82,8 +82,12 @@ def show_task_group():
         if (css.cgroup == 0):
             continue
         cgroup = readSU('struct cgroup', css.cgroup)
+        if (cgroup == 0):
+            continue
         count = count + 1
-        cgroup_name = dentry_to_filename(cgroup.dentry)
+        cgroup_name = "<default>"
+        if (cgroup.dentry != 0):
+            cgroup_name = dentry_to_filename(cgroup.dentry)
         print ("task_group = 0x%16x, cgroup = 0x%16x\n\t(%s)" %
                 (task_group, cgroup, cgroup_name))
 
