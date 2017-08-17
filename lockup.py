@@ -8,6 +8,7 @@ from __future__ import division
 from pykdump.API import *
 
 from LinuxDump import Tasks
+from LinuxDump.trees import *
 
 import sys
 
@@ -69,9 +70,12 @@ def show_cfs_task_list(runqueue, reverse_sort):
     """
     task_offset = member_offset("struct task_struct", "se")
     task_list = []
-    for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
-                                         "group_node",
-                                         "struct sched_entity"):
+#    for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
+#                                         "group_node",
+#                                         "struct sched_entity"):
+    for sched_entity in for_all_rbtree(runqueue.cfs.tasks_timeline,
+                                       "struct sched_entity",
+                                       "run_node"):
         if (sched_entity == runqueue.cfs.curr):
             continue
         task_addr = sched_entity - task_offset
