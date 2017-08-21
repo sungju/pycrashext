@@ -39,12 +39,18 @@ def print_pstree(options):
 def task_status_str(status):
     return {
         0: "RU",
+        "TASK_RUNNING" : "RU",
         1: "IN",
+        "TASK_INTERRUPTIBLE" : "IN",
         2: "UN",
+        "TASK_UNINTERRUPTIBLE" : "UN",
         4: "ST",
+        "TASK_STOPPED" : "ST",
         8: "TR",
         16: "ZO",
+        "TASK_ZOMBIE" : "ZO",
         32: "DE",
+        "TASK_DEAD" : "DE",
         64: "DE",
     }[status]
 
