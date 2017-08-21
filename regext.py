@@ -84,3 +84,16 @@ rprog("sched", "scheduling information",
       help)
 
 
+help = '''
+Print process list in tree format.
+
+-p          - Print process ID
+-g          - Print number of threads
+-s          - Print task state
+-t          - Print a specific task and its children
+'''
+
+
+rprog("pstree", "Print process list in tree format",
+      "-h   - list available options",
+      help)
