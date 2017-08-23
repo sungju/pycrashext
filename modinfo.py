@@ -41,7 +41,7 @@ def module_info(options):
         load_module_details()
 
     for module in module_list:
-        print("0x%x %-20s %10d" % (long(module),
+        print("0x%x %-25s %10d" % (long(module),
                                  module.name,
                                  module.core_size))
 
