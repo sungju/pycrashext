@@ -40,6 +40,10 @@ def module_info(options):
     if (len(module_list) == 0):
         load_module_details()
 
+    print("%-18s %-25s %10s" % ("struct module *",
+                      "MODULE_NAME",
+                      "SIZE"))
+
     for module in module_list:
         print("0x%x %-25s %10d" % (long(module),
                                  module.name,
