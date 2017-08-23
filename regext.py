@@ -97,3 +97,14 @@ Print process list in tree format.
 rprog("pstree", "Print process list in tree format",
       "-h   - list available options",
       help)
+
+
+help = '''
+Module related information.
+
+--disasm <module name>  - Disassemble functions in a module
+'''
+
+rprog("modinfo", "Module related information",
+      "-h       - list available options",
+      help)
