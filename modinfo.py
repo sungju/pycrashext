@@ -9,10 +9,13 @@ from pykdump.API import *
 from LinuxDump import Tasks
 import sys
 
-
-def find_module(module_name):
+module_list = []
+def load_module_details():
     # Most of the part is borrowed from lsModules in API.py
     # - Daniel Kwon
+    global module_list
+
+    module_list = []
     try:
         # On older kernels, we have module_list
         kernel_module = sym2addr("kernel_module")
@@ -21,17 +24,37 @@ def find_module(module_name):
             for module in readStructNext(module_list, "next", inchead = False):
                 if (long(module) == kernel_module):
                     break
-                if (module.name == module_name):
-                    return module
+                module_list.insert(0, module)
         else:
             # On new kernels, we have a listhead
             lh = ListHead(sym2addr("modules"), "struct module")
             for module in lh.list:
-                if (module.name == module_name):
-                    return module
+                module_list.insert(0, module)
     except:
         # If anything went wrong, return a partial list
         pass
+
+def module_info(options):
+    global module_list
+
+    if (len(module_list) == 0):
+        load_module_details()
+
+    for module in module_list:
+        print("0x%x %-20s %10d" % (long(module),
+                                 module.name,
+                                 module.core_size))
+
+
+def find_module(module_name):
+    global module_list
+
+    if (len(module_list) == 0):
+        load_module_details()
+
+    for module in module_list:
+        if (module.name == module_name):
+            return module
 
     return None
 
@@ -39,10 +62,13 @@ def find_module(module_name):
 def disasm_one_func(func_detail):
     disasm_str = exec_crash_command("dis -l 0x%s" % (func_detail[0]))
 
-    print ("BEGIN disassemble %s() %s" % (func_detail[2], "-" * 20))
+    print ("%s BEGIN disassemble %s() %s" % ("-" * 10,
+                                             func_detail[2],
+                                             "-" * 10))
     print (disasm_str, end='')
-    print ("END   disassemble %s() %s\n" % (func_detail[2], "=" * 20))
-
+    print ("%s END   disassemble %s() %s\n" % ("=" * 10,
+                                               func_detail[2],
+                                               "=" * 10))
 
 def disasm_module(options):
     module = find_module(options.disasm_module)
@@ -68,14 +94,20 @@ def modinfo():
     op.add_option("--disasm", dest="disasm_module", default=None,
                   action="store", type="string",
                   help="Disassemble a module functions")
-    op.add_option("--details", dest="show_details", default=0,
+    op.add_option("--reload", dest="reload_modlist", default=0,
                   action="store_true",
                   help="Show details")
 
     (o, args) = op.parse_args()
 
+    if (o.reload_modlist):
+        load_module_details()
+
     if (o.disasm_module is not None):
         disasm_module(o)
+        exit(0)
+
+    module_info(o)
 
 if ( __name__ == '__main__'):
     modinfo()
