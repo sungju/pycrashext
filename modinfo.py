@@ -74,6 +74,27 @@ def disasm_one_func(func_detail):
                                                func_detail[2],
                                                "=" * 10))
 
+
+def get_mod_sym_list(module_name,
+                     exclude_types=None, include_types=None):
+    mod_func_list = []
+    for sym_str_list in exec_crash_command("sym -m %s" % (module_name)).splitlines():
+        spl = sym_str_list.split(' ', 2)
+        if (spl[1] == 'MODULE'):
+            continue
+        if (exclude_types is not None):
+            if (spl[1] in exclude_types):
+                continue
+
+        if (include_types is not None):
+            if (spl[1] not in include_types):
+                continue
+
+        mod_func_list.append(spl)
+
+    return mod_func_list
+
+
 def disasm_module(options):
     module = find_module(options.disasm_module)
     if (module is None):
@@ -81,16 +102,64 @@ def disasm_module(options):
         return
 
     mod_func_list = []
-    for sym_str_list in exec_crash_command("sym -m %s" % (module.name)).splitlines():
-        spl = sym_str_list.split(' ', 2)
-        if (spl[1] == 'MODULE'):
-            continue
-        if (spl[1] != '(t)'):
-            continue
-        mod_func_list.append(spl)
+    mod_func_list = get_mod_sym_list(module.name,
+                                     include_types=['(t)', '(T)'])
 
     for a_func in mod_func_list:
         disasm_one_func(a_func)
+
+
+def get_sym_type_key(sym_list):
+    return sym_list[1]
+
+
+def show_module_detail(options):
+    module = find_module(options.module_detail)
+    if (module is None):
+        print("The module %s does not exist" % (options.disasm_module))
+        return
+
+
+    print ("%-15s : 0x%x" % ("struct module", long(module)))
+    print ("%-15s : %s" % ("name", module.name))
+    print ("%-15s : %s" % ("version", module.version))
+    print ("%-15s : %s" % ("source ver", module.srcversion))
+    print ("%-15s : %s (0x%x)" % ("init", addr2sym(module.init), module.init))
+    print ("%-15s : %s (0x%x)" % ("exit", addr2sym(module.exit), module.exit))
+
+    mod_sym_list = get_mod_sym_list(module.name)
+
+    text_sym_list = []
+    bss_sym_list = []
+    data_sym_list = []
+    readonly_sym_list = []
+
+    for sym_entry in mod_sym_list:
+        if (sym_entry[1] == '(T)' or sym_entry[1] == '(t)'):
+            text_sym_list.insert(0, sym_entry)
+            continue
+        if (sym_entry[1] == '(B)' or sym_entry[1] == '(b)'):
+            bss_sym_list.insert(0, sym_entry)
+            continue
+        if (sym_entry[1] == '(D)' or sym_entry[1] == '(d)'):
+            data_sym_list.insert(0, sym_entry)
+            continue
+        if (sym_entry[1] == '(R)' or sym_entry[1] == '(r)'):
+            readonly_sym_list.insert(0, sym_entry)
+            continue
+
+
+    print_sym_list_section("\n.text section", text_sym_list)
+    print_sym_list_section("\n.bss section", bss_sym_list)
+    print_sym_list_section("\n.data section", data_sym_list)
+    print_sym_list_section("\n.readonly_data section", readonly_sym_list)
+
+
+def print_sym_list_section(title, sym_list):
+    print(title)
+    for sym_entry in sym_list:
+        print("0x%s %s %s" %
+            (sym_entry[0], sym_entry[1], sym_entry[2]))
 
 
 def modinfo():
@@ -100,6 +169,9 @@ def modinfo():
                   help="Disassemble a module functions")
     op.add_option("--reload", dest="reload_modlist", default=0,
                   action="store_true",
+                  help="Reload module table")
+    op.add_option("--detail", dest="module_detail", default=None,
+                  action="store", type="string",
                   help="Show details")
 
     (o, args) = op.parse_args()
@@ -109,7 +181,11 @@ def modinfo():
 
     if (o.disasm_module is not None):
         disasm_module(o)
-        exit(0)
+        sys.exit(0)
+
+    if (o.module_detail is not None):
+        show_module_detail(o)
+        sys.exit(0)
 
     module_info(o)
 
