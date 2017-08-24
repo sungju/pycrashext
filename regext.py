@@ -103,6 +103,8 @@ help = '''
 Module related information.
 
 --disasm <module name>  - Disassemble functions in a module
+--reload                - Reload module table
+--detail                - Show details
 '''
 
 rprog("modinfo", "Module related information",
