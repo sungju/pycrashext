@@ -167,17 +167,11 @@ def modinfo():
     op.add_option("--disasm", dest="disasm_module", default=None,
                   action="store", type="string",
                   help="Disassemble a module functions")
-    op.add_option("--reload", dest="reload_modlist", default=0,
-                  action="store_true",
-                  help="Reload module table")
     op.add_option("--detail", dest="module_detail", default=None,
                   action="store", type="string",
                   help="Show details")
 
     (o, args) = op.parse_args()
-
-    if (o.reload_modlist):
-        load_module_details()
 
     if (o.disasm_module is not None):
         disasm_module(o)

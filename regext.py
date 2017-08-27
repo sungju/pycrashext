@@ -110,3 +110,15 @@ Module related information.
 rprog("modinfo", "Module related information",
       "-h       - list available options",
       help)
+
+
+help = '''
+ipmi related information.
+
+--smi_list      - Show smi_info list
+--details       - Show additional information
+'''
+
+rprog("ipmi", "ipmi related information",
+      "-h       - list available options",
+      help)
