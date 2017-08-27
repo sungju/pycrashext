@@ -46,13 +46,31 @@ def show_smi_list(show_details):
                                              addr2sym(smi_info.handlers)))
         if (show_details):
             print ("%20s : 0x%x" % ("curr_msg", smi_info.curr_msg))
-            print ("%20s : 0x%x" % ("waiting_msg", smi_info.waiting_msg))
+            if (member_offset('struct smi_info', 'waiting_msg') >= 0):
+                print ("%20s : 0x%x" % ("waiting_msg", smi_info.waiting_msg))
             print ("%20s : %s" % ("state", si_state_str(smi_info.si_state)))
             print ("%20s : %d" % ("IRQ", smi_info.irq))
             su = readSU("struct task_struct", smi_info.thread);
             print ("%20s : %s (0x%x)" % ("kernel thread",
-                                         su.comm,
+                                         su.comm if su > 0 else "<None>",
                                          smi_info.thread))
+
+
+            ipmi_smi = readSU('struct ipmi_smi', smi_info.intf)
+            bmc_device = readSU('struct bmc_device', ipmi_smi.bmc)
+            if (member_offset('struct bmc_device', 'name') >= 0):
+                print ("%20s : %s" % ("BMC name", bmc_device.name))
+
+            ipmi_device_id = readSU('struct ipmi_device_id',
+                                    bmc_device.id)
+            print ("%20s : 0x%x" % ("Device ID", ipmi_device_id.device_id))
+            print ("%20s : 0x%x" % ("Manufacturer ID",
+                                    ipmi_device_id.manufacturer_id))
+            print ("%20s : 0x%x" % ("IPMI version",
+                                    ipmi_device_id.ipmi_version))
+
+
+        print()
 
 
 def ipmi():
