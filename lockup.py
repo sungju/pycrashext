@@ -91,11 +91,45 @@ def show_cfs_task_list(runqueue, reverse_sort):
     for task in sorted_task_list:
         print_task_delay(task)
 
+def show_prio_array(title, prio_array, reverse_sort):
+    print ("%s" % (title))
+    has_any_entry = 0
+    for idx in range(0,140):
+        task_list = []
+        for task in readSUListFromHead(prio_array.queue[idx],
+                                       "run_list",
+                                       "struct task_struct"):
+            task_list.insert(0, task)
+        if (len(task_list) == 0):
+            continue
+
+        has_any_entry = 1
+        sorted_task_list = sorted(task_list,
+                                  key=getDelayKey,
+                                  reverse=not reverse_sort)
+
+        print ("\t[%4d]" % (idx))
+        for task in sorted_task_list:
+            print_task_delay(task)
+
+    if (has_any_entry == 0):
+        print("\tNo entry under this array")
+
+    return
+
+
+def show_prio_task_list(runqueue, reverse_sort):
+    show_prio_array("Active prio_array", runqueue.active, reverse_sort)
+    show_prio_array("Expired prio_array", runqueue.expired, reverse_sort)
 
 
 def show_task_list(runqueue, reverse_sort):
-    show_rq_task_list(runqueue, reverse_sort)
-    show_cfs_task_list(runqueue, reverse_sort)
+    if (member_offset('struct rq', 'rt') >= 0):
+        show_rq_task_list(runqueue, reverse_sort)
+    if (member_offset('struct rq', 'cfs') >= 0):
+        show_cfs_task_list(runqueue, reverse_sort)
+    if (member_offset('struct rq', 'active') >= 0):
+        show_prio_task_list(runqueue, reverse_sort)
     print("")
 
 
