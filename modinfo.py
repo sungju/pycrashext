@@ -167,7 +167,7 @@ def modinfo():
     op.add_option("--disasm", dest="disasm_module", default=None,
                   action="store", type="string",
                   help="Disassemble a module functions")
-    op.add_option("--detail", dest="module_detail", default=None,
+    op.add_option("--details", dest="module_detail", default=None,
                   action="store", type="string",
                   help="Show details")
 

@@ -102,8 +102,8 @@ rprog("pstree", "Print process list in tree format",
 help = '''
 Module related information.
 
---disasm <module name>  - Disassemble functions in a module
---detail <module name>  - Show details
+--disasm <module name>    - Disassemble functions in a module
+--detailsl <module name>  - Show details
 '''
 
 rprog("modinfo", "Module related information",
