@@ -121,3 +121,14 @@ ipmi related information.
 rprog("ipmi", "ipmi related information",
       "-h       - list available options",
       help)
+
+help = '''
+command list test.
+
+--cmd <command> - The command set to run
+--list          - Show the command set list
+'''
+
+rprog("cmds_test", "command list test",
+      "-h       - list available options",
+      help)
