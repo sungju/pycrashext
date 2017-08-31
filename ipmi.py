@@ -27,10 +27,15 @@ def irq_status(disabled):
         return "ENABLED"
 
 def show_smi_list(show_details):
-    pa = readSymbol("smi_infos")
-    if (pa == 0):
+    try:
+        pa = readSymbol("smi_infos")
+        if (pa == 0):
+            print ("SMI Info does not exist")
+            return
+    except:
         print ("SMI Info does not exist")
         return
+
 
     print ("%-18s %-18s %-18s %-18s" % ("smi_info",
                                         "ipmi_smi_t",

@@ -21,8 +21,7 @@ def sched_test_list():
 
 
 def cgroupinfo_test_list():
-    return ["cgroupinfo --tree",
-            "cgroupinfo"]
+    return ["cgroupinfo --tglist --tree"]
 
 
 def pstree_test_list():
@@ -34,6 +33,14 @@ def modinfo_test_list():
     return ["modinfo", "modinfo --details ext4"]
 
 
+def vmw_mem_test_list():
+    return ["vmw_mem"]
+
+
+def ipmi_test_list():
+    return ["ipmi --smi_list", "ipmi --smi_list --details"]
+
+
 def show_command_list(cmd_funcs):
     for cmd_set in cmd_funcs:
         print ("cmds_test --cmd %s" % (cmd_set))
@@ -43,13 +50,23 @@ def show_command_list(cmd_funcs):
         print ()
 
 
+def all_cmds_list(cmd_funcs):
+    cmd_list = []
+    for cmd in cmd_funcs:
+        cmd_list.extend(cmd_funcs[cmd]())
+
+    return cmd_list
+
+
 def cmds_test():
     cmd_funcs = {\
         'lockup'     : lockup_test_list,\
         'sched'      : sched_test_list,\
         'cgroupinfo' : cgroupinfo_test_list,\
         'pstree'     : pstree_test_list,\
-        'modinfo'    : modinfo_test_list\
+        'modinfo'    : modinfo_test_list,\
+        'vmw_mem'    : vmw_mem_test_list,\
+        'ipmi'       : ipmi_test_list\
     }
 
     op = OptionParser()
@@ -69,7 +86,14 @@ def cmds_test():
         sys.exit(0)
 
 
-    cmd_list = cmd_funcs[o.command]()
+    cmd = o.command
+    if (cmd == "all"):
+        print ("PLEASE RUN IT WITH YOUR OWN RISK")
+        print ("PyKdump seems not able to handle several calls in one shot")
+
+        cmd_list = all_cmds_list(cmd_funcs)
+    else:
+        cmd_list = cmd_funcs[cmd]()
 
     for cmd in cmd_list:
         run_a_command(cmd)

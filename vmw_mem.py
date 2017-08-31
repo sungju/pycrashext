@@ -6,13 +6,17 @@ from pykdump.API import *
 import sys
 
 def vmw_mem():
+    try:
+        pa = readSymbol('balloon');
+        if (pa == 0):
+            return
+    except:
+        print ("VMware balloon symbol does not exist")
+        return
+
     baddr = sym2addr('balloon')
     balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
     print ('%s' % (balloon_result))
-
-    pa = readSymbol('balloon');
-    if (pa == 0):
-        return
 
     print ("allocated size (pages)     = %d" % pa.size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %

@@ -110,13 +110,13 @@ def cgroupinfo():
 
     if (o.taskgroup_list):
         show_task_group()
-        sys.exit(0)
+#        sys.exit(0)
 
     if (o.cgroup_tree):
         show_cgroup_tree()
-        sys.exit(0)
+#        sys.exit(0)
 
-    show_task_group()
+    # show_task_group()
 
 
 if ( __name__ == '__main__'):
