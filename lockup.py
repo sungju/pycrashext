@@ -19,9 +19,12 @@ def getDelayKey(taskobj):
     return taskobj.sched_info.run_delay
 
 def print_task_delay(task):
-    sched_info = task.sched_info
-    print ("%20s (0x%x) : %10.2f seconds delayed in queue" %
-            (task.comm, task, sched_info.run_delay / 1000000000))
+    try:
+        sched_info = task.sched_info
+        print ("%20s (0x%x) : %10.2f seconds delayed in queue" %
+               (task.comm, task, sched_info.run_delay / 1000000000))
+    except:
+        pass
 
 def show_rq_task_list(runqueue, reverse_sort):
     """
@@ -68,7 +71,6 @@ def show_rq_task_list(runqueue, reverse_sort):
 def show_cfs_task_list(runqueue, reverse_sort):
     """
     """
-    task_offset = member_offset("struct task_struct", "se")
     task_list = []
 #    for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
 #                                         "group_node",
@@ -78,6 +80,7 @@ def show_cfs_task_list(runqueue, reverse_sort):
                                        "run_node"):
         if (sched_entity == runqueue.cfs.curr):
             continue
+        task_offset = member_offset("struct task_struct", "se")
         task_addr = sched_entity - task_offset
         task = readSU('struct task_struct', task_addr)
         task_list.append(task)
