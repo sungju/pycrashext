@@ -87,19 +87,26 @@ def show_cfs_task_list(runqueue, reverse_sort):
     task_list = []
     task_root = None
 
-    if (member_offset("struct cfs_rq", "tasks") >= 0):
-        for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
-                                             "group_node",
-                                             "struct sched_entity"):
+    if (member_offset('struct rq', 'cfs_tasks') >= 0):
+        for sched_entity in readSUListFromHead(runqueue.cfs_tasks,
+                                               "group_node",
+                                               "struct sched_entity"):
             task = read_task_from_sched_entity(sched_entity,
                                                runqueue)
             if (task != None):
                 task_list.append(task)
-
     elif (member_offset("struct cfs_rq", "tasks_timeline") >= 0):
         for sched_entity in for_all_rbtree(runqueue.cfs.tasks_timeline,
                                            "struct sched_entity",
                                            "run_node"):
+            task = read_task_from_sched_entity(sched_entity,
+                                               runqueue)
+            if (task != None):
+                task_list.append(task)
+    elif (member_offset("struct cfs_rq", "tasks") >= 0):
+        for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
+                                             "group_node",
+                                             "struct sched_entity"):
             task = read_task_from_sched_entity(sched_entity,
                                                runqueue)
             if (task != None):
