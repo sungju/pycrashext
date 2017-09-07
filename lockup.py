@@ -2,6 +2,7 @@
  Written by Daniel Sungju Kwon
 """
 
+
 from __future__ import print_function
 from __future__ import division
 
@@ -12,11 +13,14 @@ from LinuxDump.trees import *
 
 import sys
 
+
 def getKey(rqobj):
     return rqobj.Timestamp
 
+
 def getDelayKey(taskobj):
     return taskobj.sched_info.run_delay
+
 
 def print_task_delay(task):
     try:
@@ -25,6 +29,7 @@ def print_task_delay(task):
                (task.comm, task, sched_info.run_delay / 1000000000))
     except:
         pass
+
 
 def show_rq_task_list(runqueue, reverse_sort):
     """
@@ -55,8 +60,8 @@ def show_rq_task_list(runqueue, reverse_sort):
     rt_array = runqueue.rt.active
     for task_list in rt_array.queue:
         for sched_rt_entity in readSUListFromHead(task_list,
-                                       "run_list",
-                                       "struct sched_rt_entity"):
+                                        "run_list",
+                                        "struct sched_rt_entity"):
             task_offset = member_offset("struct task_struct", "rt")
             task_addr = sched_rt_entity - task_offset
             task = readSU("struct task_struct", task_addr)
@@ -67,23 +72,41 @@ def show_rq_task_list(runqueue, reverse_sort):
             print_task_delay(task)
 
 
+def read_task_from_sched_entity(sched_entity, runqueue):
+    if (sched_entity == runqueue.cfs.curr):
+        return None
+    task_offset = member_offset("struct task_struct", "se")
+    task_addr = sched_entity - task_offset
+    task = readSU('struct task_struct', task_addr)
+    return task
+
 
 def show_cfs_task_list(runqueue, reverse_sort):
     """
     """
     task_list = []
-#    for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
-#                                         "group_node",
-#                                         "struct sched_entity"):
-    for sched_entity in for_all_rbtree(runqueue.cfs.tasks_timeline,
-                                       "struct sched_entity",
-                                       "run_node"):
-        if (sched_entity == runqueue.cfs.curr):
-            continue
-        task_offset = member_offset("struct task_struct", "se")
-        task_addr = sched_entity - task_offset
-        task = readSU('struct task_struct', task_addr)
-        task_list.append(task)
+    task_root = None
+
+    if (member_offset("struct cfs_rq", "tasks") >= 0):
+        for sched_entity in readSUListFromHead(runqueue.cfs.tasks,
+                                             "group_node",
+                                             "struct sched_entity"):
+            task = read_task_from_sched_entity(sched_entity,
+                                               runqueue)
+            if (task != None):
+                task_list.append(task)
+
+    elif (member_offset("struct cfs_rq", "tasks_timeline") >= 0):
+        for sched_entity in for_all_rbtree(runqueue.cfs.tasks_timeline,
+                                           "struct sched_entity",
+                                           "run_node"):
+            task = read_task_from_sched_entity(sched_entity,
+                                               runqueue)
+            if (task != None):
+                task_list.append(task)
+    else:
+        task_list = []
+
 
     sorted_task_list = sorted(task_list,
                               key=getDelayKey,
