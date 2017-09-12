@@ -1,3 +1,7 @@
+"""
+ Written by Daniel Sungju Kwon
+"""
+
 from crash import register_epython_prog as rprog
 
 from pykdump.API import *
