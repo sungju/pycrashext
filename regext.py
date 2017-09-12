@@ -30,10 +30,14 @@ help = '''
 vmware's ballooning value check
 '''
 
-if (symbol_exists('balloon')):
-    rprog("vmw_mem", "vmware ballooning information ",
-          "-h   - list available options",
-          help)
+try:
+    pa = readSymbol('balloon');
+    if (pa != 0):
+        rprog("vmw_mem", "vmware ballooning information ",
+              "-h   - list available options",
+              help)
+except:
+    pass
 
 
 help = '''
@@ -118,9 +122,14 @@ ipmi related information.
 --details       - Show additional information
 '''
 
-rprog("ipmi", "ipmi related information",
-      "-h       - list available options",
-      help)
+try:
+    pa = readSymbol("smi_infos")
+    if (pa != 0):
+        rprog("ipmi", "ipmi related information",
+              "-h       - list available options",
+              help)
+except:
+    pass
 
 help = '''
 command list test.
