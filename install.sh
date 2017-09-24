@@ -12,6 +12,12 @@ echo ""
 echo "      Python/CRASH API"
 echo "      https://sourceforge.net/projects/pykdump/"
 echo ""
+grep "mpykdump64.so" ~/.crashrc 
+if (( $? != 0 ))
+then
+  echo "mpykdump64.so needs to be loaded before the script in ~/.crashrc"
+  exit 0
+fi
 
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
