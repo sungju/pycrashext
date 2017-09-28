@@ -145,3 +145,12 @@ command list test.
 rprog("cmds_test", "command list test",
       "-h       - list available options",
       help)
+
+
+help = '''
+Showing softirq and tasklet details.
+'''
+
+rprog("bh", "Bottom Half information",
+      "-h       - list available options",
+      help)
