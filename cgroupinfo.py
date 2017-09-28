@@ -36,7 +36,7 @@ def show_cgroup_tree():
     print ("** cgroup tree **")
     top_cgroup = rootnode.top_cgroup
     curlimit = sys.getrecursionlimit()
-    sys.setrecursionlimit(100)
+    sys.setrecursionlimit(1000)
     print_cgroup_entry(top_cgroup, top_cgroup, 0)
     sys.setrecursionlimit(curlimit)
 
