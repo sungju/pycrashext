@@ -34,14 +34,9 @@ help = '''
 vmware's ballooning value check
 '''
 
-try:
-    pa = readSymbol('balloon');
-    if (pa != 0):
-        rprog("vmw_mem", "vmware ballooning information ",
-              "-h   - list available options",
-              help)
-except:
-    pass
+rprog("vmw_mem", "vmware ballooning information ",
+      "-h   - list available options",
+      help)
 
 
 help = '''
