@@ -31,6 +31,18 @@ def print_task_delay(task):
         pass
 
 
+def show_rt_stat_in_rq(runqueue):
+    rt = runqueue.rt
+    print ("CPU %3d: rt_throttled = %d, rt_time = %10d, rt_runtime = %10d" %
+           (runqueue.cpu, rt.rt_throttled, rt.rt_time, rt.rt_runtime))
+
+
+def show_rt_stat(options):
+    rqlist = Tasks.getRunQueues()
+    for rq in rqlist:
+        show_rt_stat_in_rq(rq)
+
+
 def show_rq_task_list(runqueue, reverse_sort):
     """
     rq->rq->active->queue[..]
@@ -190,8 +202,16 @@ def lockup():
     op.add_option("--tasks", dest="show_tasks", default=0,
                   action="store_true",
                   help="show tasks in each runqueue")
+    op.add_option("--rt", dest="rt_details", default=0,
+                  action="store_true",
+                  help="show RT statistics")
 
     (o, args) = op.parse_args()
+
+    if (o.rt_details):
+        show_rt_stat(o)
+        return
+
 
     lockup_display(not o.reverse_sort, o.show_tasks)
 
