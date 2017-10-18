@@ -31,10 +31,10 @@ def print_task_delay(task):
         pass
 
 
-def show_rt_stat_in_rq(runqueue):
-    rt = runqueue.rt
-    print ("CPU %3d: rt_throttled = %d, rt_time = %10d, rt_runtime = %10d" %
-           (runqueue.cpu, rt.rt_throttled, rt.rt_time, rt.rt_runtime))
+def show_rt_stat_in_rq(rq):
+    rt = rq.rt
+    print ("CPU %3d: rt_throttled = %d, rt_time = %12d, rt_runtime = %10d" %
+           (rq.cpu, rt.rt_throttled, rt.rt_time, rt.rt_runtime))
 
 
 def show_rt_stat(options):
