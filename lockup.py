@@ -22,11 +22,18 @@ def getDelayKey(taskobj):
     return taskobj.sched_info.run_delay
 
 
-def print_task_delay(task):
+def print_task_delay(task, options):
     try:
         sched_info = task.sched_info
-        print ("%20s (0x%x) : %10.2f seconds delayed in queue" %
-               (task.comm, task, sched_info.run_delay / 1000000000))
+        prio = task.prio
+        if (task.policy != 0):
+            prio = task.rt_priority
+
+        print ("%20s (0x%x)[%3d] : %10.2f seconds delayed in queue" %
+               (task.comm, task, prio, sched_info.run_delay / 1000000000))
+        if (options.task_details):
+            print ("\t\texec_start = %d, exec_max = %d" %
+                   (task.se.exec_start, task.se.exec_max))
     except:
         pass
 
@@ -43,7 +50,7 @@ def show_rt_stat(options):
         show_rt_stat_in_rq(rq)
 
 
-def show_rq_task_list(runqueue, reverse_sort):
+def show_rq_task_list(runqueue, reverse_sort, options):
     """
     rq->rq->active->queue[..]
 
@@ -81,7 +88,7 @@ def show_rq_task_list(runqueue, reverse_sort):
                 print("  RT tasks:")
                 head_displayed = True
 
-            print_task_delay(task)
+            print_task_delay(task, options)
 
 
 def read_task_from_sched_entity(sched_entity, runqueue):
@@ -93,7 +100,7 @@ def read_task_from_sched_entity(sched_entity, runqueue):
     return task
 
 
-def show_cfs_task_list(runqueue, reverse_sort):
+def show_cfs_task_list(runqueue, reverse_sort, options):
     """
     """
     task_list = []
@@ -134,9 +141,9 @@ def show_cfs_task_list(runqueue, reverse_sort):
         print("  CFS tasks:")
 
     for task in sorted_task_list:
-        print_task_delay(task)
+        print_task_delay(task, options)
 
-def show_prio_array(title, prio_array, reverse_sort):
+def show_prio_array(title, prio_array, reverse_sort, options):
     print ("%s" % (title))
     has_any_entry = 0
     for idx in range(0,140):
@@ -155,7 +162,7 @@ def show_prio_array(title, prio_array, reverse_sort):
 
         print ("\t[%4d]" % (idx))
         for task in sorted_task_list:
-            print_task_delay(task)
+            print_task_delay(task, options)
 
     if (has_any_entry == 0):
         print("\tNo entry under this array")
@@ -163,22 +170,24 @@ def show_prio_array(title, prio_array, reverse_sort):
     return
 
 
-def show_prio_task_list(runqueue, reverse_sort):
-    show_prio_array("Active prio_array", runqueue.active, reverse_sort)
-    show_prio_array("Expired prio_array", runqueue.expired, reverse_sort)
+def show_prio_task_list(runqueue, reverse_sort, options):
+    show_prio_array("Active prio_array", runqueue.active,
+                    reverse_sort, options)
+    show_prio_array("Expired prio_array", runqueue.expired,
+                    reverse_sort, options)
 
 
-def show_task_list(runqueue, reverse_sort):
+def show_task_list(runqueue, reverse_sort, options):
     if (member_offset('struct rq', 'rt') >= 0):
-        show_rq_task_list(runqueue, reverse_sort)
+        show_rq_task_list(runqueue, reverse_sort, options)
     if (member_offset('struct rq', 'cfs') >= 0):
-        show_cfs_task_list(runqueue, reverse_sort)
+        show_cfs_task_list(runqueue, reverse_sort, options)
     if (member_offset('struct rq', 'active') >= 0):
-        show_prio_task_list(runqueue, reverse_sort)
+        show_prio_task_list(runqueue, reverse_sort, options)
     print("")
 
 
-def lockup_display(reverse_sort, show_tasks):
+def lockup_display(reverse_sort, show_tasks, options):
     rqlist = Tasks.getRunQueues()
     rqsorted = sorted(rqlist, key=getKey, reverse=reverse_sort)
     if (reverse_sort):
@@ -187,11 +196,15 @@ def lockup_display(reverse_sort, show_tasks):
         now = rqsorted[-1].Timestamp
 
     for rq in rqsorted:
-        print ("CPU %3d: %10.2f sec behind by 0x%x, %s (%d in queue)" %
+        prio = rq.curr.prio
+        if (rq.curr.policy != 0):
+            prio = rq.curr.rt_priority
+
+        print ("CPU %3d: %10.2f sec behind by 0x%x, %s [%3d] (%d in queue)" %
                (rq.cpu, (now - rq.Timestamp) / 1000000000,
-                rq.curr, rq.curr.comm, rq.nr_running))
+                rq.curr, rq.curr.comm, prio, rq.nr_running))
         if (show_tasks):
-            show_task_list(rq, reverse_sort)
+            show_task_list(rq, reverse_sort, options)
 
 
 def lockup():
@@ -202,18 +215,21 @@ def lockup():
     op.add_option("--tasks", dest="show_tasks", default=0,
                   action="store_true",
                   help="show tasks in each runqueue")
-    op.add_option("--rt", dest="rt_details", default=0,
+    op.add_option("--rt", dest="rt_stat", default=0,
                   action="store_true",
                   help="show RT statistics")
+    op.add_option("--details", dest="task_details", default=0,
+                  action="store_true",
+                  help="show task details")
 
     (o, args) = op.parse_args()
 
-    if (o.rt_details):
+    if (o.rt_stat):
         show_rt_stat(o)
         return
 
 
-    lockup_display(not o.reverse_sort, o.show_tasks)
+    lockup_display(not o.reverse_sort, o.show_tasks, o)
 
 if ( __name__ == '__main__'):
     lockup()
