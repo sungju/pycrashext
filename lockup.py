@@ -32,7 +32,7 @@ def print_task_delay(task, options):
         print ("%20s (0x%x)[%3d] : %10.2f seconds delayed in queue" %
                (task.comm, task, prio, sched_info.run_delay / 1000000000))
         if (options.task_details):
-            print ("\t\texec_start = %d, exec_max = %d" %
+            print ("\t\t\texec_start = %d, exec_max = %d" %
                    (task.se.exec_start, task.se.exec_max))
     except:
         pass
