@@ -40,8 +40,11 @@ def print_task_delay(task, options):
 
 def show_rt_stat_in_rq(rq):
     rt = rq.rt
-    print ("CPU %3d: rt_throttled = %d, rt_time = %12d, rt_runtime = %10d" %
-           (rq.cpu, rt.rt_throttled, rt.rt_time, rt.rt_runtime))
+    rt_period = rt.tg.rt_bandwidth.rt_period.tv64
+    print ("CPU %3d: rt_nr_running = %d, rt_throttled = %d\n"
+           "\trt_time = %12d, rt_runtime = %10d, rt_period = %d" %
+           (rq.cpu, rt.rt_nr_running, rt.rt_throttled, rt.rt_time,
+            rt.rt_runtime, rt_period))
 
 
 def show_rt_stat(options):

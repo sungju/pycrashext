@@ -47,8 +47,8 @@ def all_filesystem_info(options):
             frozen = sb.s_writers.frozen
 
         frozen_str = get_frozen_str(frozen)
-        print ("frozen=%s, %s (%s) [%s]" %
-               (frozen_str,
+        print ("SB: 0x%14x, frozen=%s, %s (%s) [%s]" %
+               (sb, frozen_str,
                dentry_to_filename(sb.s_root), sb.s_id,
                 sb.s_type.name))
 
