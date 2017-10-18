@@ -63,14 +63,14 @@ def bh():
 
     (o, args) = op.parse_args()
 
-    if (o.softirq):
-        show_softirq_list(o)
-
     if (o.tasklet):
         show_tasklet_list(o)
 
     if (o.hitasklet):
         show_tasklet_hi_list(o)
+
+    show_softirq_list(o)
+
 
 if ( __name__ == '__main__'):
     bh()
