@@ -41,10 +41,10 @@ def all_filesystem_info(options):
                                          "s_list",
                                          "struct super_block"):
         frozen = -1
-        if (member_offset('struct super_block', 's_frozen') >= 0):
-            frozen = sb.s_frozen
-        elif (member_offset('struct super_block', 's_writers') >= 0):
+        if (member_offset('struct super_block', 's_writers') >= 0):
             frozen = sb.s_writers.frozen
+        elif (member_offset('struct super_block', 's_frozen') >= 0):
+            frozen = sb.s_frozen
 
         frozen_str = get_frozen_str(frozen)
         print ("SB: 0x%14x, frozen=%s, %s (%s) [%s]" %
