@@ -149,3 +149,12 @@ Showing softirq and tasklet details.
 rprog("bh", "Bottom Half information",
       "-h       - list available options",
       help)
+
+
+help = '''
+filesystem related information.
+'''
+
+rprog("fsinfo", "Filesystem information",
+      "-h       - list available options",
+      help)
