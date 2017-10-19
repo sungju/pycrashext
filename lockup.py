@@ -22,6 +22,17 @@ def getDelayKey(taskobj):
     return taskobj.sched_info.run_delay
 
 
+def get_task_policy_str(policy):
+    return {
+        0: "N", # SCHED_NORMAL
+        1: "F", # SCHED_FIFO
+        2: "R", # SCHED_RR
+        3: "B", # SCHED_BATCH
+        5: "I", # SCHED_IDLE
+        6: "D", # SCHED_DEADLINE
+    }[policy]
+
+
 def print_task_delay(task, options):
     try:
         sched_info = task.sched_info
@@ -29,8 +40,9 @@ def print_task_delay(task, options):
         if (task.policy != 0):
             prio = task.rt_priority
 
-        print ("%20s (0x%x)[%3d] : %10.2f seconds delayed in queue" %
-               (task.comm, task, prio, sched_info.run_delay / 1000000000))
+        print ("%20s (0x%x)[%s:%3d] : %10.2f seconds delayed in queue" %
+               (task.comm, task, get_task_policy_str(task.policy),
+                prio, sched_info.run_delay / 1000000000))
         if (options.task_details):
             print ("\t\t\texec_start = %d, exec_max = %d" %
                    (task.se.exec_start, task.se.exec_max))
@@ -203,9 +215,11 @@ def lockup_display(reverse_sort, show_tasks, options):
         if (rq.curr.policy != 0):
             prio = rq.curr.rt_priority
 
-        print ("CPU %3d: %10.2f sec behind by 0x%x, %s [%3d] (%d in queue)" %
+        print ("CPU %3d: %10.2f sec behind by "
+               "0x%x, %s [%s:%3d] (%d in queue)" %
                (rq.cpu, (now - rq.Timestamp) / 1000000000,
-                rq.curr, rq.curr.comm, prio, rq.nr_running))
+                rq.curr, rq.curr.comm,
+                get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
 
