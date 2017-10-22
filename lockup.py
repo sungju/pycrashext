@@ -40,7 +40,7 @@ def print_task_delay(task, options):
         if (task.policy != 0):
             prio = task.rt_priority
 
-        print ("%20s (0x%x)[%s:%3d] : %10.2f seconds delayed in queue" %
+        print ("%20s (0x%x)[%s:%3d] : %10.2f sec delayed in queue" %
                (task.comm, task, get_task_policy_str(task.policy),
                 prio, sched_info.run_delay / 1000000000))
         if (options.task_details):
