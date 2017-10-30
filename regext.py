@@ -158,3 +158,11 @@ filesystem related information.
 rprog("fsinfo", "Filesystem information",
       "-h       - list available options",
       help)
+
+help = '''
+networking related information.
+'''
+
+rprog("netinfo", "Network information",
+      "-h       - list available options",
+      help)

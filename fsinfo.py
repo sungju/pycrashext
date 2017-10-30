@@ -58,7 +58,7 @@ def fsinfo():
     op = OptionParser()
     op.add_option("--details", dest="filesystem_details", default=0,
                   action="store_true",
-                  help="Show scheduling classes")
+                  help="Show detailed filesystem information")
 
     (o, args) = op.parse_args()
 
