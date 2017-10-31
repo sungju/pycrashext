@@ -24,6 +24,15 @@ pid_cnt = 0
 branch_bar = []
 branch_locations = []
 
+
+def findTaskByPid(task_id):
+    init_task = readSymbol("init_task")
+    for task in readSUListFromHead(init_task.tasks,
+                                   "tasks",
+                                   "struct task_struct"):
+        if (task.pid == task_id or task.tgid == task_id):
+            return task
+
 def print_pstree(options):
     global pid_cnt
     pid_cnt = 0
@@ -31,6 +40,11 @@ def print_pstree(options):
     if (options.task_id > 0):
         tt = TaskTable()
         init_task = tt.getByPid(options.task_id)
+        if (init_task == None):
+            init_task = findTaskByPid(options.task_id)
+        if (init_task == None):
+            return
+
     print_task(init_task, 0, True, options)
     print_children(init_task, 0, options)
 
@@ -82,6 +96,9 @@ def print_task(task, depth, first, options):
     global pid_cnt
     global branch_locations
 
+    if (task == None):
+        return
+
     pid_cnt = pid_cnt + 1
     thread_str = ""
     if (options.print_thread):
@@ -93,8 +110,13 @@ def print_task(task, depth, first, options):
                 return 0
 
     print_branch(depth, first)
+
+    comm_str = ""
+    if (task.comm != 0):
+        comm_str = task.comm
+
     print_str = ("%s%s%s%s " %
-           (task.comm,
+           (comm_str,
             "(" + str(task.pid) + ")"
                 if options.print_pid else "",
             "[" + task_status_str(task.state) +"]"
@@ -111,6 +133,9 @@ def print_task(task, depth, first, options):
 
 def print_children(task, depth, options):
     global branch_bar
+
+    if (task == None):
+        return
 
     depth = depth + 1
     while (len(branch_bar) <= depth):
