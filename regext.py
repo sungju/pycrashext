@@ -160,6 +160,14 @@ rprog("fsinfo", "Filesystem information",
       help)
 
 help = '''
+CPU related information.
+'''
+
+rprog("cpuinfo", "CPU information",
+      "-h       - list available options",
+      help)
+
+help = '''
 networking related information.
 '''
 
