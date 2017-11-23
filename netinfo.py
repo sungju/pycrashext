@@ -38,8 +38,11 @@ def show_network_interfaces(options):
                    (netdev_ops_str, netdev_ops))
 
             master_name = ""
-            if (dev.master != 0):
-                master_name = dev.master.name
+            if (member_offset("struct net_device", "master") >= 0):
+                if (dev.master != 0):
+                    master_name = dev.master.name
+            else:
+                master_name = "Not available"
 
             print("\tMTU: %d, Master = <%s>" %
                   (dev.mtu, master_name))
