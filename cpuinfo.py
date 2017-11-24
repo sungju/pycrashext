@@ -24,13 +24,28 @@ def show_cpufreq():
     for cpu, addr in enumerate(addrs):
         cpufreq_addr = readULong(addr)
         cpufreq_cpu_data = readSU('struct cpufreq_policy', cpufreq_addr)
-        cpudata = all_cpu_data[cpu]
-        print("CPU %3d, min = %d, max = %d, cur = %d\n"
-              "\tcurrent_pstate = %d, policy = %s" %
-                (cpu, cpufreq_cpu_data.min, cpufreq_cpu_data.max,
-                 cpufreq_cpu_data.cur,
-                 cpudata.pstate.current_pstate,
-                 cpufreq_policy_str(cpufreq_cpu_data.policy)))
+        cur_cpu_khz = cpufreq_cpu_data.cur
+        if (cur_cpu_khz == 0):
+            cur_cpu_khz = readSymbol("cpu_khz")
+
+        print("CPU %3d (0x%x) min = %d, max = %d, cur = %d" %
+                (cpu, cpufreq_addr, cpufreq_cpu_data.min,
+                 cpufreq_cpu_data.max, cur_cpu_khz))
+        if (all_cpu_data != None and all_cpu_data != 0):
+            cpudata = all_cpu_data[cpu]
+            print("\tcpudata = 0x%x, current_pstate = %d, turbo_pstate = %d,\n"
+                  "\tmin_pstate = %d, max_pstate = %d, policy = %s" %
+                     (cpudata, cpudata.pstate.current_pstate,
+                      cpudata.pstate.turbo_pstate,
+                      cpudata.pstate.min_pstate,
+                      cpudata.pstate.max_pstate,
+                     cpufreq_policy_str(cpufreq_cpu_data.policy)))
+            try:
+                print("\t%s" %
+                      (exec_crash_command("cpudata.sample.freq -d 0x%x" %
+                                          (cpudata))))
+            except:
+                pass
 
 def cpuinfo():
     op = OptionParser()
@@ -42,8 +57,10 @@ def cpuinfo():
 
     if (o.cpufreq):
         show_cpufreq()
-#        sys.exit(0)
+        sys.exit(0)
 
+    # default action
+    show_cpufreq()
 
 if ( __name__ == '__main__'):
     cpuinfo()
