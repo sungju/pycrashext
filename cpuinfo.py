@@ -20,8 +20,7 @@ def cpufreq_policy_str(policy):
 
 def show_cpufreq():
     if (not sys_info.machine in ("x86_64", "i386", "i686", "athlon")):
-        print("Only available on x86 architecutres")
-        sys.exit(1)
+        print("Some information are only available on x86 architecutres")
 
     addrs = percpu.get_cpu_var("cpufreq_cpu_data")
     try:
