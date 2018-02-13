@@ -95,10 +95,26 @@ def show_asm_details( asm_inst ):
 
     return
 
+def revs_arm():
+    # ARM register details
+    print ("""
+** function parameters for ARM **
+X0 - X29: General Purpose Registers
+    X0 - X7:    Arguments & Result
+    X8:         Indirect result (struct) location
+    X9 - X15:   Spare temp registers
+    X16 - X17:  Intra-call registers (PLT, linker)
+    X18:        Platform specific (TLS)
+    X19 - X28:  Callee-saved registers
+    X29:        Frame pointer
+X30: This is the Link Register (LR)""")
+
 
 def show_registers():
     if (sys_info.machine in ("x86_64", "i386", "i686", "athlon")):
         revs_x86()
+    if (sys_info.machine.startswith("arm")):
+        revs_arm()
 
 def revs():
     op = OptionParser()
