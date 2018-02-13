@@ -19,6 +19,10 @@ def cpufreq_policy_str(policy):
     } [policy];
 
 def show_cpufreq():
+    if (not sys_info.machine in ("x86_64", "i386", "i686", "athlon")):
+        print("Only available on x86 architecutres")
+        sys.exit(1)
+
     addrs = percpu.get_cpu_var("cpufreq_cpu_data")
     try:
         all_cpu_data = readSymbol("all_cpu_data")

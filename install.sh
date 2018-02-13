@@ -12,7 +12,7 @@ echo ""
 echo "      Python/CRASH API"
 echo "      https://sourceforge.net/projects/pykdump/"
 echo ""
-grep "mpykdump64.so" ~/.crashrc 
+grep "mpykdump*.so" ~/.crashrc 
 if (( $? != 0 ))
 then
   echo "mpykdump64.so needs to be loaded before the script in ~/.crashrc"

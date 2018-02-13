@@ -66,7 +66,7 @@ def netinfo():
 
     if (o.show_interface):
         show_network_interfaces(o)
-        system.exit(0)
+        sys.exit(0)
 
 
     show_network_interfaces(o)
