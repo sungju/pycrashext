@@ -100,13 +100,13 @@ def revs_arm():
     print ("""
 ** function parameters for ARM **
 X0 - X29: General Purpose Registers
-    X0 - X7:    Arguments & Result
-    X8:         Indirect result (struct) location
-    X9 - X15:   Spare temp registers
-    X16 - X17:  Intra-call registers (PLT, linker)
-    X18:        Platform specific (TLS)
-    X19 - X28:  Callee-saved registers
-    X29:        Frame pointer
+    X0 - X7     : Arguments & Result
+    X8          : Indirect result (struct) location
+    X9 - X15    : Spare temp registers
+    X16 - X17   : Intra-call registers (PLT, linker)
+    X18         : Platform specific (TLS)
+    X19 - X28   : Callee-saved registers
+    X29         : Frame pointer
 X30: This is the Link Register (LR)""")
 
 
