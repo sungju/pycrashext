@@ -20,10 +20,17 @@ def cpufreq_policy_str(policy):
 
 def show_cpufreq():
     addrs = percpu.get_cpu_var("cpufreq_cpu_data")
-    all_cpu_data = readSymbol("all_cpu_data")
+    try:
+        all_cpu_data = readSymbol("all_cpu_data")
+    except:
+        pass
     for cpu, addr in enumerate(addrs):
         cpufreq_addr = readULong(addr)
         cpufreq_cpu_data = readSU('struct cpufreq_policy', cpufreq_addr)
+        if (cpufreq_cpu_data == None or cpufreq_cpu_data == 0):
+            print("struct cpufreq_policy = 0x%x" % (cpufreq_cpu_data))
+            continue
+
         cur_cpu_khz = cpufreq_cpu_data.cur
         if (cur_cpu_khz == 0):
             cur_cpu_khz = readSymbol("cpu_khz")
