@@ -16,7 +16,7 @@ def show_network_interfaces(options):
     for dev in netdevice.dev_base_list():
         dev_addr = "Not available"
         if (dev.dev_addr != 0):
-            dev_addr = ("%x:%x:%x:%x:%x:%x" %
+            dev_addr = ("%02x:%02x:%02x:%02x:%02x:%02x" %
                         (dev.dev_addr[0], dev.dev_addr[1],
                          dev.dev_addr[2], dev.dev_addr[3],
                          dev.dev_addr[4], dev.dev_addr[5]))
