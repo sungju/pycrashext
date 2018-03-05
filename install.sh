@@ -22,7 +22,7 @@ fi
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
 echo '' >> ~/.bash_profile
-echo "export PYKDUMPPATH=$PWD" >> ~/.bash_profile
+echo "export PYKDUMPPATH=$PWD:\$PYKDUMPPATH" >> ~/.bash_profile
 echo " [DONE]"
 
 # Make it load the registeration code during crash start
