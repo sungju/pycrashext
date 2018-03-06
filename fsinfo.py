@@ -55,6 +55,8 @@ def get_mount_option(mnt_flags):
 #        0x1000: "SHARED",
 #        0x2000: "UNBINDABLE",
 
+        0x800000: "locked",     # MNT_LOCKED
+        0x8000000: "umount",    # MNT_UMOUNT
     }.get(mnt_flags, "")
 
 def get_mount_options(mnt_flags):
