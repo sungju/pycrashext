@@ -107,7 +107,8 @@ def all_filesystem_info(options):
 
 
 def find_pid_from_file(options):
-    file_struct = readSU("struct file", int(options.findpid, 16))
+    file_struct = readSU("struct file",
+                         int(options.file_addr_for_pid, 16))
     d_inode = file_struct.f_path.dentry.d_inode;
     vfs_inode_offset = member_offset('struct proc_inode', 'vfs_inode');
     proc_inode = readSU("struct proc_inode", d_inode - vfs_inode_offset)
@@ -127,13 +128,13 @@ def fsinfo():
     op.add_option("--details", dest="filesystem_details", default=0,
                   action="store_true",
                   help="Show detailed filesystem information")
-    op.add_option("--findpid", dest="findpid", default="",
+    op.add_option("--findpid", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a file")
 
     (o, args) = op.parse_args()
 
-    if (o.findpid != ""):
+    if (o.file_addr_for_pid != ""):
         find_pid_from_file(o)
         sys.exit(0);
 
