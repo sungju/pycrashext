@@ -106,14 +106,36 @@ def all_filesystem_info(options):
                 get_mount_options(mnt_flags)))
 
 
+def find_pid_from_file(options):
+    file_struct = readSU("struct file", int(options.findpid, 16))
+    d_inode = file_struct.f_path.dentry.d_inode;
+    vfs_inode_offset = member_offset('struct proc_inode', 'vfs_inode');
+    proc_inode = readSU("struct proc_inode", d_inode - vfs_inode_offset)
+    pid_first = proc_inode.pid.tasks[0].first
+    pids_offset = member_offset("struct task_struct", "pids");
+    task_struct = readSU("struct task_struct", pid_first - pids_offset);
+
+    crashout = exec_crash_command(
+        "struct task_struct.pid,comm,files {:#x} -d".format(task_struct))
+    print("struct task_struct.pid,comm,files %x\n%s" %
+          (task_struct, crashout))
+
+    return
 
 def fsinfo():
     op = OptionParser()
     op.add_option("--details", dest="filesystem_details", default=0,
                   action="store_true",
                   help="Show detailed filesystem information")
+    op.add_option("--findpid", dest="findpid", default="",
+                  action="store",
+                  help="Find PID from a file")
 
     (o, args) = op.parse_args()
+
+    if (o.findpid != ""):
+        find_pid_from_file(o)
+        sys.exit(0);
 
     all_filesystem_info(o)
 
