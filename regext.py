@@ -174,3 +174,13 @@ networking related information.
 rprog("netinfo", "Network information",
       "-h       - list available options",
       help)
+
+
+
+help = '''
+memory related information
+'''
+
+rprog("meminfo", "Memory information",
+      "-h       - list available options",
+      help)
