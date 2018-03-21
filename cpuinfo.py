@@ -11,6 +11,32 @@ import sys
 from optparse import OptionParser
 
 
+def  show_cpuid(options):
+    phys_cpu_list = {}
+
+    cpuinfo_addrs = percpu.get_cpu_var("cpu_info")
+    for cpu, addr in enumerate(cpuinfo_addrs):
+        cpuinfo_x86 = readSU("struct cpuinfo_x86", addr)
+        phys_proc_id = cpuinfo_x86.phys_proc_id
+        cpu_core_id = cpuinfo_x86.cpu_core_id
+
+        cpu_core_dict = {}
+        if (phys_proc_id in phys_cpu_list):
+            cpu_core_dict = phys_cpu_list[phys_proc_id]
+
+        cpu_core_dict[cpu] = cpu_core_id
+        phys_cpu_list[phys_proc_id] = cpu_core_dict
+
+
+    for phys_cpu in phys_cpu_list:
+        print("<<< Physical CPU %3d >>>" % (phys_cpu))
+        core_dict = phys_cpu_list[phys_cpu]
+
+        for cpu in core_dict:
+            core = core_dict[cpu]
+            print("\tCPU %3d, core %3d" % (cpu, core))
+
+
 def cpufreq_policy_str(policy):
     return {
         0: "",
@@ -64,11 +90,18 @@ def cpuinfo():
     op.add_option("--cpufreq", dest="cpufreq", default=0,
                   action="store_true",
                   help="CPU frequency details")
+    op.add_option("--cpuid", dest="cpuid", default=0,
+                  action="store_true",
+                  help="Show CPU's physical and core ID")
 
     (o, args) = op.parse_args()
 
     if (o.cpufreq):
         show_cpufreq()
+        sys.exit(0)
+
+    if (o.cpuid):
+        show_cpuid(o)
         sys.exit(0)
 
     # default action
