@@ -24,7 +24,7 @@ def  show_cpuid(options):
         if (phys_proc_id in phys_cpu_list):
             cpu_core_dict = phys_cpu_list[phys_proc_id]
 
-        cpu_core_dict[cpu] = cpu_core_id
+        cpu_core_dict[cpu] = cpuinfo_x86
         phys_cpu_list[phys_proc_id] = cpu_core_dict
 
 
@@ -33,8 +33,11 @@ def  show_cpuid(options):
         core_dict = phys_cpu_list[phys_cpu]
 
         for cpu in core_dict:
-            core = core_dict[cpu]
-            print("\tCPU %3d, core %3d" % (cpu, core))
+            cpuinfo_x86 = core_dict[cpu]
+            print("\tCPU %3d, core %3d : 0x%x %s" %
+                  (cpu, cpuinfo_x86.cpu_core_id,
+                   cpuinfo_x86,
+                   cpuinfo_x86.x86_model_id))
 
 
 def cpufreq_policy_str(policy):
