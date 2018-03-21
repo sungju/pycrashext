@@ -80,12 +80,17 @@ def show_slabtop(options):
     for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
         kmem_cache = readSU("struct kmem_cache",
                             int(sorted_slabtop[i][0], 16))
+        obj_size = 0
+        if (member_offset('struct kmem_cache', 'buffer_size') >= 0):
+            obj_size = kmem_cache.buffer_size
+        elif (member_offset('struct kmem_cache', 'object_size') >= 0):
+            obj_size = kmem_cache.object_size
 
         print("0x%16s %-30s %9sK %7d" %
                 (sorted_slabtop[i][0],
                  kmem_cache.name,
                  sorted_slabtop[i][1],
-                 kmem_cache.buffer_size))
+                 obj_size))
 
     print("=" * 68)
 
