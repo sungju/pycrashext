@@ -11,7 +11,7 @@ import sys
 from optparse import OptionParser
 
 
-def  show_cpuid(options):
+def  show_cpuid_x86(options):
     phys_cpu_list = {}
 
     cpuinfo_addrs = percpu.get_cpu_var("cpu_info")
@@ -38,6 +38,13 @@ def  show_cpuid(options):
                   (cpu, cpuinfo_x86.cpu_core_id,
                    cpuinfo_x86,
                    cpuinfo_x86.x86_model_id))
+
+    print("\n\tFor details, run 'cpuinfo_x86  <address>'")
+
+
+def show_cpuid(options):
+    if (sys_info.machine in ("x86_64", "i386", "i686", "athlon")):
+        show_cpuid_x86(options)
 
 
 def cpufreq_policy_str(policy):
