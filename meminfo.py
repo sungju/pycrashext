@@ -55,6 +55,40 @@ def show_tasks_memusage(options):
           (total_rss/1048576))
 
 
+def show_slabtop(options):
+    result = exec_crash_command("kmem -s")
+    result_lines = result.splitlines(True)
+    slab_list = {}
+    for i in range(1, len(result_lines) -1):
+        result_line = result_lines[i].split()
+        if (len(result_line) < 7):
+            continue
+        result_line[6] = result_line[6].replace("k", "")
+        total_used = int(result_line[5]) * int(result_line[6])
+        slab_list[result_line[0]] = total_used
+
+    sorted_slabtop = sorted(slab_list.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    min_number = 10
+    if (options.all):
+        min_number = len(sorted_slabtop) - 1
+
+    print("%18s %-30s %10s %7s" %
+          ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
+    print("=" * 68)
+    for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
+        kmem_cache = readSU("struct kmem_cache",
+                            int(sorted_slabtop[i][0], 16))
+
+        print("0x%16s %-30s %9sK %7d" %
+                (sorted_slabtop[i][0],
+                 kmem_cache.name,
+                 sorted_slabtop[i][1],
+                 kmem_cache.buffer_size))
+
+    print("=" * 68)
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("--memusage", dest="memusage", default=0,
@@ -66,11 +100,17 @@ def meminfo():
     op.add_option("--all", dest="all", default=0,
                   action="store_true",
                   help="Show all the tasks")
+    op.add_option("--slabtop", dest="slabtop", default=0,
+                  action="store_true",
+                  help="Show slabtop-like output")
 
     (o, args) = op.parse_args()
 
     if (o.memusage):
         show_tasks_memusage(o)
+
+    if (o.slabtop):
+        show_slabtop(o)
 
 if ( __name__ == '__main__'):
     meminfo()
