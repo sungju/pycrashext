@@ -26,7 +26,9 @@ def show_cpufreq():
     try:
         all_cpu_data = readSymbol("all_cpu_data")
     except:
+        all_cpu_data = None
         pass
+
     for cpu, addr in enumerate(addrs):
         cpufreq_addr = readULong(addr)
         cpufreq_cpu_data = readSU('struct cpufreq_policy', cpufreq_addr)
