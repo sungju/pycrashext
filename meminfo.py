@@ -40,15 +40,16 @@ def show_tasks_memusage(options):
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
 
-    print("%40s %25s" % ("[ Process name ] ", " [ RSS usage ] "))
+    print("=" * 70)
+    print("%-14s   %-s" % (" [ RSS usage ]", "[ Process name ]"))
     print("=" * 70)
     min_number = 10
     if (options.all):
         min_number = len(sorted_usage) - 1
 
     for i in range(0, min(len(sorted_usage) - 1, min_number)):
-        print("%40s %20s KiB" %
-                (sorted_usage[i][0], sorted_usage[i][1]))
+        print("%10s KiB   %-s" %
+                (sorted_usage[i][1], sorted_usage[i][0]))
 
     print("=" * 70)
     print("Total memory usage from user-space = %.2f GiB" %
