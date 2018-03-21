@@ -73,7 +73,8 @@ def show_slabtop(options):
     if (options.all):
         min_number = len(sorted_slabtop) - 1
 
-    print("%18s %-30s %10s %7s" %
+    print("=" * 68)
+    print("%-18s %-30s %10s %7s" %
           ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
     print("=" * 68)
     for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
@@ -99,7 +100,7 @@ def meminfo():
                   help="Show data in individual tasks")
     op.add_option("--all", dest="all", default=0,
                   action="store_true",
-                  help="Show all the tasks")
+                  help="Show all the output")
     op.add_option("--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
