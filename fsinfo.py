@@ -141,10 +141,10 @@ def fsinfo():
                   help="Show detailed filesystem information")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
-                  help="Find PID from a file address (hex)")
+                  help="Find PID from a /proc file address (hex)")
     op.add_option("--findpidbydentry", dest="dentry_addr_for_pid",
                   default="", action="store",
-                  help="Find PID from a dentry address (hex)")
+                  help="Find PID from a /proc dentry address (hex)")
 
     (o, args) = op.parse_args()
 
