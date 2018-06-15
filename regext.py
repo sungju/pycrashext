@@ -184,3 +184,14 @@ memory related information
 rprog("meminfo", "Memory information",
       "-h       - list available options",
       help)
+
+
+
+help = '''
+time related information
+'''
+
+rprog("timeinfo", "Time information",
+      "-h       - list available options",
+      help)
+
