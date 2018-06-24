@@ -195,3 +195,11 @@ rprog("timeinfo", "Time information",
       "-h       - list available options",
       help)
 
+help = '''
+enhanced disasm command related information
+'''
+
+rprog("edis", "Enhanced disasm",
+      "-h       - list available options",
+      help)
+
