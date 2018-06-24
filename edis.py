@@ -26,7 +26,11 @@ def disasm(ins_addr, o, cmd_path_list):
         print("Can't find disasm.py in path")
         return
 
-    command_str = "dis -lr %s" % (ins_addr)
+    options = "-l"
+    if (o.reverse):
+        options = options + " -r"
+
+    command_str = "dis %s %s" % (options, ins_addr)
     disasm_str = exec_crash_command(command_str)
     result_str = exec_gdb_command("!echo '%s' | python %s" % (disasm_str, disasm_path))
 
@@ -35,9 +39,12 @@ def disasm(ins_addr, o, cmd_path_list):
 
 def edis():
     op = OptionParser()
-    op.add_option("--all", dest="all", default=0,
+    op.add_option("-r", "--reverse",
                   action="store_true",
-                  help="Show all the output")
+                  dest="reverse",
+                  default=False,
+                  help="displays all instructions from the start of the" \
+                    + " routine up to and including the designated address.")
 
     (o, args) = op.parse_args()
     disasm(args[0], o, os.environ["PYKDUMPPATH"])
