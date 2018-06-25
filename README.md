@@ -353,3 +353,41 @@ crash> edis -rg ffffffff81363bf7
 ||||  | |   0xffffffff81363b63 <__handle_sysrq+0xa3>:   nopl   0x0(%rax,%rax,1)
 ||||  | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.
 ```
+
+
+### vmw_mem ###
+It displays VMware ballooning usage. It is useful to check out unacounted memory in VMware virtual guest.
+
+```
+crash> vmw_mem
+  size = 0x2e1c39
+  target = 0x606770
+  stats = {
+    timer = 0x2138df, 
+    alloc = 0x2e130b, 
+    alloc_fail = 0x7, 
+    sleep_alloc = 0xa59, 
+    sleep_alloc_fail = 0x0, 
+    refused_alloc = 0x123, 
+    refused_free = 0x123, 
+    free = 0x0, 
+    lock = 0x2e1d5c, 
+    lock_fail = 0x123, 
+    unlock = 0x0, 
+    unlock_fail = 0x0, 
+    target = 0x2138df, 
+    target_fail = 0x14, 
+    start = 0x15, 
+    start_fail = 0x0, 
+    guest_type = 0x15, 
+    guest_type_fail = 0x0
+  }
+
+allocated size (pages)     = 3021881
+allocated size (bytes)     = 12377624576, (11.53GB)
+required target (pages)    = 6317936
+required target (bytes)    = 25878265856, (24.10GB)
+
+rate_alloc                 = 2048
+
+```
