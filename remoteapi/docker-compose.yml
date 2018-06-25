@@ -1,0 +1,20 @@
+#
+# Providing remote supporiting for crash extension
+#
+# Written by Daniel Sungju Kwon
+# dkwon@redhat.com
+version: "3.1"
+
+services:
+  crashext:
+    image: crashext
+    build:
+      context: ./web
+      dockerfile: crashext.Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./plugins:/app/plugins:z
+      - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
+    environment:
+      - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
