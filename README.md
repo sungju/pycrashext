@@ -161,3 +161,120 @@ Total number of task_group(s) = 130
 ```
 
 
+### modinfo ###
+It provides module details as well as a way to disassemble all the functions in the module.
+
+```
+crash> modinfo
+struct module *    MODULE_NAME                     SIZE
+0xffffffffc036f780 dm_mod                        123941
+0xffffffffc0389160 dm_log                         18411
+0xffffffffc037c000 dm_region_hash                 20813
+0xffffffffc03901c0 dm_mirror                      22289
+0xffffffffc0382040 dca                            15130
+0xffffffffc03ac3a0 pps_core                       19057
+0xffffffffc03bd2a0 i2c_core                       63151
+0xffffffffc03e11a0 ptp                            19231
+0xffffffffc0395000 i2c_algo_bit                   13413
+
+crash> modinfo --details oracleacfs
+struct module   : 0xffffffffa085a200
+name            : oracleacfs
+version         : None
+source ver      : 533BB7E5866E52F63B9ACCB
+init            : init_module (0xffffffffa06a2370)
+exit            : ofs_cleanup_module (0xffffffffa06a2320)
+
+.text section
+0xffffffffa07210a0 (t) STACK_delete
+0xffffffffa0720fe0 (t) STACK_insert
+0xffffffffa0720fa0 (t) Ri_LIB_CTX_get_res_meth
+0xffffffffa0720f30 (t) ri_mode_filter_func
+0xffffffffa0720ea0 (t) STACK_pop_free
+0xffffffffa0720e30 (t) STACK_clear
+0xffffffffa0720df0 (t) STACK_free
+0xffffffffa0720d60 (t) STACK_move
+0xffffffffa0720d50 (t) STACK_push
+0xffffffffa0720d40 (t) STACK_unshift
+0xffffffffa0720d10 (t) STACK_shift
+0xffffffffa0720ce0 (t) STACK_pop
+
+
+crash> modinfo --disasm=oracleacfs
+---------- BEGIN disassemble OfsLocateExtent() ----------
+0xffffffffa0500000 <OfsLocateExtent>:   push   %rbp
+0xffffffffa0500001 <OfsLocateExtent+0x1>:       mov    %rsp,%rbp
+0xffffffffa0500004 <OfsLocateExtent+0x4>:       push   %r14
+0xffffffffa0500006 <OfsLocateExtent+0x6>:       push   %r13
+0xffffffffa0500008 <OfsLocateExtent+0x8>:       push   %r12
+0xffffffffa050000a <OfsLocateExtent+0xa>:       push   %rbx
+0xffffffffa050000b <OfsLocateExtent+0xb>:       nopl   0x0(%rax,%rax,1)
+0xffffffffa0500010 <OfsLocateExtent+0x10>:      xor    %r12d,%r12d
+0xffffffffa0500013 <OfsLocateExtent+0x13>:      test   %rdx,%rdx
+...
+```
+
+
+### cpuinfo ###
+It provides CPU related information include how cores are constructed.
+
+```
+crash> cpuinfo
+CPU   0 (0xffffa168bd178200) min = 1200000, max = 2400000, cur = 2394574
+        cpudata = 0xffffa168bd178400, current_pstate = 24, turbo_pstate = 34,
+        min_pstate = 12, max_pstate = 24, policy = CPUFREQ_POLICY_PERFORMANCE
+CPU   1 (0xffffa168bd178600) min = 1200000, max = 2400000, cur = 2394574
+        cpudata = 0xffffa168bd178800, current_pstate = 24, turbo_pstate = 34,
+        min_pstate = 12, max_pstate = 24, policy = CPUFREQ_POLICY_PERFORMANCE
+CPU   2 (0xffffa168bd178a00) min = 1200000, max = 2400000, cur = 2394574
+        cpudata = 0xffffa168bd178c00, current_pstate = 24, turbo_pstate = 34,
+        min_pstate = 12, max_pstate = 24, policy = CPUFREQ_POLICY_PERFORMANCE
+CPU   3 (0xffffa168bd178e00) min = 1200000, max = 2400000, cur = 2394574
+...
+
+crash> cpuinfo --cpuid
+<<< Physical CPU   0 >>>
+        CPU   0, core   0 : 0xffffa168bfc18200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   1, core   1 : 0xffffa168bfc58200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   2, core   2 : 0xffffa168bfc98200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   3, core   3 : 0xffffa168bfcd8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   4, core   4 : 0xffffa168bfd18200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   5, core   8 : 0xffffa168bfd58200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   6, core   9 : 0xffffa168bfd98200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   7, core  10 : 0xffffa168bfdd8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   8, core  11 : 0xffffa168bfe18200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU   9, core  12 : 0xffffa168bfe58200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  20, core   0 : 0xffffa168bfe98200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  21, core   1 : 0xffffa168bfed8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  22, core   2 : 0xffffa168bff18200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  23, core   3 : 0xffffa168bff58200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  24, core   4 : 0xffffa168bff98200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  25, core   8 : 0xffffa168bffd8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  26, core   9 : 0xffffa168c0018200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  27, core  10 : 0xffffa168c0058200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  28, core  11 : 0xffffa168c0098200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  29, core  12 : 0xffffa168c00d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+<<< Physical CPU   1 >>>
+        CPU  10, core   0 : 0xffffa188bf018200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  11, core   1 : 0xffffa188bf058200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  12, core   2 : 0xffffa188bf098200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  13, core   3 : 0xffffa188bf0d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  14, core   4 : 0xffffa188bf118200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  15, core   8 : 0xffffa188bf158200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  16, core   9 : 0xffffa188bf198200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  17, core  10 : 0xffffa188bf1d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  18, core  11 : 0xffffa188bf218200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  19, core  12 : 0xffffa188bf258200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  30, core   0 : 0xffffa188bf298200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  31, core   1 : 0xffffa188bf2d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  32, core   2 : 0xffffa188bf318200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  33, core   3 : 0xffffa188bf358200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  34, core   4 : 0xffffa188bf398200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  35, core   8 : 0xffffa188bf3d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  36, core   9 : 0xffffa188bf418200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  37, core  10 : 0xffffa188bf458200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  38, core  11 : 0xffffa188bf498200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+        CPU  39, core  12 : 0xffffa188bf4d8200 Intel(R) Xeon(R) CPU E5-2640 v4 @ 2.40GHz
+
+        For details, run 'cpuinfo_x86  <address>'
+```
