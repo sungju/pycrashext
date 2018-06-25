@@ -89,9 +89,10 @@ def show_cpufreq():
                       cpudata.pstate.max_pstate,
                      cpufreq_policy_str(cpufreq_cpu_data.policy)))
             try:
-                print("\t%s" %
-                      (exec_crash_command("cpudata.sample.freq -d 0x%x" %
-                                          (cpudata))))
+                if (member_offset('struct cpudata', 'sample') > -1) and \
+                   (member_offset('struct sample', 'freq') > -1):
+                    print("\t%s" % (exec_crash_command("cpudata.sample.freq -d 0x%x" %
+                                            (cpudata))))
             except:
                 pass
 
