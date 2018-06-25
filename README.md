@@ -391,3 +391,25 @@ required target (bytes)    = 25878265856, (24.10GB)
 rate_alloc                 = 2048
 
 ```
+
+
+### timeinfo ###
+It provides time related information. For now, it is providing clock source details.
+
+```
+crash> timeinfo --source --details
+Current clocksource = clocksource_tsc (0xffffffff81a9a580)
+
+clocksource_tsc (0xffffffff81a9a580)
+        name : tsc
+        read : read_tsc (0xffffffff81013550)
+clocksource_hpet (0xffffffff81aaa280)
+        name : hpet
+        read : read_hpet (0xffffffff81043e30)
+clocksource_acpi_pm (0xffffffff81b27b40)
+        name : acpi_pm
+        read : acpi_pm_read (0xffffffff81450eb0)
+clocksource_jiffies (0xffffffff81ab8e80)
+        name : jiffies
+        read : jiffies_read (0xffffffff810b7160)
+```
