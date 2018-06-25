@@ -26,6 +26,8 @@ def set_kernel_version(asm_str):
     global cur_rhel_path
 
     first_line = asm_str.splitlines()[0]
+    if not first_line.startswith("/"):
+        return ""
     pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux.*")
     m = pattern.search(first_line)
     kernel_version = m.group('kernelversion')
@@ -183,7 +185,7 @@ def draw_branches(disasm_str):
                 jmp_found = jmp_found + 1
         loc = loc + 1
 
-    result = ""
+    result = "\n"
     loc = 0
     for line in disasm_str.splitlines():
         jmp_str = " "
@@ -256,4 +258,4 @@ def disasm():
     if jump_graph != "":
         result = draw_branches(result)
 
-    return result.strip()
+    return result.rstrip()
