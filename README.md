@@ -1,5 +1,5 @@
 # pycrashext
-Crash extensions for Pykdump
+Crash extensions for Pykdump. This requires pykdump loaded before use. You can find pykdump binary at [https://sourceforge.net/projects/pykdump/](https://sourceforge.net/projects/pykdump/).
 
 
 ### How to install
