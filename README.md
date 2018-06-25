@@ -413,3 +413,52 @@ clocksource_jiffies (0xffffffff81ab8e80)
         name : jiffies
         read : jiffies_read (0xffffffff810b7160)
 ```
+
+
+### meminfo ###
+It provides memory related information.
+
+```
+crash> meminfo -h
+Usage: meminfo.py [options]
+
+Options:
+  -h, --help  show this help message and exit
+  --memusage  Show memory usages by tasks
+  --nogroup   Show data in individual tasks
+  --all       Show all the output
+  --slabtop   Show slabtop-like output
+
+crash> meminfo --memusage
+======================================================================
+ [ RSS usage ]   [ Process name ]
+======================================================================
+    226892 KiB   ocssd.bin
+    182112 KiB   ologgerd
+    121296 KiB   cssdagent
+    120680 KiB   cssdmonitor
+    120244 KiB   osysmond.bin
+     69064 KiB   java
+     49944 KiB   oraagent.bin
+     39016 KiB   orarootagent.bi
+     36984 KiB   tnslsnr
+     27956 KiB   crsd.bin
+======================================================================
+Total memory usage from user-space = 8.74 GiB
+
+crash> meminfo --slabtop
+====================================================================
+kmem_cache         NAME                                TOTAL OBJSIZE
+====================================================================
+0xffff88102f8e0d80 vm_area_struct                     37264K     200
+0xffff8810299f1000 filp                               25648K     256
+0xffff88102f960f80 dentry                             15348K     192
+0xffff88102f920e80 radix_tree_node                    13616K     560
+0xffff88103fcf03c0 size-2048                          11616K    2048
+0xffff88103fc40100 size-64                             6984K      64
+0xffff881029a61140 proc_inode_cache                    6672K     656
+0xffff8810292a1480 sock_inode_cache                    6144K     704
+0xffff88102f870bc0 task_struct                         5824K    2672
+0xffff88102f850b40 anon_vma_chain                      5652K      48
+====================================================================
+```
