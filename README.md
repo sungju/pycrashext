@@ -278,3 +278,78 @@ crash> cpuinfo --cpuid
 
         For details, run 'cpuinfo_x86  <address>'
 ```
+
+### edis ###
+Enhanced disassembly command. It provides the source code line by line if the remote server is up and running. The server code is packed in docker image, so, it can be run on any envivronment as long as the system has docker commands.
+
+To make it work properly, the docke image should mount source repository by setting 'RHEL_SOURCE_DIR' environment variable before start the docker. 
+
+Here is an example to start remoteapi. Please run it in a system that has the source code.
+
+```
+$ export RHEL_SOURCE_DIR="/Users/sungju/source"
+$ cd remoteapi
+$ ./start_docker.sh
+```
+
+Once it is running, you can use this in your crash command. But, this also needs to set 'CRASHEXT_SERVER' environment variable before start 'crash'.
+
+```
+$ export CRASHEXT_SERVER=http://myexample.com:5000
+$ crash
+```
+
+If everything goes well, you now can run 'edis'.
+
+```
+crash> edis -rg ffffffff81363bf7
+/usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 495
+                 494 void __handle_sysrq(int key, struct tty_struct *tty, int check_mask)
+                 495 {
+            0xffffffff81363ac0 <__handle_sysrq>:        push   %rbp
+            0xffffffff81363ac1 <__handle_sysrq+0x1>:    mov    %rsp,%rbp
+            0xffffffff81363ac4 <__handle_sysrq+0x4>:    sub    $0x40,%rsp
+            0xffffffff81363ac8 <__handle_sysrq+0x8>:    mov    %rbx,-0x28(%rbp)
+            0xffffffff81363acc <__handle_sysrq+0xc>:    mov    %r12,-0x20(%rbp)
+            0xffffffff81363ad0 <__handle_sysrq+0x10>:   mov    %r13,-0x18(%rbp)
+            0xffffffff81363ad4 <__handle_sysrq+0x14>:   mov    %r14,-0x10(%rbp)
+            0xffffffff81363ad8 <__handle_sysrq+0x18>:   mov    %r15,-0x8(%rbp)
+            0xffffffff81363adc <__handle_sysrq+0x1c>:   nopl   0x0(%rax,%rax,1)
+            0xffffffff81363ae1 <__handle_sysrq+0x21>:   mov    %edi,%ebx
+            /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 501
+                 501    spin_lock_irqsave(&sysrq_key_table_lock, flags);
+            0xffffffff81363ae3 <__handle_sysrq+0x23>:   mov    $0xffffffff8200cf94,%rdi
+            0xffffffff81363aea <__handle_sysrq+0x2a>:   mov    %edx,-0x38(%rbp)
+
+...
++----------*0xffffffff81363b20 <__handle_sysrq+0x60>:   jbe    0xffffffff81363bab <__handle_sysrq+0xeb>
+|           /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 461
+|                461    else if ((key >= 'a') && (key <= 'z'))
+|                462            retval = key + 10 - 'a';
+|           0xffffffff81363b26 <__handle_sysrq+0x66>:   lea    -0x61(%rbx),%eax
+|           0xffffffff81363b29 <__handle_sysrq+0x69>:   cmp    $0x19,%eax
+|+---------*0xffffffff81363b2c <__handle_sysrq+0x6c>:   jbe    0xffffffff81363ba8 <__handle_sysrq+0xe8>
+||          /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 526
+||               526            printk("HELP : ");
+||      +==>0xffffffff81363b2e <__handle_sysrq+0x6e>:   mov    $0xffffffff817fcf79,%rdi
+||      |   0xffffffff81363b35 <__handle_sysrq+0x75>:   xor    %eax,%eax
+||      |   0xffffffff81363b37 <__handle_sysrq+0x77>:   mov    $0xffffffff81b15500,%r12
+||      |   0xffffffff81363b3e <__handle_sysrq+0x7e>:   xor    %ebx,%ebx
+||      |   0xffffffff81363b40 <__handle_sysrq+0x80>:   callq  0xffffffff8155296f <printk>
+||      |   0xffffffff81363b45 <__handle_sysrq+0x85>:   nopl   (%rax)
+||      |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 529
+||      |        529                    if (sysrq_key_table[i]) {
+||    +====>0xffffffff81363b48 <__handle_sysrq+0x88>:   mov    (%r12),%rsi
+||    | |   0xffffffff81363b4c <__handle_sysrq+0x8c>:   test   %rsi,%rsi
+||+--------*0xffffffff81363b4f <__handle_sysrq+0x8f>:   je     0xffffffff81363b7f <__handle_sysrq+0xbf>
+|||   | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 532
+|||   | |        532                            for (j = 0; sysrq_key_table[i] !=
+|||   | |        533                                            sysrq_key_table[j]; j++)
+|||   | |        534                                    ;
+|||   | |   0xffffffff81363b51 <__handle_sysrq+0x91>:   xor    %edx,%edx
+|||   | |   0xffffffff81363b53 <__handle_sysrq+0x93>:   cmp    0x7b19a6(%rip),%rsi        # 0xffffffff81b15500 <sysrq_key_table>
+|||   | |   0xffffffff81363b5a <__handle_sysrq+0x9a>:   mov    $0xffffffff81b15508,%rax
+|||+-------*0xffffffff81363b61 <__handle_sysrq+0xa1>:   je     0xffffffff81363b77 <__handle_sysrq+0xb7>
+||||  | |   0xffffffff81363b63 <__handle_sysrq+0xa3>:   nopl   0x0(%rax,%rax,1)
+||||  | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.
+```
