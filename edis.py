@@ -30,9 +30,18 @@ def disasm(ins_addr, o, cmd_path_list):
     if (o.reverse):
         options = options + " -r"
 
+    cmd_options = ""
+    if (o.graph):
+        cmd_options = cmd_options + " -g"
+
     command_str = "dis %s %s" % (options, ins_addr)
     disasm_str = exec_crash_command(command_str)
-    result_str = exec_gdb_command("!echo '%s' | python %s" % (disasm_str, disasm_path))
+    if (disasm_str.startswith("symbol not found")):
+        print (disasm_str)
+        return
+
+    result_str = exec_gdb_command("!echo '%s' | python %s %s" % \
+                                  (disasm_str, disasm_path, cmd_options))
 
     print (result_str)
 
@@ -45,6 +54,12 @@ def edis():
                   default=False,
                   help="displays all instructions from the start of the" \
                     + " routine up to and including the designated address.")
+
+    op.add_option("-g", "--graph",
+                  action="store_true",
+                  dest="graph",
+                  default=False,
+                  help="display jump graph on the left")
 
     (o, args) = op.parse_args()
     disasm(args[0], o, os.environ["PYKDUMPPATH"])
