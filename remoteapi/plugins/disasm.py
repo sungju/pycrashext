@@ -62,7 +62,8 @@ def is_end_of_one_statement(a_line):
     if my_line.endswith(';') or \
        my_line.endswith(':') or \
        my_line.endswith('{') or \
-       my_line.endswith('}'):
+       my_line.endswith('}') or \
+       my_line.startswith("#"):
         return True
 
     return False
@@ -118,11 +119,14 @@ def read_source_line(source_line, has_header):
         result = result + '%8d %s' % (line_number -1, file_lines[line_number - 2])
 
     if has_header == False:
+        result = result + read_a_function_header(file_lines, line_number - 1)
+        '''
         for i in range(line_number - 1, 0, -1):
             if "(" in file_lines[i]:
                 for j in range(i, line_number - 1):
                     result = result + '%8d %s' % (j + 1, file_lines[j])
                 break
+        '''
 
 
     if is_assembly_source(source_file) == False:
@@ -195,7 +199,7 @@ def draw_branches(disasm_str):
                 jmp_found = jmp_found + 1
         loc = loc + 1
 
-    result = "\n"
+    result = ""
     loc = 0
     for line in disasm_str.splitlines():
         jmp_str = " "
@@ -227,7 +231,29 @@ def draw_branches(disasm_str):
     return result
 
 
-def read_function(asm_str):
+def read_a_function_header(file_lines, line_number):
+    result = ""
+    # Read function header
+    prev_line_number = line_number - 1
+    source_line = file_lines[prev_line_number]
+    while not is_end_of_one_statement(source_line):
+        prev_line_number = prev_line_number - 1
+        source_line = file_lines[prev_line_number]
+    while file_lines[prev_line_number + 1].strip() == "":
+        prev_line_number = prev_line_number + 1
+
+    for i in range(prev_line_number + 1, line_number):
+        source_line = file_lines[i]
+        result = result + '%8d %s' % (i + 1, source_line)
+    # end of Read function header
+    return result
+
+
+def read_a_function(asm_str):
+    '''
+    Read a function, but it only works when the symbol is availabe in
+    vmcore.
+    '''
     first_line = asm_str.splitlines()[0]
     result = ""
     source_file, line_number = parse_source_line(first_line)
@@ -248,9 +274,12 @@ def read_function(asm_str):
     open_brace = 0
     close_brace = 0
     in_comment = False
+
+    result = read_a_function_header(file_lines, line_number)
+
     while line_number < len(file_lines):
         line = file_lines[line_number]
-        result = result + line + "\n"
+        result = result + "%8d %s" % (line_number + 1, line)
         for i in range(0, len(line) - 1):
             if line[i] == '{' and in_comment == False:
                 open_brace = open_brace + 1
@@ -300,7 +329,7 @@ def disasm():
         return result
 
     if full_source != "":
-        return read_function(asm_str) # Read function and return
+        return read_a_function(asm_str) # Read function and return
 
 
     result = ""
