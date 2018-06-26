@@ -53,6 +53,10 @@ def disasm(ins_addr, o, cmd_path_list):
     if ":" in ins_addr or "." in ins_addr: # It's for source code
         if ":" not in ins_addr: # Let's make fake line number
             ins_addr = ins_addr + ": 0"
+        else:
+            idx = ins_addr.rfind(":")
+            ins_addr = ins_addr[:idx] + ": " + ins_addr[idx+1:]
+
         kernel_ver, release_ver = get_kernel_version()
         disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
                     (kernel_ver, release_ver, ins_addr)
