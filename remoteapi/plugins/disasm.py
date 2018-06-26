@@ -272,6 +272,14 @@ def read_a_function(asm_str):
     except:
         return "Failed to read file %s/%s" % (cur_rhel_path, source_file)
 
+    if line_number == 0:
+        result = ""
+        for line in file_lines:
+            line_number = line_number + 1
+            result = result + "%8d %s" % (line_number, line)
+
+        return result
+
     line_number = line_number - 1
     open_brace = 0
     close_brace = 0

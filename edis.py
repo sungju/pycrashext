@@ -56,7 +56,6 @@ def disasm(ins_addr, o, cmd_path_list):
         kernel_ver, release_ver = get_kernel_version()
         disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
                     (kernel_ver, release_ver, ins_addr)
-        print (disasm_str)
     else:
         command_str = "dis %s %s" % (options, ins_addr)
         disasm_str = exec_crash_command(command_str)
