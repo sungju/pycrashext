@@ -35,6 +35,8 @@ def disasm(ins_addr, o, cmd_path_list):
         cmd_options = cmd_options + " -g"
     if (o.fullsource):
         cmd_options = cmd_options + " -f"
+        if (not o.reverse):
+            options = options + " -r"
 
     command_str = "dis %s %s" % (options, ins_addr)
     disasm_str = exec_crash_command(command_str)
