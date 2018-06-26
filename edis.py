@@ -14,6 +14,18 @@ import operator
 import os
 
 
+def get_kernel_version():
+    sys_output = exec_crash_command("sys")
+    for line in sys_output.splitlines():
+        words = line.split()
+        if words[0] == "RELEASE:":
+            release_ver = words[1]
+            idx = words[1].rfind(".")
+            kernel_ver = words[1][:idx]
+            return kernel_ver, release_ver
+
+    return "", ""
+
 def disasm(ins_addr, o, cmd_path_list):
     path_list = cmd_path_list.split(':')
     disasm_path = ""
@@ -38,8 +50,16 @@ def disasm(ins_addr, o, cmd_path_list):
         if (not o.reverse):
             options = options + " -r"
 
-    command_str = "dis %s %s" % (options, ins_addr)
-    disasm_str = exec_crash_command(command_str)
+    if ":" in ins_addr or "." in ins_addr: # It's for source code
+        if ":" not in ins_addr: # Let's make fake line number
+            ins_addr = ins_addr + " 0"
+        kernel_ver, release_ver = get_kernel_version()
+        disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
+                    (kernel_ver, release_ver, ins_addr)
+        print (disasm_str)
+    else:
+        command_str = "dis %s %s" % (options, ins_addr)
+        disasm_str = exec_crash_command(command_str)
     if (disasm_str.startswith("symbol not found")):
         print (disasm_str)
         return
