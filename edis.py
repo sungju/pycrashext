@@ -33,6 +33,8 @@ def disasm(ins_addr, o, cmd_path_list):
     cmd_options = ""
     if (o.graph):
         cmd_options = cmd_options + " -g"
+    if (o.fullsource):
+        cmd_options = cmd_options + " -f"
 
     command_str = "dis %s %s" % (options, ins_addr)
     disasm_str = exec_crash_command(command_str)
@@ -60,6 +62,12 @@ def edis():
                   dest="graph",
                   default=False,
                   help="display jump graph on the left")
+
+    op.add_option("-f", "--full",
+                  action="store_true",
+                  dest="fullsource",
+                  default=False,
+                  help="Dispaly full function code")
 
     (o, args) = op.parse_args()
     disasm(args[0], o, os.environ["PYKDUMPPATH"])

@@ -78,14 +78,24 @@ def is_assembly_source(source_file):
     return False
 
 
-def read_source_line(source_line, has_header):
+def parse_source_line(source_line):
+    if not source_line.startswith("/"):
+        return "", -1
+
     pattern = re.compile(r"(.+)/linux-[^/]*/(?P<source_file>.+): (?P<line_number>[0-9]+)")
     try:
         m = pattern.search(source_line)
         source_file = m.group('source_file')
         ln = m.group('line_number')
         line_number = int(ln)
+        return source_file, line_number
     except:
+        return "", -1
+
+
+def read_source_line(source_line, has_header):
+    source_file, line_number = parse_source_line(source_line)
+    if source_file == "":
         return ""
 
     file_lines = []
@@ -217,6 +227,48 @@ def draw_branches(disasm_str):
     return result
 
 
+def read_function(asm_str):
+    first_line = asm_str.splitlines()[0]
+    result = ""
+    source_file, line_number = parse_source_line(first_line)
+    if source_file == "":
+        return "Source code is not available"
+
+
+    file_lines = []
+    try:
+        os.chdir(cur_rhel_path)
+        f = open(source_file, 'r')
+        file_lines = f.readlines()
+        f.close()
+    except:
+        return "Failed to read file %s/%s" % (cur_rhel_path, source_file)
+
+    line_number = line_number - 1
+    open_brace = 0
+    close_brace = 0
+    in_comment = False
+    while line_number < len(file_lines):
+        line = file_lines[line_number]
+        result = result + line + "\n"
+        for i in range(0, len(line) - 1):
+            if line[i] == '{' and in_comment == False:
+                open_brace = open_brace + 1
+            elif line[i] == '}' and in_comment == False:
+                close_brace = close_brace + 1
+            elif line[i] == '/' and line[i + 1] == '*':
+                in_comment = True
+            elif line[i] == '*' and line[i + 1] == '/':
+                in_comment = False
+
+        if open_brace > 0 and open_brace == close_brace:
+            break
+        line_number = line_number + 1
+
+    return result
+
+
+
 def disasm():
     # First line can be used to identify kernel version
     try:
@@ -236,9 +288,20 @@ def disasm():
     except:
         jump_graph = ""
 
+
+    # Print source code only
+    try:
+        full_source = request.form["full_source"]
+    except:
+        full_source = ""
+
     result = set_kernel_version(asm_str)
     if result.startswith("FAIL"):
         return result
+
+    if full_source != "":
+        return read_function(asm_str) # Read function and return
+
 
     result = ""
 
