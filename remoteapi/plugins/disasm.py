@@ -155,7 +155,7 @@ JUMP_ORIGIN = 0x10000
 JUMP_TARGET = 0x20000
 JUMP_CORNER = 0x30000
 
-MAX_JMP_LINES = 100
+MAX_JMP_LINES = 200
 
 def draw_branches(disasm_str):
     result = ""
@@ -176,6 +176,8 @@ def draw_branches(disasm_str):
         if line.startswith("0x"):
             words = line.split()
             if words[2].startswith("j"):
+                if jmp_found >= MAX_JMP_LINES:
+                    break
                 if words[3] in asm_addr_dict:
                     target_idx = asm_addr_dict[words[3]]
                 else:
