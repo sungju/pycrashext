@@ -28,7 +28,7 @@ def set_kernel_version(asm_str):
     first_line = asm_str.splitlines()[0]
     if not first_line.startswith("/"):
         return ""
-    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux.*")
+    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux-.*")
     m = pattern.search(first_line)
     kernel_version = m.group('kernelversion')
     # Below 'rhel_version' is going to be used to find source directory
