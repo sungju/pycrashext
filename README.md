@@ -352,6 +352,16 @@ crash> edis -rg ffffffff81363bf7
 |||+-------*0xffffffff81363b61 <__handle_sysrq+0xa1>:   je     0xffffffff81363b77 <__handle_sysrq+0xb7>
 ||||  | |   0xffffffff81363b63 <__handle_sysrq+0xa3>:   nopl   0x0(%rax,%rax,1)
 ||||  | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.
+
+
+crash> edis -f include/linux/list.h:697:700
+/usr/src/debug/kernel-2.6.32-431.el6/linux-2.6.32-431.el6.x86_64/include/linux/list.h: 697 700
+
+     697 	for (pos = (pos)->next;						 \
+     698 	     pos &&							 \
+     699 		({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;}); \
+     700 	     pos = pos->next)
+
 ```
 
 
