@@ -81,21 +81,37 @@ def is_assembly_source(source_file):
 
 def parse_source_line(source_line):
     if not source_line.startswith("/"):
-        return "", -1
+        return "", 0, 0
 
-    pattern = re.compile(r"(.+)/linux-[^/]*/(?P<source_file>.+): (?P<line_number>[0-9]+)")
+    words = source_line.split(":")
+
+#    pattern = re.compile(r"(.+)/linux-[^/]*/(?P<source_file>.+): (?P<line_number>[0-9]+)([ \t]*)(?P<end_line_number>[0-9]+)")
+    pattern = re.compile(r"(.+)/linux-[^/]*/(?P<source_file>.+)")
     try:
-        m = pattern.search(source_line)
+        m = pattern.search(words[0])
         source_file = m.group('source_file')
-        ln = m.group('line_number')
-        line_number = int(ln)
-        return source_file, line_number
+        line_number = 0
+        end_line_number = 0
+        line_words = words[1].split()
+
+        try:
+            line_number = int(line_words[0])
+        except:
+            pass
+
+        try:
+            end_line_number = int(line_words[1])
+        except:
+            pass
+
+        return source_file, line_number, end_line_number
+
     except:
-        return "", -1
+        return "", 0, 0
 
 
 def read_source_line(source_line, has_header):
-    source_file, line_number = parse_source_line(source_line)
+    source_file, line_number, end_line_number = parse_source_line(source_line)
     if source_file == "":
         return ""
 
@@ -258,7 +274,7 @@ def read_a_function(asm_str):
     '''
     first_line = asm_str.splitlines()[0]
     result = ""
-    source_file, line_number = parse_source_line(first_line)
+    source_file, line_number, end_line_number = parse_source_line(first_line)
     if source_file == "":
         return "Source code is not available"
 
@@ -284,6 +300,8 @@ def read_a_function(asm_str):
     open_brace = 0
     close_brace = 0
     in_comment = False
+    if end_line_number >= len(file_lines):
+        end_line_number = len(file_lines)
 
     result = read_a_function_header(file_lines, line_number)
 
@@ -300,9 +318,15 @@ def read_a_function(asm_str):
             elif line[i] == '*' and line[i + 1] == '/':
                 in_comment = False
 
-        if open_brace > 0 and open_brace == close_brace:
-            break
         line_number = line_number + 1
+
+        if end_line_number == 0:
+            if open_brace > 0 and open_brace == close_brace:
+                break
+        else:
+            if line_number >= end_line_number:
+                break
+
 
     return result
 
