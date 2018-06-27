@@ -12,6 +12,7 @@ import os
 import base64
 
 cur_kernel_version = ""
+cur_release_version = ""
 cur_rhel_path = ""
 
 
@@ -23,14 +24,16 @@ def add_plugin_rule(app):
 
 def set_kernel_version(asm_str):
     global cur_kernel_version
+    global cur_release_version
     global cur_rhel_path
 
     first_line = asm_str.splitlines()[0]
     if not first_line.startswith("/"):
         return ""
-    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux-.*")
+    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux-(?P<releaseversion>.+)/.*")
     m = pattern.search(first_line)
     kernel_version = m.group('kernelversion')
+    release_version = m.group('releaseversion')
     # Below 'rhel_version' is going to be used to find source directory
     rhel_version = 'rh' + kernel_version.split('.')[-1]
 
@@ -45,6 +48,7 @@ def set_kernel_version(asm_str):
     if result != 0:
         return "FAILED to git checkout %s" % (kernel_version)
     cur_kernel_version = kernel_version
+    cur_release_version = release_version.split("/")[0]
 
     return kernel_version
 
@@ -173,6 +177,25 @@ JUMP_CORNER = 0x30000
 
 MAX_JMP_LINES = 200
 
+def is_jump_op(op_code):
+    global cur_release_version
+
+    idx = cur_release_version.rfind(".")
+    arch = cur_release_version[idx + 1:]
+    jump_op_set = []
+    exclude_set = []
+    if arch == 'x86_64' or arch == 'i386':
+        jump_op_set = [ "j" ]
+    elif arch == 'ppc64le':
+        jump_op_set = [ "b" ]
+
+    for op in jump_op_set:
+        if op_code.startswith(op):
+            return True
+
+    return False
+
+
 def draw_branches(disasm_str):
     result = ""
     asm_addr_dict = {}
@@ -191,10 +214,12 @@ def draw_branches(disasm_str):
     for line in disasm_str.splitlines():
         if line.startswith("0x"):
             words = line.split()
-            if words[2].startswith("j"):
+            if is_jump_op(words[2]):
                 if jmp_found >= MAX_JMP_LINES:
                     break
-                if words[3] in asm_addr_dict:
+
+                # Consider a situation that implies the jumping address
+                if len(words) > 3 and words[3] in asm_addr_dict:
                     target_idx = asm_addr_dict[words[3]]
                 else:
                     target_idx = total_num
