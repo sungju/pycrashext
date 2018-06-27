@@ -288,8 +288,8 @@ def read_a_function(asm_str):
     except:
         return "Failed to read file %s/%s" % (cur_rhel_path, source_file)
 
+    result = first_line + "\n"
     if line_number == 0:
-        result = ""
         for line in file_lines:
             line_number = line_number + 1
             result = result + "%8d %s" % (line_number, line)
@@ -303,7 +303,7 @@ def read_a_function(asm_str):
     if end_line_number >= len(file_lines):
         end_line_number = len(file_lines)
 
-    result = read_a_function_header(file_lines, line_number)
+    result = result + "\n" + read_a_function_header(file_lines, line_number)
 
     while line_number < len(file_lines):
         line = file_lines[line_number]
