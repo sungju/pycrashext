@@ -362,6 +362,34 @@ crash> edis -f include/linux/list.h:697:700
      699 		({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;}); \
      700 	     pos = pos->next)
 
+crash> edis -f __list_add
+/usr/src/debug/kernel-2.6.32-431.el6/linux-2.6.32-431.el6.x86_64/lib/list_debug.c: 22
+
+      12 /*
+      13  * Insert a new entry between two known consecutive entries.
+      14  *
+      15  * This is only for internal list manipulation where we know
+      16  * the prev/next entries already!
+      17  */
+      18 
+      19 void __list_add(struct list_head *new,
+      20 			      struct list_head *prev,
+      21 			      struct list_head *next)
+      22 {
+      23 	WARN(next->prev != prev,
+      24 		"list_add corruption. next->prev should be "
+      25 		"prev (%p), but was %p. (next=%p).\n",
+      26 		prev, next->prev, next);
+      27 	WARN(prev->next != next,
+      28 		"list_add corruption. prev->next should be "
+      29 		"next (%p), but was %p. (prev=%p).\n",
+      30 		next, prev->next, prev);
+      31 	next->prev = new;
+      32 	new->next = next;
+      33 	new->prev = prev;
+      34 	prev->next = new;
+      35 }
+
 ```
 
 
