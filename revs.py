@@ -110,11 +110,32 @@ X0 - X29: General Purpose Registers
 X30: This is the Link Register (LR)""")
 
 
+def revs_ppc():
+    # PPCxx register details
+    print ("""
+** function parameters for PPC **
+R0 : Instruction pointer
+R1 : Stack pointer
+R2 : Table of Contents (TOC) pointer
+R3 - R10 : Arguments
+    R3 : 1st argument
+    R4 : 2nd argument
+    R5 : 3rd argument
+    R6 : 4th argument
+    R7 : 5th argument
+    R8 : 6th argument
+    R9 : 7th argument
+    R10 : 8th argument
+""")
+
+
 def show_registers():
     if (sys_info.machine in ("x86_64", "i386", "i686", "athlon")):
         revs_x86()
     if (sys_info.machine.startswith("arm")):
         revs_arm()
+    if (sys_info.machine.startswith("ppc")):
+        revs_ppc()
 
 def revs():
     op = OptionParser()

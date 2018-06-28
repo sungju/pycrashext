@@ -54,8 +54,13 @@ def disasm(ins_addr, o, cmd_path_list):
         if ":" not in ins_addr: # Let's make fake line number
             ins_addr = ins_addr + ": 0"
         else:
-            idx = ins_addr.rfind(":")
-            ins_addr = ins_addr[:idx] + ": " + ins_addr[idx+1:]
+            words = ins_addr.split(":")
+            ins_addr = ""
+            for column in words:
+                if ins_addr == "":
+                    ins_addr = column + ":"
+                else:
+                    ins_addr = ins_addr + " " + column
 
         kernel_ver, release_ver = get_kernel_version()
         disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
