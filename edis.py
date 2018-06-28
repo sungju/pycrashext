@@ -50,7 +50,8 @@ def disasm(ins_addr, o, cmd_path_list):
         if (not o.reverse):
             options = options + " -r"
 
-    if ":" in ins_addr or "." in ins_addr: # It's for source code
+    if ":" in ins_addr or \
+       (not ins_addr.startswith(".") and "." in ins_addr): # It's for ppc
         if ":" not in ins_addr: # Let's make fake line number
             ins_addr = ins_addr + ": 0"
         else:
