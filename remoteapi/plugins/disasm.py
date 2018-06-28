@@ -186,8 +186,12 @@ def is_jump_op(op_code):
     exclude_set = []
     if arch == 'x86_64' or arch == 'i386':
         jump_op_set = [ "j" ]
-    elif arch == 'ppc64le':
+    elif arch == 'ppc64le' or arch == 'ppc64':
         jump_op_set = [ "b" ]
+        exclude_set = [ "bl" ]
+
+    if op_code in exclude_set:
+        return False
 
     for op in jump_op_set:
         if op_code.startswith(op):
