@@ -126,6 +126,22 @@ R3 - R10 : Arguments
     R8 : 6th argument
     R9 : 7th argument
     R10 : 8th argument
+
+How to find a stack value:
+Example)
+
+0xc0000000002e74d0 <.migrate_pages>:    mflr    r0
+0xc0000000002e74d4 <.migrate_pages+0x4>:        std     r17,-120(r1)
+
+    #6 [c000002542703a70] .migrate_pages at c0000000002e7674
+    #7 [c000002542703be0] .do_mbind at c0000000002ce16c
+            ^
+            +-- address in the above function stack
+
+crash> px 0xc000002542703be0-120
+$1 = 0xc000002542703b68
+crash> rd 0xc000002542703b68
+c000002542703b68:  c000003b387cf6e8                    ...;8|..
 """)
 
 
