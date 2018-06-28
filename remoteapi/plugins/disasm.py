@@ -35,7 +35,11 @@ def set_kernel_version(asm_str):
     kernel_version = m.group('kernelversion')
     release_version = m.group('releaseversion')
     # Below 'rhel_version' is going to be used to find source directory
-    rhel_version = 'rh' + kernel_version.split('.')[-1]
+    if release_version.find(".el5."):
+        rhel_version = 'rhel5'
+        kernel_version = release_version[:release_version.rfind(".")]
+    else:
+        rhel_version = 'rh' + kernel_version.split('.')[-1]
 
     cur_rhel_path = os.environ['RHEL_SOURCE_DIR'] + "/" + rhel_version
 
