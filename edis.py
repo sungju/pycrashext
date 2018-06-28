@@ -88,6 +88,13 @@ def edis():
                   help="displays all instructions from the start of the" \
                     + " routine up to and including the designated address.")
 
+
+    op.add_option("-l", "--list",
+                  action="store_true",
+                  dest="list",
+                  default=False,
+                  help="Dummy argument to match with 'dis -l'")
+
     op.add_option("-g", "--graph",
                   action="store_true",
                   dest="graph",
