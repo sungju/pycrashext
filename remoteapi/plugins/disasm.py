@@ -30,12 +30,12 @@ def set_kernel_version(asm_str):
     first_line = asm_str.splitlines()[0]
     if not first_line.startswith("/"):
         return ""
-    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux-(?P<releaseversion>.+)/.*")
+    pattern = re.compile(r"(.+)/debug/(?P<kernelversion>.+)/linux-(?P<releaseversion>[^/]+)/.*")
     m = pattern.search(first_line)
     kernel_version = m.group('kernelversion')
     release_version = m.group('releaseversion')
     # Below 'rhel_version' is going to be used to find source directory
-    if release_version.find(".el5."):
+    if release_version.find(".el5.") >= 0:
         rhel_version = 'rhel5'
         kernel_version = release_version[:release_version.rfind(".")]
     else:
@@ -43,7 +43,10 @@ def set_kernel_version(asm_str):
 
     cur_rhel_path = os.environ['RHEL_SOURCE_DIR'] + "/" + rhel_version
 
-    os.chdir(cur_rhel_path)
+    try:
+        os.chdir(cur_rhel_path)
+    except:
+        return "FAILED to change directory to %s" % cur_rhel_path
 
     if cur_kernel_version == kernel_version:
         return kernel_version
