@@ -184,7 +184,7 @@ JUMP_CORNER = 0x30000
 
 MAX_JMP_LINES = 200
 
-def is_jump_op(op_code):
+def check_jump_op(op_code):
     global cur_release_version
 
     idx = cur_release_version.rfind(".")
@@ -207,7 +207,7 @@ def is_jump_op(op_code):
     return False
 
 
-def draw_branches(disasm_str):
+def draw_branches(disasm_str, jump_op_list):
     result = ""
     asm_addr_dict = {}
     loc = 0
@@ -225,7 +225,15 @@ def draw_branches(disasm_str):
     for line in disasm_str.splitlines():
         if line.startswith("0x"):
             words = line.split()
-            if is_jump_op(words[2]):
+            is_jump_op = False
+            if jump_op_list == None:
+                if check_jump_op(words[2]):
+                    is_jump_op = True
+            else:
+                if words[2] in jump_op_list:
+                    is_jump_op = True
+
+            if is_jump_op:
                 if jmp_found >= MAX_JMP_LINES:
                     break
 
@@ -384,8 +392,11 @@ def disasm():
     # Draw branch graphs
     try:
         jump_graph = request.form["jump_graph"]
+        jump_op_str = request.form["jump_op_list"]
+        jump_op_list = jump_op_str.split(",")
     except:
         jump_graph = ""
+        jump_op_list = None
 
 
     # Print source code only
@@ -418,6 +429,6 @@ def disasm():
             result = result + source_line
 
     if jump_graph != "":
-        result = draw_branches(result)
+        result = draw_branches(result, jump_op_list)
 
     return result.rstrip()
