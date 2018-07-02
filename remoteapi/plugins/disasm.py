@@ -392,10 +392,16 @@ def disasm():
     # Draw branch graphs
     try:
         jump_graph = request.form["jump_graph"]
-        jump_op_str = request.form["jump_op_list"]
-        jump_op_list = jump_op_str.split(",")
     except:
-        jump_graph = ""
+        jump_gaph = ""
+
+    try:
+        jump_op_list = None
+        if jump_graph != "":
+            jump_op_str = request.form["jump_op_list"]
+        if jump_op_str != "":
+            jump_op_list = jump_op_str.split(",")
+    except:
         jump_op_list = None
 
 
