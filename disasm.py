@@ -26,6 +26,13 @@ def disasm():
                   default=False,
                   help="Display full source code")
 
+    op.add_option("-j", "--jump",
+                  action="store",
+                  type="string",
+                  dest="jump_op_list",
+                  default="",
+                  help="Shows graph for the specified jump operations only")
+
     (o, args) = op.parse_args()
 
 
@@ -38,8 +45,13 @@ def disasm():
     if o.fullsource:
         full_source = "fullsource"
 
+
+    jump_op_list = ""
+    if o.jump_op_list != "":
+        jump_op_list = o.jump_op_list
+
     data = {"asm_str" : encoded_asm, "jump_graph" : draw_graph,
-            "full_source" : full_source}
+            "full_source" : full_source, "jump_op_list" : jump_op_list}
     res = r.post(encode_url, data = data).text
 
     # Print the result

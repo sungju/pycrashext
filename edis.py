@@ -70,6 +70,8 @@ def disasm(ins_addr, o, cmd_path_list):
         cmd_options = cmd_options + " -f"
         if (not o.reverse):
             options = options + " -r"
+    if (o.jump_op_list != ""):
+        cmd_options = cmd_options + " -j '" + o.jump_op_list + "'"
 
     if ":" in ins_addr or \
        (not ins_addr.startswith(".") and "." in ins_addr): # It's for ppc
@@ -127,6 +129,14 @@ def edis():
                   dest="fullsource",
                   default=False,
                   help="Dispaly full function code")
+
+
+    op.add_option("-j", "--jump",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="jump_op_list",
+                  help="Shows graph for the specified jump operations only")
 
     (o, args) = op.parse_args()
     disasm(args[0], o, os.environ["PYKDUMPPATH"])
