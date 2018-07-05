@@ -10,6 +10,7 @@ from flask import request
 import re
 import os
 import base64
+import subprocess
 
 cur_kernel_version = ""
 cur_release_version = ""
@@ -51,9 +52,19 @@ def set_kernel_version(asm_str):
     if cur_kernel_version == kernel_version:
         return kernel_version
 
-    result = os.system('git checkout -f ' + kernel_version)
-    if result != 0:
+    try:
+        process = subprocess.Popen('git checkout -f ' + kernel_version,
+                                   shell=True,
+                                   stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE)
+        result = process.wait()
+        out = process.stdout.read()
+        err = process.stderr.read()
+        if err != None and err.startswith("error:"):
+            return 'FAILED to git checkout\n' + err
+    except:
         return "FAILED to git checkout %s" % (kernel_version)
+
     cur_kernel_version = kernel_version
     cur_release_version = release_version.split("/")[0]
 
