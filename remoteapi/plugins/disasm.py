@@ -60,7 +60,8 @@ def set_kernel_version(asm_str):
         result = process.wait()
         out = process.stdout.read()
         err = process.stderr.read()
-        if err != None and err.startswith("error:"):
+        if err != None and \
+           (err.startswith("error:") or err.startswith("fatal:")):
             return 'FAILED to git checkout\n' + err
     except:
         return "FAILED to git checkout %s" % (kernel_version)
