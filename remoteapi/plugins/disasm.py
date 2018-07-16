@@ -91,6 +91,17 @@ def is_end_of_one_statement(a_line):
 
     return False
 
+def is_function_header(a_line):
+    a_line = a_line.strip()
+    my_line = re.findall(r"[a-zA-Z]*[ \t]*[a-zA-Z]+[ \t]+[a-zA-Z0-9_]+[ \t]*\(", a_line)
+    if my_line is None or len(my_line) == 0:
+        return False
+
+    if my_line[0].startswith("return"):
+        return False  # ex) return wait_noreap_copyout(wo...
+
+    return True
+
 
 def is_assembly_source(source_file):
     if source_file.endswith(".S") or \
@@ -157,8 +168,9 @@ def read_source_line(source_line, has_header):
         has_header = True # Assembly doesn't require to check prototype
         result = result + '%8d %s' % (line_number -1, file_lines[line_number - 2])
 
-    if has_header == False:
-        result = result + read_a_function_header(file_lines, line_number - 1)
+    if has_header == False and end_line_number == 0:
+        header_lines, open_brace, close_brace = read_a_function_header(file_lines, line_number - 1)
+        result = result + header_lines
         '''
         for i in range(line_number - 1, 0, -1):
             if "(" in file_lines[i]:
@@ -307,20 +319,45 @@ def draw_branches(disasm_str, jump_op_list):
 
 def read_a_function_header(file_lines, line_number):
     result = ""
+    is_in_comment = False
     # Read function header
     prev_line_number = line_number - 1
     source_line = file_lines[prev_line_number]
+    while True:
+        a_line = source_line.strip()
+        if a_line.find("*/") >= 0 and a_line.find("\"") == -1:
+            is_in_comment = True
+        if a_line.find("/*") >= 0 and a_line.find("\"") == -1:
+            is_in_comment = False
+
+        if not is_in_comment and is_function_header(source_line):
+            break
+        prev_line_number = prev_line_number - 1
+        source_line = file_lines[prev_line_number]
+
     while not is_end_of_one_statement(source_line):
         prev_line_number = prev_line_number - 1
         source_line = file_lines[prev_line_number]
     while file_lines[prev_line_number + 1].strip() == "":
         prev_line_number = prev_line_number + 1
 
+    in_comment = False
+    open_brace = 0
+    close_brace = 0
     for i in range(prev_line_number + 1, line_number):
-        source_line = file_lines[i]
-        result = result + '%8d %s' % (i + 1, source_line)
+        line = file_lines[i]
+        result = result + '%8d %s' % (i + 1, line)
+        for i in range(0, len(line) - 1):
+            if line[i] == '{' and in_comment == False:
+                open_brace = open_brace + 1
+            elif line[i] == '}' and in_comment == False:
+                close_brace = close_brace + 1
+            elif line[i] == '/' and line[i + 1] == '*':
+                in_comment = True
+            elif line[i] == '*' and line[i + 1] == '/':
+                in_comment = False
     # end of Read function header
-    return result
+    return result, open_brace, close_brace
 
 
 def read_a_function(asm_str):
@@ -359,7 +396,10 @@ def read_a_function(asm_str):
     if end_line_number >= len(file_lines):
         end_line_number = len(file_lines)
 
-    result = result + "\n" + read_a_function_header(file_lines, line_number)
+    if end_line_number == 0:
+        header_lines, open_brace, close_brace = read_a_function_header(file_lines,
+                                                                       line_number)
+        result = result + "\n" + header_lines
 
     while line_number < len(file_lines):
         line = file_lines[line_number]
