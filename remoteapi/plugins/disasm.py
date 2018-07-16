@@ -93,6 +93,10 @@ def is_end_of_one_statement(a_line):
 
 def is_function_header(a_line):
     a_line = a_line.strip()
+    my_line = re.findall(r"SYSCALL_DEFINE[0-9][ \t]*\(", a_line)
+    if my_line is not None and len(my_line) > 0:
+        return True
+
     my_line = re.findall(r"[a-zA-Z]*[ \t]*[a-zA-Z]+[ \t]+[a-zA-Z0-9_]+[ \t]*\(", a_line)
     if my_line is None or len(my_line) == 0:
         return False
