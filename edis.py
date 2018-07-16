@@ -47,7 +47,7 @@ def get_kernel_version():
 
     return "", ""
 
-def disasm(ins_addr, o, cmd_path_list):
+def disasm(ins_addr, o, args, cmd_path_list):
     path_list = cmd_path_list.split(':')
     disasm_path = ""
     for path in path_list:
@@ -85,6 +85,10 @@ def disasm(ins_addr, o, cmd_path_list):
                     ins_addr = column + ":"
                 else:
                     ins_addr = ins_addr + " " + column
+
+            for line_number in args[1:]:
+                ins_addr = ins_addr + line_number + " "
+
 
         kernel_ver, release_ver = get_kernel_version()
         disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
@@ -139,7 +143,7 @@ def edis():
                   help="Shows graph for the specified jump operations only")
 
     (o, args) = op.parse_args()
-    disasm(args[0], o, os.environ["PYKDUMPPATH"])
+    disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
 
 
 if ( __name__ == '__main__'):
