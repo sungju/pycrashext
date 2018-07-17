@@ -227,6 +227,9 @@ def check_jump_op(op_code):
     elif arch == 'ppc64le' or arch == 'ppc64':
         jump_op_set = [ "b" ]
         exclude_set = [ "bl", "bctrl" ]
+    elif arch.startswith("arm"):
+        jump_op_set = [ "b" ]
+        exclude_set = [ "bl", "bic", "bics", "blx" ]
 
     if op_code in exclude_set:
         return False
