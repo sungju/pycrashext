@@ -35,14 +35,17 @@ def set_kernel_version(asm_str):
     m = pattern.search(first_line)
     kernel_version = m.group('kernelversion')
     release_version = m.group('releaseversion')
-    # Below 'rhel_version' is going to be used to find source directory
+    # Below 'gitdir' is going to be used to find source directory
     if release_version.find(".el5.") >= 0:
-        rhel_version = 'rhel5'
+        gitdir = 'rhel5'
         kernel_version = release_version[:release_version.rfind(".")]
+    elif release_version.find(".fc") >= 0:
+        gitdir = 'fedora'
+        kernel_version = "kernel-" + kernel_version
     else:
-        rhel_version = 'rh' + kernel_version.split('.')[-1]
+        gitdir = 'rh' + kernel_version.split('.')[-1]
 
-    cur_rhel_path = os.environ['RHEL_SOURCE_DIR'] + "/" + rhel_version
+    cur_rhel_path = os.environ['RHEL_SOURCE_DIR'] + "/" + gitdir
 
     try:
         os.chdir(cur_rhel_path)
