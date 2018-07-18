@@ -167,9 +167,13 @@ def revs():
 
     if (o.Asm != ""):
         show_asm_details(o.Asm)
+        sys.exit(0)
 
     if (o.Regs):
         show_registers()
+        sys.exit(0)
+
+    show_registers()
 
 
     return
