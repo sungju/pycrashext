@@ -1,0 +1,127 @@
+-----------------------------------------------------------------
+reng.py uses this to get instructions.
+-----------------------------------------------------------------
+
+REGISTERS: i386 i686 x86_64 athlon
+** function parameters for x86_64 **
+%rdi - 1st argument (%rdi:64, %edi:32, %di:16, %dl:8)
+%rsi - 2nd argument (%rsi:64, %esi:32, %si:16, %sl:8)
+%rdx - 3rd argument (%rdx:64, %edx:32, %dx:16, %dl:8)
+%rcx - 4th argument (%rcx:64, %ecx:32, %cx:16, %cl:8)
+%r8 - 5th argument (%r8:64, %r8d:32, %r8w:16, %r8b:8)
+%r9 - 6th argument (%r9:64, %r9d:32, %r9w:16, %r9b:8)
+%rsp - Stack pointer
+%rax - Return value
+END_REGISTERS: i386 i686 x86_64 athlon
+
+-----------------------------------------------------------------
+** Everything in between main keywords will be ignored 
+   unless the word is matching with the predefined keywords. 
+-----------------------------------------------------------------
+
+REGISTERS: arm
+** function parameters for ARM **
+X0 - X29: General Purpose Registers
+    X0 - X7     : Arguments & Result
+    X8          : Indirect result (struct) location
+    X9 - X15    : Spare temp registers
+    X16 - X17   : Intra-call registers (PLT, linker)
+    X18         : Platform specific (TLS)
+    X19 - X28   : Callee-saved registers
+    X29         : Frame pointer
+X30: This is the Link Register (LR)
+END_REGISTERS: arm
+
+REGISTERS: ppc
+** function parameters for PPC **
+R0 : Instruction pointer 
+R1 : Stack pointer
+R2 : Table of Contents (TOC) pointer
+R3 - R10 : Arguments
+    R3 : 1st argument
+    R4 : 2nd argument
+    R5 : 3rd argument
+    R6 : 4th argument
+    R7 : 5th argument
+    R8 : 6th argument
+    R9 : 7th argument
+    R10 : 8th argument
+
+How to find a stack value:
+Example)
+
+0xc0000000002e74d0 <.migrate_pages>:    mflr    r0
+0xc0000000002e74d4 <.migrate_pages+0x4>:        std     r17,-120(r1)
+
+    #6 [c000002542703a70] .migrate_pages at c0000000002e7674
+    #7 [c000002542703be0] .do_mbind at c0000000002ce16c
+            ^
+            +-- address in the above function stack
+
+crash> px 0xc000002542703be0-120
+$1 = 0xc000002542703b68
+crash> rd 0xc000002542703b68
+c000002542703b68:  c000003b387cf6e8                    ...;8|..
+
+END_REGISTERS: ppc
+
+INSTRUCTION: lea
+lea - Load effective address
+     The lea instruction places the address specified by its
+     first operandinto the register specified by its second
+     operand.Note, the contents of the memory location are
+     notloaded, only the effective address is computed and
+     placed into the register.This is useful for obtaining
+     a pointer into a memory region or to perform simple
+     arithmetic operations.
+
+     Syntax
+     lea <mem>, <reg32>
+
+     Examples
+     lea (%ebx,%esi,8), %edi - the quantity EBX+8*ESI is placed in EDI.
+     lea val(,1), %eax - the value val is placed in EAX.
+
+END_INSTRUCTION: lea
+
+INSTRUCTION: je jne jz jg jge jl jle
+j<condition> - Conditional jump
+
+        These instructions are conditional jumps that are based on
+        the status ofa set of condition codes that are stored in a
+        special register calledthe machine status word. The contents
+        of the machine statusword include information about the last
+        arithmetic operationperformed. For example, one bit of this
+        word indicates if the lastresult was zero. Another indicates
+        if the last result wasnegative. Based on these condition codes,
+        a number of conditional jumpscan be performed. For example,
+        the jzinstruction performs a jump to the specified operand label
+        if the resultof the last arithmetic operation was zero.
+        Otherwise, control proceedsto the next instruction in sequence.
+
+        A number of the conditional branches are given names that
+        areintuitively based on the last operation performed being
+        a specialcompare instruction, cmp (see below). For example,
+        conditional branchessuch as jle and jne are based on first
+        performing a cmp operationon the desired operands.
+
+
+        Syntax
+            je <label> (jump when equal)
+            jne <label> (jump when not equal)
+            jz <label> (jump when last result was zero)
+            jg <label> (jump when greater than)
+            jge <label> (jump when greater than or equal to)
+            jl <label> (jump when less than)
+            jle <label> (jump when less than or equal to)
+
+        Example
+            cmp %ebx, %eax
+            jle done
+
+            If the contents of EAX are less than or equal to the contents
+            of EBX,jump to the label done.  Otherwise, continue to the
+            nextinstruction.
+
+END_INSTRUCTION: je jne jz jg jge jl jle
+
