@@ -20,9 +20,8 @@ usage() {
   	echo
 }
 
-remove_docker_image() {
-  old_img=$(docker image ls | grep crashext | awk '{ print $3 }')
-  docker image rm $old_img
+build_docker_image() {
+  docker-compose build
 }
 
 while (( "$#" )); do
@@ -31,8 +30,8 @@ while (( "$#" )); do
       usage
       exit 0
       ;;
-    -r|--sslab) # Delete the old image before start
-      remove_docker_image
+    -b|--build) # Build the docker before start
+      build_docker_image
       ;;
     *) # unknown option
       usage

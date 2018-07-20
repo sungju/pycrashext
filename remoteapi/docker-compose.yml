@@ -14,7 +14,7 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./plugins:/app/plugins:z
+            #      - ./plugins:/app/plugins:z
       - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
     environment:
       - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
