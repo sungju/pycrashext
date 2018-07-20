@@ -87,7 +87,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     ins_addr = ins_addr + " " + column
 
             for line_number in args[1:]:
-                ins_addr = ins_addr + line_number + " "
+                ins_addr = ins_addr + " " + line_number
 
 
         kernel_ver, release_ver = get_kernel_version()

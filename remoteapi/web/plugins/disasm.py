@@ -41,7 +41,7 @@ def set_kernel_version(asm_str):
         kernel_version = release_version[:release_version.rfind(".")]
     elif release_version.find(".fc") >= 0:
         gitdir = 'fedora'
-        kernel_version = "kernel-" + kernel_version
+        kernel_version = "kernel-" + release_version[:release_version.rfind(".")]
     else:
         gitdir = 'rh' + kernel_version.split('.')[-1]
 
@@ -227,6 +227,9 @@ def check_jump_op(op_code):
     elif arch == 'ppc64le' or arch == 'ppc64':
         jump_op_set = [ "b" ]
         exclude_set = [ "bl", "bctrl" ]
+    elif arch.startswith("arm"):
+        jump_op_set = [ "b" ]
+        exclude_set = [ "bl", "bic", "bics", "blx" ]
 
     if op_code in exclude_set:
         return False

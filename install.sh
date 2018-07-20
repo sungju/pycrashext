@@ -19,6 +19,22 @@ then
   exit 0
 fi
 
+echo
+echo "To use 'edis' properly, it's recommended to configure source server"
+echo "in another system which has all source repositories and running"
+echo "the server by run './start_server.sh' under 'remoteapi' directory"
+echo
+echo "If it's configured, please provide the server address in the below"
+echo "format."
+echo
+echo " example) http://<server address>:5000"
+echo -n "Please provide address> "
+read server_addr
+
+if [ ! -z $server_addr ] && [ $server_addr != "" ]; then
+	echo "export CRASHEXT_SERVER=$server_addr" >> ~/.bash_profile
+fi
+
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
 echo '' >> ~/.bash_profile
@@ -34,3 +50,5 @@ echo " [DONE]"
 
 echo ""
 echo "All Done"
+echo
+echo "Please re-login to apply the changes"
