@@ -6,6 +6,8 @@ which can be used to do the job 'pykdump extension' cannot do
 due to limited libraries.
 """
 
+import os
+
 from flask import Flask
 from flask import jsonify
 
@@ -71,7 +73,15 @@ application = AppReloader(get_app)
 
 
 def start_app():
-    run_simple('0.0.0.0', 5000, application,
+    if "PYCRASHEXT_PORT" in os.environ:
+        try:
+            run_port = int(os.environ["PYCRASHEXT_PORT"])
+        except:
+            run_port = 5000
+    else:
+        run_port = 5000
+
+    run_simple('0.0.0.0', run_port, application,
                use_reloader=True, use_debugger=True, use_evalex=True)
 
 

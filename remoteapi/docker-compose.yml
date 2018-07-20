@@ -18,3 +18,4 @@ services:
       - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
     environment:
       - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
+      - PYCRASHEXT_PORT=${PYCRASHEXT_PORT}
