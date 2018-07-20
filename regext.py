@@ -6,6 +6,8 @@ from crash import register_epython_prog as rprog
 
 from pykdump.API import *
 
+import os
+
 
 """
 
@@ -199,7 +201,9 @@ help = '''
 enhanced disasm command related information
 '''
 
-rprog("edis", "Enhanced disasm",
-      "-h       - list available options",
-      help)
+if 'CRASHEXT_SERVER' in os.environ and \
+   len(os.environ['CRASHEXT_SERVER'].strip) > 0:
+    rprog("edis", "Enhanced disasm",
+          "-h       - list available options",
+          help)
 
