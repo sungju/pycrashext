@@ -289,7 +289,10 @@ Here is an example to start remoteapi. Please run it in a system that has the so
 ```
 $ export RHEL_SOURCE_DIR="/Users/sungju/source"
 $ cd remoteapi
+
 $ ./start_docker.sh
+or
+$ ./run_standalone.sh
 ```
 
 Once it is running, you can use this in your crash command. But, this also needs to set 'CRASHEXT_SERVER' environment variable before start 'crash'.
@@ -499,4 +502,46 @@ kmem_cache         NAME                                TOTAL OBJSIZE
 0xffff88102f870bc0 task_struct                         5824K    2672
 0xffff88102f850b40 anon_vma_chain                      5652K      48
 ====================================================================
+```
+
+### revs ###
+It provides some basic information you may need to understand disassembled instructions. The idea is to provide as many instrution details as possible, but it may takes long time to complete yet.
+
+```
+crash> revs -h
+Usage: revs.py [options]
+
+Options:
+  -h, --help  show this help message and exit
+  --regs      Registers used for argument passing
+  --asm=ASM   Simple manual for GNU assembly
+
+crash> revs
+** function parameters for x86_64 **
+%rdi - 1st argument (%rdi:64, %edi:32, %di:16, %dl:8)
+%rsi - 2nd argument (%rsi:64, %esi:32, %si:16, %sl:8)
+%rdx - 3rd argument (%rdx:64, %edx:32, %dx:16, %dl:8)
+%rcx - 4th argument (%rcx:64, %ecx:32, %cx:16, %cl:8)
+%r8 - 5th argument (%r8:64, %r8d:32, %r8w:16, %r8b:8)
+%r9 - 6th argument (%r9:64, %r9d:32, %r9w:16, %r9b:8)
+%rsp - Stack pointer
+%rax - Return value
+
+crash> revs --asm=lea
+lea - Load effective address
+     The lea instruction places the address specified by its
+     first operandinto the register specified by its second
+     operand.Note, the contents of the memory location are
+     notloaded, only the effective address is computed and
+     placed into the register.This is useful for obtaining
+     a pointer into a memory region or to perform simple
+     arithmetic operations.
+
+     Syntax
+     lea <mem>, <reg32>
+
+     Examples
+     lea (%ebx,%esi,8), %edi - the quantity EBX+8*ESI is placed in EDI.
+     lea val(,1), %eax - the value val is placed in EAX.
+
 ```
