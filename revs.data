@@ -125,3 +125,91 @@ j<condition> - Conditional jump
 
 END_INSTRUCTION: je jne jz jg jge jl jle
 
+INSTRUCTION: mov movb
+mov - Move
+	The mov instruction copies the data item referred to by its first 
+	operand (i.e. register contents, memory contents, or a constant 
+	value) into the location referred to by its second operand
+	(i.e. a register or memory). While register-to-register moves are 
+	possible, direct memory-to-memory moves are not.
+
+	In cases where memory transfers are desired, the source memory
+	contents must first be loaded into a register, then can be stored
+	to the destination memory address.
+
+	Syntax
+	mov <reg>, <reg>
+	mov <reg>, <mem>
+	mov <mem>, <reg>
+	mov <con>, <reg>
+	mov <con>, <mem>
+
+	Examples
+	mov %ebx, %eax — copy the value in EBX into EAX
+	movb $5, var(,1) — store the value 5 into the byte at location var
+END_INSTRUCTION: mov movb
+
+INSTRUCTION: push
+push — Push on stack
+	The push instruction places its operand onto the top of the hardware
+	supported stack in memory. Specifically, push first decrements ESP by 4,
+	then places its operand into the contents of the 32-bit location 
+	at address (%esp). ESP (the stack pointer) is decremented by push 
+	since the x86 stack grows down — i.e. the stack grows from high 
+	addresses to lower addresses.
+
+	Syntax
+	push <reg32>
+	push <mem>
+	push <con32>
+
+	Examples
+	push %eax — push eax on the stack
+	push var(,1) — push the 4 bytes at address var onto the stack
+END_INSTRUCTION: push
+
+INSTRUCTION: pop
+pop — Pop from stack
+	The pop instruction removes the 4-byte data element from the top of
+	the hardware-supported stack into the specified operand (i.e. register
+	or memory location). It first moves the 4 bytes located at memory
+	location (%esp) into the specified register or memory location,
+	and then increments ESP by 4.
+
+	Syntax
+	pop <reg32>
+	pop <mem>
+
+	Examples
+	pop %edi — pop the top element of the stack into EDI.
+	pop (%ebx) — pop the top element of the stack into memory at the 
+				 four bytes starting at location EBX.
+END_INSTRUCTION: pop 
+
+INSTRUCTION: shl shr
+shl, shr — Shift left and right
+	These instructions shift the bits in their first operand's contents
+	left and right, padding the resulting empty bit positions with zeros.
+	The shifted operand can be shifted up to 31 places. The number of
+	bits to shift is specified by the second operand, which can be
+	either an 8-bit constant or the register CL. In either case, shifts
+	counts of greater then 31 are performed modulo 32.
+
+	Syntax
+	shl <con8>, <reg>
+	shl <con8>, <mem>
+	shl %cl, <reg>
+	shl %cl, <mem>
+	shr <con8>, <reg>
+	shr <con8>, <mem>
+	shr %cl, <reg>
+	shr %cl, <mem>
+
+	Examples
+	shl $1, eax — Multiply the value of EAX by 2 (if the most
+		      significant bit is 0)
+	shr %cl, %ebx — Store in EBX the floor of result of dividing the value 
+			of EBX by 2^n where n is the value in CL. 
+			Caution: for negative integers, it is different from
+			the C semantics of division!
+END_INSTRUCTION: shl shr
