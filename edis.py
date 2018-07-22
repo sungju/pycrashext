@@ -206,6 +206,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
             print(line)
 
 
+    crashcolor.set_color(crashcolor.RESET)
+
+
 def edis():
     op = OptionParser()
     op.add_option("-r", "--reverse",
