@@ -54,44 +54,39 @@ def read_database():
             if os.path.exists(path + "/revs.data"):
                 source_file = path + "/revs.data"
                 break
-        f = open(source_file, 'r')
-        file_lines = f.readlines()
-        f.close()
+        inst_set = ["REGISTERS", "INSTRUCTION"]
+        idx = 0
+        with open(source_file, 'r') as f:
+            for line in f:
+                words = line.split(":")
+                if words[0] in inst_set:
+                    if words[0] == "REGISTERS":
+                        arch_list = words[1] # don't split yet
+                        register_details = ""
+                        idx = idx + 1
+                        for detail_line in f:
+                            idx = idx + 1
+                            if detail_line == "END_" + line:
+                                arch_register_list[arch_list] = register_details
+                                break
+                            register_details = register_details + detail_line
+                    elif words[0] == "INSTRUCTION":
+                        inst_list = words[1] # don't split yet
+                        inst_details = ""
+                        idx = idx + 1
+                        for detail_line in f:
+                            idx = idx + 1
+                            if detail_line == "END_" + line:
+                                instruction_list[inst_list] = inst_details
+                                break
+                            inst_details = inst_details + detail_line
+                        idx = idx + 1
+                else:
+                    idx = idx + 1
+
     except:
         print("Failed to read file %s" % (source_file))
         return
-
-    inst_set = ["REGISTERS", "INSTRUCTION"]
-    idx = 0
-    while (idx < len(file_lines)):
-        line = file_lines[idx]
-        words = line.split(":")
-        if words[0] in inst_set:
-            if words[0] == "REGISTERS":
-                arch_list = words[1] # don't split yet
-                register_details = ""
-                idx = idx + 1
-                while idx < len(file_lines):
-                    detail_line = file_lines[idx]
-                    idx = idx + 1
-                    if detail_line == "END_" + line:
-                        arch_register_list[arch_list] = register_details
-                        break
-                    register_details = register_details + detail_line
-            elif words[0] == "INSTRUCTION":
-                inst_list = words[1] # don't split yet
-                inst_details = ""
-                idx = idx + 1
-                while idx < len(file_lines):
-                    detail_line = file_lines[idx]
-                    idx = idx + 1
-                    if detail_line == "END_" + line:
-                        instruction_list[inst_list] = inst_details
-                        break
-                    inst_details = inst_details + detail_line
-                idx = idx + 1
-        else:
-            idx = idx + 1
 
 
 def revs():
