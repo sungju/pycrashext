@@ -34,6 +34,11 @@ def show_asm_details( asm_inst ):
 
     return
 
+
+def show_asm_list():
+    for inst_list_str in instruction_list:
+        print("%s" % (inst_list_str.strip()))
+
 def show_registers():
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
@@ -99,6 +104,10 @@ def revs():
                 action="store",
                 help="Simple manual for GNU assembly")
 
+    op.add_option('--list', dest='List', default=0,
+                action="store_true",
+                help="Shows the list of instructions you can check details")
+
     (o, args) = op.parse_args()
 
 
@@ -110,6 +119,11 @@ def revs():
 
     if (o.Regs):
         show_registers()
+        sys.exit(0)
+
+
+    if (o.List):
+        show_asm_list()
         sys.exit(0)
 
     show_registers()
