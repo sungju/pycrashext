@@ -304,94 +304,212 @@ $ crash
 
 If everything goes well, you now can run 'edis'.
 
+- Below is similar to 'dis -lr', but provides actual source code for each lines
+
 ```
-crash> edis -rg ffffffff81363bf7
-/usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 495
-                 494 void __handle_sysrq(int key, struct tty_struct *tty, int check_mask)
-                 495 {
-            0xffffffff81363ac0 <__handle_sysrq>:        push   %rbp
-            0xffffffff81363ac1 <__handle_sysrq+0x1>:    mov    %rsp,%rbp
-            0xffffffff81363ac4 <__handle_sysrq+0x4>:    sub    $0x40,%rsp
-            0xffffffff81363ac8 <__handle_sysrq+0x8>:    mov    %rbx,-0x28(%rbp)
-            0xffffffff81363acc <__handle_sysrq+0xc>:    mov    %r12,-0x20(%rbp)
-            0xffffffff81363ad0 <__handle_sysrq+0x10>:   mov    %r13,-0x18(%rbp)
-            0xffffffff81363ad4 <__handle_sysrq+0x14>:   mov    %r14,-0x10(%rbp)
-            0xffffffff81363ad8 <__handle_sysrq+0x18>:   mov    %r15,-0x8(%rbp)
-            0xffffffff81363adc <__handle_sysrq+0x1c>:   nopl   0x0(%rax,%rax,1)
-            0xffffffff81363ae1 <__handle_sysrq+0x21>:   mov    %edi,%ebx
-            /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 501
-                 501    spin_lock_irqsave(&sysrq_key_table_lock, flags);
-            0xffffffff81363ae3 <__handle_sysrq+0x23>:   mov    $0xffffffff8200cf94,%rdi
-            0xffffffff81363aea <__handle_sysrq+0x2a>:   mov    %edx,-0x38(%rbp)
-
+crash> edis -r ffffffff812461ec
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
+      41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+      42 {
+0xffffffff81246190 <show_sb_opts>:show_sb_optsdata32 data32 data32 xchg %ax,%ax [FTRACE NOP]
 ...
-+----------*0xffffffff81363b20 <__handle_sysrq+0x60>:   jbe    0xffffffff81363bab <__handle_sysrq+0xeb>
-|           /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 461
-|                461    else if ((key >= 'a') && (key <= 'z'))
-|                462            retval = key + 10 - 'a';
-|           0xffffffff81363b26 <__handle_sysrq+0x66>:   lea    -0x61(%rbx),%eax
-|           0xffffffff81363b29 <__handle_sysrq+0x69>:   cmp    $0x19,%eax
-|+---------*0xffffffff81363b2c <__handle_sysrq+0x6c>:   jbe    0xffffffff81363ba8 <__handle_sysrq+0xe8>
-||          /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 526
-||               526            printk("HELP : ");
-||      +==>0xffffffff81363b2e <__handle_sysrq+0x6e>:   mov    $0xffffffff817fcf79,%rdi
-||      |   0xffffffff81363b35 <__handle_sysrq+0x75>:   xor    %eax,%eax
-||      |   0xffffffff81363b37 <__handle_sysrq+0x77>:   mov    $0xffffffff81b15500,%r12
-||      |   0xffffffff81363b3e <__handle_sysrq+0x7e>:   xor    %ebx,%ebx
-||      |   0xffffffff81363b40 <__handle_sysrq+0x80>:   callq  0xffffffff8155296f <printk>
-||      |   0xffffffff81363b45 <__handle_sysrq+0x85>:   nopl   (%rax)
-||      |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 529
-||      |        529                    if (sysrq_key_table[i]) {
-||    +====>0xffffffff81363b48 <__handle_sysrq+0x88>:   mov    (%r12),%rsi
-||    | |   0xffffffff81363b4c <__handle_sysrq+0x8c>:   test   %rsi,%rsi
-||+--------*0xffffffff81363b4f <__handle_sysrq+0x8f>:   je     0xffffffff81363b7f <__handle_sysrq+0xbf>
-|||   | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.x86_64/drivers/char/sysrq.c: 532
-|||   | |        532                            for (j = 0; sysrq_key_table[i] !=
-|||   | |        533                                            sysrq_key_table[j]; j++)
-|||   | |        534                                    ;
-|||   | |   0xffffffff81363b51 <__handle_sysrq+0x91>:   xor    %edx,%edx
-|||   | |   0xffffffff81363b53 <__handle_sysrq+0x93>:   cmp    0x7b19a6(%rip),%rsi        # 0xffffffff81b15500 <sysrq_key_table>
-|||   | |   0xffffffff81363b5a <__handle_sysrq+0x9a>:   mov    $0xffffffff81b15508,%rax
-|||+-------*0xffffffff81363b61 <__handle_sysrq+0xa1>:   je     0xffffffff81363b77 <__handle_sysrq+0xb7>
-||||  | |   0xffffffff81363b63 <__handle_sysrq+0xa3>:   nopl   0x0(%rax,%rax,1)
-||||  | |   /usr/src/debug/kernel-2.6.32-696.28.1.el6/linux-2.6.32-696.28.1.el6.
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+      51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+0xffffffff812461da <show_sb_opts+0x4a>:0x4amovslq (%rbx),%rax
+0xffffffff812461dd <show_sb_opts+0x4d>:0x4dtest   %eax,%eax
+0xffffffff812461df <show_sb_opts+0x4f>:0x4fjne    0xffffffff812461c3 <show_sb_opts+0x33>
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 56
+      56 	return security_sb_show_options(m, sb);
+0xffffffff812461e1 <show_sb_opts+0x51>:0x51mov    %r12,%rsi
+0xffffffff812461e4 <show_sb_opts+0x54>:0x54mov    %r13,%rdi
+0xffffffff812461e7 <show_sb_opts+0x57>:0x57callq  0xffffffff812b3c70 <security_sb_show_options>
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 57
+      57 }
+0xffffffff812461ec <show_sb_opts+0x5c>:0x5cpop    %rbx
+```
+
+- Sometimes, it is useful to see where this instruction came from by drawing 'jump' lines
+	- If there are too many jmp instructions, the screen can be a bit messy. You can reduce the number of jump instructions you are interested in by providing '-j <jmp op>'
+
+```
+crash> edis -rg ffffffff812461ec
+     /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
+           41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+           42 {
+     0xffffffff81246190 <show_sb_opts>:show_sb_optsdata32 data32 data32 xchg %ax,%ax [FTRACE NOP]
+     0xffffffff81246195 <show_sb_opts+0x5>:0x5push   %rbp
+     /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+           51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+     0xffffffff81246196 <show_sb_opts+0x6>:0x6mov    $0x10,%eax
+     /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
+           41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+           42 {
+     0xffffffff8124619b <show_sb_opts+0xb>:0xbmov    %rsp,%rbp
+     0xffffffff8124619e <show_sb_opts+0xe>:0xepush   %r13
+     0xffffffff812461a0 <show_sb_opts+0x10>:0x10mov    %rdi,%r13
+     0xffffffff812461a3 <show_sb_opts+0x13>:0x13push   %r12
+     0xffffffff812461a5 <show_sb_opts+0x15>:0x15mov    %rsi,%r12
+     0xffffffff812461a8 <show_sb_opts+0x18>:0x18push   %rbx
+     /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+           51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+     0xffffffff812461a9 <show_sb_opts+0x19>:0x19mov    $0xffffffff816f5fc0,%rbx
++---*0xffffffff812461b0 <show_sb_opts+0x20>:0x20jmp    0xffffffff812461c3 <show_sb_opts+0x33>
+|    0xffffffff812461b2 <show_sb_opts+0x22>:0x22nopw   0x0(%rax,%rax,1)
+| +=>0xffffffff812461b8 <show_sb_opts+0x28>:0x28add    $0x10,%rbx
+| |  0xffffffff812461bc <show_sb_opts+0x2c>:0x2cmovslq (%rbx),%rax
+| |  0xffffffff812461bf <show_sb_opts+0x2f>:0x2ftest   %eax,%eax
+|+--*0xffffffff812461c1 <show_sb_opts+0x31>:0x31je     0xffffffff812461e1 <show_sb_opts+0x51>
+|||  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 52
+|||        52 		if (sb->s_flags & fs_infop->flag)
+|||        53 			seq_puts(m, fs_infop->str);
++==+>0xffffffff812461c3 <show_sb_opts+0x33>:0x33test   %rax,0x50(%r12)
+ |+-*0xffffffff812461c8 <show_sb_opts+0x38>:0x38je     0xffffffff812461b8 <show_sb_opts+0x28>
+ | | /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 53
+ | |       52 		if (sb->s_flags & fs_infop->flag)
+ | |       53 			seq_puts(m, fs_infop->str);
+ | | 0xffffffff812461ca <show_sb_opts+0x3a>:0x3amov    0x8(%rbx),%rsi
+ | | 0xffffffff812461ce <show_sb_opts+0x3e>:0x3emov    %r13,%rdi
+ | | /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+ | |       51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+ | | 0xffffffff812461d1 <show_sb_opts+0x41>:0x41add    $0x10,%rbx
+ | | /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 53
+ | |       52 		if (sb->s_flags & fs_infop->flag)
+ | |       53 			seq_puts(m, fs_infop->str);
+ | | 0xffffffff812461d5 <show_sb_opts+0x45>:0x45callq  0xffffffff812289d0 <seq_puts>
+ | | /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+ | |       51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+ | | 0xffffffff812461da <show_sb_opts+0x4a>:0x4amovslq (%rbx),%rax
+ | | 0xffffffff812461dd <show_sb_opts+0x4d>:0x4dtest   %eax,%eax
+ | +*0xffffffff812461df <show_sb_opts+0x4f>:0x4fjne    0xffffffff812461c3 <show_sb_opts+0x33>
+ |   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 56
+ |         56 	return security_sb_show_options(m, sb);
+ +==>0xffffffff812461e1 <show_sb_opts+0x51>:0x51mov    %r12,%rsi
+     0xffffffff812461e4 <show_sb_opts+0x54>:0x54mov    %r13,%rdi
+     0xffffffff812461e7 <show_sb_opts+0x57>:0x57callq  0xffffffff812b3c70 <security_sb_show_options>
 
 
-crash> edis -f include/linux/list.h:697:700
-/usr/src/debug/kernel-2.6.32-431.el6/linux-2.6.32-431.el6.x86_64/include/linux/list.h: 697 700
+crash> edis -rgj je ffffffff812461ec
+   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
+         41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+         42 {
+   0xffffffff81246190 <show_sb_opts>:show_sb_optsdata32 data32 data32 xchg %ax,%ax [FTRACE NOP]
+   0xffffffff81246195 <show_sb_opts+0x5>:0x5push   %rbp
+   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+         51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+   0xffffffff81246196 <show_sb_opts+0x6>:0x6mov    $0x10,%eax
+   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
+         41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+         42 {
+   0xffffffff8124619b <show_sb_opts+0xb>:0xbmov    %rsp,%rbp
+   0xffffffff8124619e <show_sb_opts+0xe>:0xepush   %r13
+   0xffffffff812461a0 <show_sb_opts+0x10>:0x10mov    %rdi,%r13
+   0xffffffff812461a3 <show_sb_opts+0x13>:0x13push   %r12
+   0xffffffff812461a5 <show_sb_opts+0x15>:0x15mov    %rsi,%r12
+   0xffffffff812461a8 <show_sb_opts+0x18>:0x18push   %rbx
+   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+         51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+   0xffffffff812461a9 <show_sb_opts+0x19>:0x19mov    $0xffffffff816f5fc0,%rbx
+   0xffffffff812461b0 <show_sb_opts+0x20>:0x20jmp    0xffffffff812461c3 <show_sb_opts+0x33>
+   0xffffffff812461b2 <show_sb_opts+0x22>:0x22nopw   0x0(%rax,%rax,1)
+ +>0xffffffff812461b8 <show_sb_opts+0x28>:0x28add    $0x10,%rbx
+ | 0xffffffff812461bc <show_sb_opts+0x2c>:0x2cmovslq (%rbx),%rax
+ | 0xffffffff812461bf <show_sb_opts+0x2f>:0x2ftest   %eax,%eax
++-*0xffffffff812461c1 <show_sb_opts+0x31>:0x31je     0xffffffff812461e1 <show_sb_opts+0x51>
+|| /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 52
+||       52 		if (sb->s_flags & fs_infop->flag)
+||       53 			seq_puts(m, fs_infop->str);
+|| 0xffffffff812461c3 <show_sb_opts+0x33>:0x33test   %rax,0x50(%r12)
+|+*0xffffffff812461c8 <show_sb_opts+0x38>:0x38je     0xffffffff812461b8 <show_sb_opts+0x28>
+|  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 53
+|        52 		if (sb->s_flags & fs_infop->flag)
+|        53 			seq_puts(m, fs_infop->str);
+|  0xffffffff812461ca <show_sb_opts+0x3a>:0x3amov    0x8(%rbx),%rsi
+|  0xffffffff812461ce <show_sb_opts+0x3e>:0x3emov    %r13,%rdi
+|  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+|        51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+|  0xffffffff812461d1 <show_sb_opts+0x41>:0x41add    $0x10,%rbx
+|  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 53
+|        52 		if (sb->s_flags & fs_infop->flag)
+|        53 			seq_puts(m, fs_infop->str);
+|  0xffffffff812461d5 <show_sb_opts+0x45>:0x45callq  0xffffffff812289d0 <seq_puts>
+|  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 51
+|        51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+|  0xffffffff812461da <show_sb_opts+0x4a>:0x4amovslq (%rbx),%rax
+|  0xffffffff812461dd <show_sb_opts+0x4d>:0x4dtest   %eax,%eax
+|  0xffffffff812461df <show_sb_opts+0x4f>:0x4fjne    0xffffffff812461c3 <show_sb_opts+0x33>
+|  /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 56
+|        56 	return security_sb_show_options(m, sb);
++=>0xffffffff812461e1 <show_sb_opts+0x51>:0x51mov    %r12,%rsi
+   0xffffffff812461e4 <show_sb_opts+0x54>:0x54mov    %r13,%rdi
+   0xffffffff812461e7 <show_sb_opts+0x57>:0x57callq  0xffffffff812b3c70 <security_sb_show_options>
+   /usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 57
+         57 }
+   0xffffffff812461ec <show_sb_opts+0x5c>:0x5cpop    %rbx
+```
 
-     697 	for (pos = (pos)->next;						 \
-     698 	     pos &&							 \
-     699 		({ tpos = hlist_entry(pos, typeof(*tpos), member); 1;}); \
-     700 	     pos = pos->next)
+- Checking full function definition or specific portion in file can be done with '-f'
 
-crash> edis -f __list_add
-/usr/src/debug/kernel-2.6.32-431.el6/linux-2.6.32-431.el6.x86_64/lib/list_debug.c: 22
+```
+crash> edis -f show_sb_opts
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c: 42
 
-      12 /*
-      13  * Insert a new entry between two known consecutive entries.
-      14  *
-      15  * This is only for internal list manipulation where we know
-      16  * the prev/next entries already!
-      17  */
-      18 
-      19 void __list_add(struct list_head *new,
-      20 			      struct list_head *prev,
-      21 			      struct list_head *next)
-      22 {
-      23 	WARN(next->prev != prev,
-      24 		"list_add corruption. next->prev should be "
-      25 		"prev (%p), but was %p. (next=%p).\n",
-      26 		prev, next->prev, next);
-      27 	WARN(prev->next != next,
-      28 		"list_add corruption. prev->next should be "
-      29 		"next (%p), but was %p. (prev=%p).\n",
-      30 		next, prev->next, prev);
-      31 	next->prev = new;
-      32 	new->next = next;
-      33 	new->prev = prev;
-      34 	prev->next = new;
-      35 }
+      41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+      42 {
+      43 	static const struct proc_fs_info fs_info[] = {
+      44 		{ MS_SYNCHRONOUS, ",sync" },
+      45 		{ MS_DIRSYNC, ",dirsync" },
+      46 		{ MS_MANDLOCK, ",mand" },
+      47 		{ 0, NULL }
+      48 	};
+      49 	const struct proc_fs_info *fs_infop;
+      50 
+      51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+      52 		if (sb->s_flags & fs_infop->flag)
+      53 			seq_puts(m, fs_infop->str);
+      54 	}
+      55 
+      56 	return security_sb_show_options(m, sb);
+      57 }
+
+```
+
+- Or, can see a port of af a file.
+
+```
+crash> edis -f fs/proc_namespace.c: 42
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c:  42
+
+      41 static int show_sb_opts(struct seq_file *m, struct super_block *sb)
+      42 {
+      43 	static const struct proc_fs_info fs_info[] = {
+      44 		{ MS_SYNCHRONOUS, ",sync" },
+      45 		{ MS_DIRSYNC, ",dirsync" },
+      46 		{ MS_MANDLOCK, ",mand" },
+      47 		{ 0, NULL }
+      48 	};
+      49 	const struct proc_fs_info *fs_infop;
+      50 
+      51 	for (fs_infop = fs_info; fs_infop->flag; fs_infop++) {
+      52 		if (sb->s_flags & fs_infop->flag)
+      53 			seq_puts(m, fs_infop->str);
+      54 	}
+      55 
+      56 	return security_sb_show_options(m, sb);
+      57 }
+
+
+ ** Execution took   5.19s (real)   4.23s (CPU), Child processes:   0.19s
+crash> edis -f fs/proc_namespace.c: 42 49
+/usr/src/debug/kernel-3.10.0-693.11.6.el7/linux-3.10.0-693.11.6.el7.x86_64/fs/proc_namespace.c:  42 49
+      42 {
+      43 	static const struct proc_fs_info fs_info[] = {
+      44 		{ MS_SYNCHRONOUS, ",sync" },
+      45 		{ MS_DIRSYNC, ",dirsync" },
+      46 		{ MS_MANDLOCK, ",mand" },
+      47 		{ 0, NULL }
+      48 	};
+      49 	const struct proc_fs_info *fs_infop;
+
 
 ```
 
