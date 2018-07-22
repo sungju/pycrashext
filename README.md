@@ -515,6 +515,7 @@ Options:
   -h, --help  show this help message and exit
   --regs      Registers used for argument passing
   --asm=ASM   Simple manual for GNU assembly
+  --list      Shows the list of instructions you can check details
 
 crash> revs
 ** function parameters for x86_64 **
