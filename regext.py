@@ -201,9 +201,9 @@ help = '''
 enhanced disasm command related information
 '''
 
-if 'CRASHEXT_SERVER' in os.environ and \
-   len(os.environ['CRASHEXT_SERVER'].strip()) > 0:
-    rprog("edis", "Enhanced disasm",
-          "-h       - list available options",
-          help)
+#if 'CRASHEXT_SERVER' in os.environ and \
+#   len(os.environ['CRASHEXT_SERVER'].strip()) > 0:
+rprog("edis", "Enhanced disasm",
+      "-h       - list available options",
+      help)
 
