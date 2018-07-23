@@ -62,7 +62,7 @@ TASK_DEAD = 64
 
 task_state_color_list = {
     TASK_RUNNING : crashcolor.BLUE,
-    TASK_INTERRUPTIBLE : crashcolor.BLACK,
+    TASK_INTERRUPTIBLE : crashcolor.RESET,
     TASK_UNINTERRUPTIBLE : crashcolor.RED,
     __TASK_STOPPED : crashcolor.CYAN,
     __TASK_TRACED : crashcolor.MAGENTA,
