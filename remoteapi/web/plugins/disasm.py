@@ -66,11 +66,12 @@ def set_kernel_version(asm_str):
         if err != None and \
            (err.startswith("error:") or err.startswith("fatal:")):
             return 'FAILED to git checkout\n' + err
+        cur_kernel_version = kernel_version
+        cur_release_version = release_version.split("/")[0]
     except:
+        cur_kernel_version = ""
+        cur_release_version = ""
         return "FAILED to git checkout %s" % (kernel_version)
-
-    cur_kernel_version = kernel_version
-    cur_release_version = release_version.split("/")[0]
 
     return kernel_version
 
@@ -219,9 +220,14 @@ def check_jump_op(op_code):
     global cur_release_version
 
     idx = cur_release_version.rfind(".")
-    arch = cur_release_version[idx + 1:]
+    if idx > -1:
+        arch = cur_release_version[idx + 1:]
+    else:
+        arch = 'x86_64'
+
     jump_op_set = []
     exclude_set = []
+
     if arch == 'x86_64' or arch == 'i386':
         jump_op_set = [ "j" ]
     elif arch == 'ppc64le' or arch == 'ppc64':
@@ -230,6 +236,8 @@ def check_jump_op(op_code):
     elif arch.startswith("arm"):
         jump_op_set = [ "b" ]
         exclude_set = [ "bl", "bic", "bics", "blx" ]
+    else:
+        jump_op_set = [ "j" ]
 
     if op_code in exclude_set:
         return False
@@ -461,7 +469,7 @@ def disasm():
         jump_op_list = None
         if jump_graph != "":
             jump_op_str = request.form["jump_op_list"]
-        if jump_op_str != "":
+        if jump_op_str != None and jump_op_str.strip() != "":
             jump_op_list = jump_op_str.split(",")
     except:
         jump_op_list = None
