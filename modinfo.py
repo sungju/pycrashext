@@ -41,10 +41,13 @@ def is_our_module(module_addr):
     if module == None:
         return False
 
-    if module.gpgsig_ok != 0:
-        return True
+    if member_offset("struct module", "sig_ok") > -1:
+        return module.sig_ok != 0
 
-    return False
+    if member_offset("struct module", "gpgsig_ok") > -1:
+        return module.gpgsig_ok != 0
+
+    return True
 
 def module_info(options):
     global module_list
