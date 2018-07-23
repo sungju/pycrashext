@@ -54,12 +54,13 @@ def disasm():
             "full_source" : full_source, "jump_op_list" : jump_op_list}
     try:
         res = r.post(encode_url, data = data).text
-    except requests.exceptions.RequestException as e:
-        res = "ERROR: " + e + \
-            "\nServer is not reachable\n" + \
-            "\tServer address is <" + encode_url + ">"
+    except r.exceptions.RequestException as e:
+        res = "\tServer is not reachable.\n" + \
+              "\tServer address is <" + encode_url + ">" + \
+              "\n" + orig_asm
     except:
-        res = "Unexpected error:" + sys.exc_info()[0]
+        res = "\tUnexpected error:" + sys.exc_info()[0] + \
+              "\n" + orig_asm
 
     # Print the result
     print (res, end='')

@@ -154,6 +154,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         else: # source line
             prog = re.compile(r"(?P<line_number>[0-9]+)")
             m = prog.search(one_line)
+            line = None
             if m is not None:
                 line = m.group("line_number")
             if line == None:
