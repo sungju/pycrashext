@@ -10,7 +10,10 @@ def disasm():
     orig_asm = "".join(sys.stdin.readlines()).encode()
     encoded_asm = base64.b64encode(orig_asm)
 
-    encode_url = os.environ['CRASHEXT_SERVER'] + '/api/disasm'
+    try:
+        encode_url = os.environ['CRASHEXT_SERVER'] + '/api/disasm'
+    except:
+        encode_url = ""
 
     # Additional options that can pass to the server
     op = OptionParser()
