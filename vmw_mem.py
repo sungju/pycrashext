@@ -9,6 +9,8 @@ from pykdump.API import *
 
 import sys
 
+import crashcolor
+
 def vmw_mem():
     try:
         pa = readSymbol('balloon');
@@ -22,6 +24,7 @@ def vmw_mem():
     balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
     print ('%s' % (balloon_result))
 
+    crashcolor.set_color(crashcolor.LIGHTRED)
     print ("allocated size (pages)     = %d" % pa.size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %
            (pa.size * crash.PAGESIZE,
@@ -30,6 +33,7 @@ def vmw_mem():
     print ("required target (bytes)    = %d, (%.2fGB)" %
            (pa.target * crash.PAGESIZE,
            ((pa.target * crash.PAGESIZE)/1024/1024/1024)))
+    crashcolor.set_color(crashcolor.RESET)
 
     print ("")
 

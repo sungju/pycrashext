@@ -9,6 +9,8 @@ from pykdump.API import *
 from LinuxDump import Tasks
 import sys
 
+import crashcolor
+
 
 def dentry_to_filename (dentry) :
     if (dentry == 0):
@@ -99,11 +101,15 @@ def all_filesystem_info(options):
             vfsmnt = readSU("struct vfsmount", vfsmnt_addr)
             mnt_flags = vfsmnt.mnt_flags
 
+
+        if frozen_str != "SB_UNFROZEN":
+            crashcolor.set_color(crashcolor.LIGHTRED)
         print ("SB: 0x%14x, frozen=%s, %s (%s) [%s], (%s)" %
                (sb, frozen_str,
                dentry_to_filename(sb.s_root), sb.s_id,
                 sb.s_type.name,
                 get_mount_options(mnt_flags)))
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def find_pid_from_file(options):

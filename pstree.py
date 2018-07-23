@@ -50,16 +50,37 @@ def print_pstree(options):
 
     print ("\n\nTotal %s tasks printed" % (pid_cnt))
 
+TASK_RUNNING = 0
+TASK_INTERRUPTIBLE = 1
+TASK_UNINTERRUPTIBLE = 2
+__TASK_STOPPED = 4
+__TASK_TRACED = 8
+EXIT_ZOMBIE = 16
+EXIT_DEAD = 32
+TASK_DEAD = 64
+
+task_state_color_list = {
+    TASK_RUNNING : crashcolor.BLACK,
+    TASK_INTERRUPTIBLE : crashcolor.BLUE,
+    TASK_UNINTERRUPTIBLE : crashcolor.RED,
+    __TASK_STOPPED : crashcolor.CYAN,
+    __TASK_TRACED : crashcolor.MAGENTA,
+    EXIT_ZOMBIE : crashcolor.YELLOW,
+    EXIT_DEAD : crashcolor.LIGHTRED,
+    TASK_DEAD : crashcolor.LIGHTRED,
+}
+
+
 def task_status_str(status):
     return {
-        0: "RU",
-        1: "IN",
-        2: "UN",
-        4: "ST",
-        8: "TR",
-        16: "ZO",
-        32: "DE",
-        64: "DE",
+        TASK_RUNNING: "RU",
+        TASK_INTERRUPTIBLE: "IN",
+        TASK_UNINTERRUPTIBLE: "UN",
+        __TASK_STOPPED: "ST",
+        __TASK_TRACED: "TR",
+        EXIT_ZOMBIE: "ZO",
+        EXIT_DEAD: "DE",
+        TASK_DEAD: "DE",
         "TASK_RUNNING" : "RU",
         "TASK_INTERRUPTIBLE" : "IN",
         "TASK_UNINTERRUPTIBLE" : "UN",
@@ -67,6 +88,7 @@ def task_status_str(status):
         "TASK_ZOMBIE" : "ZO",
         "TASK_DEAD" : "DE",
     }[status]
+
 
 def print_branch(depth, first):
     global branch_locations
@@ -115,6 +137,9 @@ def print_task(task, depth, first, options):
     if (task.comm != 0):
         comm_str = task.comm
 
+    if (task.state & 0xff) in task_state_color_list:
+        crashcolor.set_color(task_state_color_list[task.state & 0xff])
+
     print_str = ("%s%s%s%s " %
            (comm_str,
             "(" + str(task.pid) + ")"
@@ -123,6 +148,7 @@ def print_task(task, depth, first, options):
                 if options.print_state else "",
             thread_str))
     print ("%s" % (print_str), end='')
+    crashcolor.set_color(crashcolor.RESET)
     if (len(branch_locations) <= depth):
         branch_locations.append(len(print_str))
     else:

@@ -12,6 +12,8 @@ from LinuxDump import Tasks
 import sys
 import operator
 
+import crashcolor
+
 def show_tasks_memusage(options):
     mem_usage_dict = {}
     if (options.nogroup):
@@ -52,8 +54,10 @@ def show_tasks_memusage(options):
                 (sorted_usage[i][1], sorted_usage[i][0]))
 
     print("=" * 70)
+    crashcolor.set_color(crashcolor.BLUE)
     print("Total memory usage from user-space = %.2f GiB" %
           (total_rss/1048576))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def show_slabtop(options):
@@ -75,7 +79,7 @@ def show_slabtop(options):
         min_number = len(sorted_slabtop) - 1
 
     print("=" * 68)
-    print("%-18s %-30s %10s %7s" %
+    print("%-18s %-29s %11s %7s" %
           ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
     print("=" * 68)
     for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
@@ -87,7 +91,7 @@ def show_slabtop(options):
         elif (member_offset('struct kmem_cache', 'object_size') >= 0):
             obj_size = kmem_cache.object_size
 
-        print("0x%16s %-30s %9sK %7d" %
+        print("0x%16s %-29s %9s K %7d" %
                 (sorted_slabtop[i][0],
                  kmem_cache.name,
                  sorted_slabtop[i][1],

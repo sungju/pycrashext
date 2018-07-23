@@ -11,6 +11,8 @@ from LinuxDump.inet import proto, netdevice
 
 import sys
 
+import crashcolor
+
 
 def show_network_interfaces(options):
     for dev in netdevice.dev_base_list():
@@ -31,8 +33,11 @@ def show_network_interfaces(options):
         if (driver_module[0] != "["):
             driver_module = "<built-in>"
 
-        print ("0x%016x : %s (%s) managed by %s" %
-               (dev, dev.name, dev_addr, driver_module))
+        print ("0x%016x : %s (%s) managed by " %
+               (dev, dev.name, dev_addr), end='')
+        crashcolor.set_color(crashcolor.BLUE)
+        print ("%s" % driver_module)
+        crashcolor.set_color(crashcolor.RESET)
         if (options.network_details):
             print ("\tnetdev_ops = %s (0x%x)" %
                    (netdev_ops_str, netdev_ops))

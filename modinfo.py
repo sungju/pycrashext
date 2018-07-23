@@ -8,6 +8,7 @@ from __future__ import division
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+import crashcolor
 
 module_list = []
 def load_module_details():
@@ -34,6 +35,17 @@ def load_module_details():
         # If anything went wrong, return a partial list
         pass
 
+
+def is_our_module(module_addr):
+    module = readSU("struct module", module_addr)
+    if module == None:
+        return False
+
+    if module.gpgsig_ok != 0:
+        return True
+
+    return False
+
 def module_info(options):
     global module_list
 
@@ -45,9 +57,12 @@ def module_info(options):
                       "SIZE"))
 
     for module in module_list:
+        if not is_our_module(module):
+            crashcolor.set_color(crashcolor.LIGHTRED)
         print("0x%x %-25s %10d" % (long(module),
                                  module.name,
                                  module.core_size))
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def find_module(module_name):
@@ -156,7 +171,9 @@ def show_module_detail(options):
 
 
 def print_sym_list_section(title, sym_list):
+    crashcolor.set_color(crashcolor.BLUE)
     print(title)
+    crashcolor.set_color(crashcolor.RESET)
     for sym_entry in sym_list:
         print("0x%s %s %s" %
             (sym_entry[0], sym_entry[1], sym_entry[2]))

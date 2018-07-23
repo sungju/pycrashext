@@ -10,6 +10,8 @@ from LinuxDump import percpu
 import sys
 from optparse import OptionParser
 
+import crashcolor
+
 
 def  show_cpuid_x86(options):
     phys_cpu_list = {}
@@ -29,7 +31,9 @@ def  show_cpuid_x86(options):
 
 
     for phys_cpu in phys_cpu_list:
+        crashcolor.set_color(crashcolor.BLUE)
         print("<<< Physical CPU %3d >>>" % (phys_cpu))
+        crashcolor.set_color(crashcolor.RESET)
         core_dict = phys_cpu_list[phys_cpu]
 
         for cpu in core_dict:

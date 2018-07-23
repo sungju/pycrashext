@@ -9,6 +9,8 @@ from pykdump.API import *
 import sys
 from optparse import OptionParser
 
+import crashcolor
+
 def dentry_to_filename (dentry) :
     if (dentry == 0):
         return "<>"
@@ -26,14 +28,18 @@ def show_cgroup_tree():
     rootnode = readSymbol("rootnode")
     if (rootnode == 0):
         return
+    crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup subsystems **")
+    crashcolor.set_color(crashcolor.RESET)
     for cgroup_subsys in readSUListFromHead(rootnode.subsys_list,
                                              'sibling',
                                              'struct cgroup_subsys'):
         print ("%s (0x%x)" % (cgroup_subsys.name, cgroup_subsys))
 
     print ("")
+    crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup tree **")
+    crashcolor.set_color(crashcolor.RESET)
     top_cgroup = rootnode.top_cgroup
     curlimit = sys.getrecursionlimit()
     sys.setrecursionlimit(1000)
@@ -96,7 +102,9 @@ def show_task_group():
                 (task_group, cgroup, cgroup_name))
 
     print ("-" * 70)
+    crashcolor.set_color(crashcolor.BLUE)
     print ("Total number of task_group(s) = %d" % (count))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 
