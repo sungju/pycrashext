@@ -98,10 +98,11 @@ def is_end_of_one_statement(a_line):
 def is_function_header(a_line):
     a_line = a_line.strip()
     my_line = re.findall(r"SYSCALL_DEFINE[0-9][ \t]*\(", a_line)
+    print(a_line)
     if my_line is not None and len(my_line) > 0:
         return True
 
-    my_line = re.findall(r"[a-zA-Z]*[ \t]*[a-zA-Z]+[ \t]+[\*]?[a-zA-Z0-9_]+[ \t]*\(", a_line)
+    my_line = re.findall(r"[a-zA-Z]*[ \n\t]*[a-zA-Z_]+[ \n\t]+[\*]?[a-zA-Z0-9_]+[ \n\t]*\(", a_line)
     if my_line is None or len(my_line) == 0:
         return False
 
@@ -339,7 +340,7 @@ def read_a_function_header(file_lines, line_number):
     result = ""
     is_in_comment = False
     # Read function header
-    prev_line_number = line_number - 1
+    prev_line_number = line_number
     source_line = file_lines[prev_line_number]
     while True:
         a_line = source_line.strip()
@@ -348,10 +349,14 @@ def read_a_function_header(file_lines, line_number):
         if a_line.find("/*") >= 0 and a_line.find("\"") == -1:
             is_in_comment = False
 
-        if not is_in_comment and is_function_header(source_line):
-            break
         prev_line_number = prev_line_number - 1
-        source_line = file_lines[prev_line_number]
+        if prev_line_number < 0:
+            break
+        prev_line = file_lines[prev_line_number]
+        if not is_in_comment and \
+           is_function_header(prev_line + "\n" + source_line):
+            break
+        source_line = prev_line
 
     while not is_end_of_one_statement(source_line):
         prev_line_number = prev_line_number - 1
