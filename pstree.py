@@ -10,6 +10,7 @@ from pykdump.API import *
 from LinuxDump.Tasks import Task, TaskTable
 
 import sys
+import crashcolor
 
 class LineType(object):
     LINE_SPACE = 0,
