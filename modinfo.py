@@ -42,7 +42,8 @@ def is_our_module(module_addr):
         return False
 
     if member_offset("struct module", "taints") > -1:
-        return module.taints == 0
+        if module.taints != 0:
+            return False
 
     if member_offset("struct module", "sig_ok") > -1:
         return module.sig_ok != 0
