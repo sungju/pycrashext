@@ -354,7 +354,8 @@ def read_a_function_header(file_lines, line_number):
             break
         prev_line = file_lines[prev_line_number]
         if not is_in_comment and not is_function_def:
-            search_line = prev_line + a_line
+            prev_a_line = re.sub(r"\".*\"", "", prev_line).strip()
+            search_line = prev_a_line + a_line
             is_function_def, found_str = is_function_header(search_line)
             if is_function_def:
                 if found_str != None and found_str.find("\n") > -1:

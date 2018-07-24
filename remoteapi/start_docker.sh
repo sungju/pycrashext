@@ -123,7 +123,7 @@ fi
 #docker-compose run --service-ports crashext
 docker-compose up crashext
 sleep 1
-docker-compose down crashext
+docker-compose down crashext --rmi all
 
 #container_id=$(docker container ls -a | grep crashext | awk '{ print $1 }')
 #docker container rm $container_id
