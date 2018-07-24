@@ -85,7 +85,7 @@ def setgit(asm_str):
 Check if the line ends properly to make one statement
 """
 def is_end_of_one_statement(a_line):
-    my_line = re.sub(r"/\*.*\*/", "", a_line).strip()
+    my_line = re.sub(r"/\*.*\*/", "\"\"", a_line).strip()
     if my_line.endswith(';') or \
        my_line.endswith(':') or \
        my_line.endswith('{') or \
@@ -98,18 +98,17 @@ def is_end_of_one_statement(a_line):
 def is_function_header(a_line):
     a_line = a_line.strip()
     my_line = re.findall(r"SYSCALL_DEFINE[0-9][ \t]*\(", a_line)
-    print(a_line)
     if my_line is not None and len(my_line) > 0:
-        return True
+        return True, my_line[0];
 
-    my_line = re.findall(r"[a-zA-Z]*[ \n\t]*[a-zA-Z_]+[ \n\t]+[\*]?[a-zA-Z0-9_]+[ \n\t]*\(", a_line)
+    my_line = re.findall(r"[a-zA-Z]*[ \n\t]*[a-zA-Z_][a-zA-Z0-9_]*[ \n\t]+[\*]?[a-zA-Z0-9_]+[ \n\t]*\(", a_line)
     if my_line is None or len(my_line) == 0:
-        return False
+        return False, None;
 
     if my_line[0].startswith("return"):
-        return False  # ex) return wait_noreap_copyout(wo...
+        return False, None;  # ex) return wait_noreap_copyout(wo...
 
-    return True
+    return True, my_line[0];
 
 
 def is_assembly_source(source_file):
@@ -342,8 +341,9 @@ def read_a_function_header(file_lines, line_number):
     # Read function header
     prev_line_number = line_number
     source_line = file_lines[prev_line_number]
+    is_function_def = False
     while True:
-        a_line = source_line.strip()
+        a_line = re.sub(r"\".*\"", "", source_line).strip()
         if a_line.find("*/") >= 0 and a_line.find("\"") == -1:
             is_in_comment = True
         if a_line.find("/*") >= 0 and a_line.find("\"") == -1:
@@ -353,21 +353,49 @@ def read_a_function_header(file_lines, line_number):
         if prev_line_number < 0:
             break
         prev_line = file_lines[prev_line_number]
-        if not is_in_comment and \
-           is_function_header(prev_line + "\n" + source_line):
-            break
-        source_line = prev_line
+        if not is_in_comment and not is_function_def:
+            search_line = prev_line + a_line
+            is_function_def, found_str = is_function_header(search_line)
+            if is_function_def:
+                if found_str != None and found_str.find("\n") > -1:
+                    prev_line_number = prev_line_number - 1
+                    prev_line = file_lines[prev_line_number]
 
-    while not is_end_of_one_statement(source_line):
-        prev_line_number = prev_line_number - 1
-        source_line = file_lines[prev_line_number]
+        source_line = prev_line
+        if not is_in_comment and is_function_def:
+            while True:
+                a_line = re.sub(r"\".*\"", "\"\"", source_line).strip()
+
+                prev_line_number = prev_line_number - 1
+                if prev_line_number < 0:
+                    break
+                source_line = file_lines[prev_line_number]
+
+                if a_line.find("/*") >= 0:
+                    is_in_comment = False
+                    prev_line_number = prev_line_number - 1
+                    break
+
+                if is_in_comment:
+                    continue
+
+                if a_line.find("*/") >= 0:
+                    is_in_comment = True
+                    continue
+
+                if a_line == "" or is_end_of_one_statement(a_line):
+                    break
+
+            prev_line_number = prev_line_number + 3 # adjust line number
+            break
+
     while file_lines[prev_line_number + 1].strip() == "":
         prev_line_number = prev_line_number + 1
 
     in_comment = False
     open_brace = 0
     close_brace = 0
-    for i in range(prev_line_number + 1, line_number):
+    for i in range(prev_line_number - 1, line_number):
         line = file_lines[i]
         result = result + '%8d %s' % (i + 1, line)
         for i in range(0, len(line) - 1):
