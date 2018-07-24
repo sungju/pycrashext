@@ -1,14 +1,31 @@
 #!/bin/bash
 
+unamestr=`uname`
+versionstr=`uname -r`
+
+
+howto_install() {
+	if [[ "$unamestr" == 'Linux' ]]; then
+		if echo "$versionstr" | grep -q ".el"; then
+			echo "$ yum install python-virtualenv python2-pip python34-pip python";
+		else
+			echo "Please check your distributor for the below commands";
+			echo "python, virtualenv, pip";
+		fi
+	elif [[ "$unamestr" == 'Darwin' ]]; then
+		echo "$ brew install python pyenv-virtualenv pyenv-virtualenvwrapper";
+		echo "$ sudo easy_install pip";
+	fi
+}
+
 usage() {
 	echo 
 	echo "To run this server as a standalone, you need to have"
 	echo "the below commands installed."
 	echo
-	echo "python"
-	echo "virtualenv"
-	echo "pip"
+	echo "python, virtualenv, pip"
 	echo
+	howto_install
 }
 
 if [ -z $RHEL_SOURCE_DIR ] || [ $RHEL_SOURCE_DIR == "" ]; then
@@ -35,4 +52,4 @@ virtualenv .  >/dev/null 2>&1 || { usage; exit -2; }
 source bin/activate
 pip install -r requirements.txt  >/dev/null 2>&1 || { usage; exit -3; }
 
-python app.py || { usage; exit -4; }
+python app.py 
