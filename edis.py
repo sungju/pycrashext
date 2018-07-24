@@ -51,6 +51,8 @@ def get_kernel_version():
 
 
 asm_color_dict = {}
+arg_color_dict = {}
+
 operand_color = crashcolor.YELLOW
 
 def get_colored_asm(asm_op):
@@ -62,9 +64,19 @@ def get_colored_asm(asm_op):
 
     return None
 
+def get_colored_arg(opvalue):
+    global arg_color_dict
+
+    for reg in arg_color_dict:
+        if opvalue.find(reg) >= 0:
+            return arg_color_dict[reg]
+
+    return None
+
 
 def set_asm_colors():
     global asm_color_dict
+    global arg_color_dict
 
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
@@ -73,6 +85,14 @@ def set_asm_colors():
             "j" : crashcolor.BLUE | crashcolor.BOLD,
             "mov" : crashcolor.GREEN,
             "push" : crashcolor.CYAN | crashcolor.UNDERLINE,
+        }
+        arg_color_dict = {
+            "di" : crashcolor.UNDERLINE | crashcolor.GREEN,
+            "si" : crashcolor.UNDERLINE | crashcolor.YELLOW,
+            "dx" : crashcolor.UNDERLINE | crashcolor.MAGENTA,
+            "cx" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r8" : crashcolor.UNDERLINE | crashcolor.LIGHTGRAY,
+            "r9" : crashcolor.UNDERLINE | crashcolor.RED,
         }
     if (sys_info.machine.startswith("arm")):
         asm_color_dict = {
@@ -84,6 +104,7 @@ def set_asm_colors():
             "bl" : crshcolor.BLUE | crashcolor.BOLD,
             "b" : crashcolor.CYAN | crashcolor.BOLD,
         }
+
 
 def disasm(ins_addr, o, args, cmd_path_list):
     global asm_color_dict
@@ -199,10 +220,41 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
             idx = line.find(words[2])
             print(line[:idx], end='')
-            crashcolor.set_color(color_str)
+            if color_str != None:
+                crashcolor.set_color(color_str)
             print(line[idx:idx+len(words[2])], end='')
-            crashcolor.set_color(operand_color)
-            print(line[idx+len(words[2]):])
+            if color_str != None:
+                crashcolor.set_color(operand_color)
+            if len(words) >= 4: # Not handling callq or jmp.
+                print(line[idx+len(words[2]):line.find(words[3])],
+                     end='')
+                idx = line.find(words[3])
+                op_list = words[3].split(",")
+                for i in range(0, len(op_list)):
+                    opval = op_list[i]
+                    color_str = get_colored_arg(opval)
+                    if color_str == None:
+                        crashcolor.set_color(crashcolor.RESET)
+                    else:
+                        crashcolor.set_color(color_str)
+                    if i < len(op_list) - 1:
+                        next_idx = line.find(op_list[i + 1])
+                    else:
+                        next_idx = idx + len(opval)
+                    print(line[idx:next_idx], end='')
+                    if color_str == None:
+                        crashcolor.set_color(crashcolor.RESET)
+                    else:
+                        crashcolor.set_color(operand_color)
+                    idx = next_idx
+                if len(words) > 4:
+                    crashcolor.set_color(crashcolor.RESET)
+                    idx = line.find(words[3])
+                    print(line[idx+len(words[3]):])
+                else:
+                    print()
+            else:
+                print(line[idx+len(words[2]):])
             crashcolor.set_color(crashcolor.RESET)
         else:
             print(line)
