@@ -87,12 +87,12 @@ def set_asm_colors():
             "push" : crashcolor.CYAN | crashcolor.UNDERLINE,
         }
         arg_color_dict = {
-            "di" : crashcolor.UNDERLINE | crashcolor.GREEN,
-            "si" : crashcolor.UNDERLINE | crashcolor.YELLOW,
-            "dx" : crashcolor.UNDERLINE | crashcolor.MAGENTA,
+            "di" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "si" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "dx" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "cx" : crashcolor.UNDERLINE | crashcolor.CYAN,
-            "r8" : crashcolor.UNDERLINE | crashcolor.LIGHTGRAY,
-            "r9" : crashcolor.UNDERLINE | crashcolor.RED,
+            "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
     if (sys_info.machine.startswith("arm")):
         asm_color_dict = {
