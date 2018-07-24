@@ -230,6 +230,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                      end='')
                 idx = line.find(words[3])
                 op_list = words[3].split(",")
+                line = line[idx:]
                 for i in range(0, len(op_list)):
                     opval = op_list[i]
                     color_str = get_colored_arg(opval)
@@ -238,21 +239,18 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     else:
                         crashcolor.set_color(color_str)
                     if i < len(op_list) - 1:
-                        next_idx = line.find(op_list[i + 1])
+                        next_idx = line.find(op_list[i + 1], len(opval))
                     else:
-                        next_idx = idx + len(opval)
-                    print(line[idx:next_idx], end='')
+                        next_idx = len(opval)
+                    print(line[:next_idx], end='')
                     if color_str == None:
                         crashcolor.set_color(crashcolor.RESET)
                     else:
                         crashcolor.set_color(operand_color)
-                    idx = next_idx
-                if len(words) > 4:
-                    crashcolor.set_color(crashcolor.RESET)
-                    idx = line.find(words[3])
-                    print(line[idx+len(words[3]):])
-                else:
-                    print()
+                    line = line[next_idx:]
+
+                crashcolor.set_color(crashcolor.RESET)
+                print(line)
             else:
                 print(line[idx+len(words[2]):])
             crashcolor.set_color(crashcolor.RESET)
