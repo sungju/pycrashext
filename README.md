@@ -15,6 +15,30 @@ $ logout
 
 ## Commands ##
 
+### syscallinfo ###
+Shows system call list and can check for any modifications.
+
+```
+crash> syscallinfo 
+  0 ffffffff8119a660 (T) sys_read                  fs/read_write.c: 435
+  1 ffffffff8119a710 (T) sys_write                 fs/read_write.c: 453
+  2 ffffffff81196aa0 (T) sys_open                  fs/open.c: 922
+  3 ffffffffa0540960 (t) efab_linux_trampoline_close [onload]
+  4 ffffffff8119fa20 (T) sys_newstat               fs/stat.c: 242
+  5 ffffffff8119fb20 (T) sys_newfstat              fs/stat.c: 278
+...
+
+crash> syscallinfo --check
+  3 ffffffffa0540960 (t) efab_linux_trampoline_close [onload] 
+ 13 ffffffffa051f720 (t) efab_linux_trampoline_sigaction [onload] 
+ 14 ffffffff810a06c0 (T) sys_rt_sigprocmask        kernel/signal.c: 2614
+	callq  0xffffffff816bda00 <ftrace_regs_caller>
+231 ffffffffa051e9c0 (t) efab_linux_trampoline_exit_group [onload] 
+===========================================================================
+3 system calls were replaced
+1 system calls were modified
+```
+
 ### pstree ###
 It prints out process list in tree format.
 
