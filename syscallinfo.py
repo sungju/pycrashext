@@ -65,7 +65,10 @@ def check_syscall_table(options):
             if len(dis_words) >= 4 and dis_words[2].strip() in invalid_start_list:
                 trap_call_no = trap_call_no + 1
                 crashcolor.set_color(crashcolor.BLUE)
-                print("%3d %s %s %-25s %s" % (idx, words[0], words[1], words[2], filepath))
+                print("%3d %s %s %-25s %s" %
+                      (idx, words[0], words[1], words[2], filepath))
+                print("\t%s" % (dis_result[dis_result.find(dis_words[2]):]),
+                      end='')
 
         crashcolor.set_color(crashcolor.RESET)
 
