@@ -41,9 +41,9 @@ def set_invalid_start_list():
     if (arch in ("x86_64", "i386", "i686", "athlon")):
         invalid_start_list = [ "jmp", "callq" ]
     elif (sys_info.machine.startswith("arm")):
-        invalid_start_list = [ "jmp", "callq" ]
+        invalid_start_list = [ "b", "bl" ]
     elif (sys_info.machine.startswith("ppc")):
-        invalid_start_list = [ "jmp", "callq" ]
+        invalid_start_list = [ "b", "bl" ]
 
 
 def check_syscall_table(options):
