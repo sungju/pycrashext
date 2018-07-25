@@ -1,7 +1,7 @@
 # pycrashext
 Crash extensions for Pykdump. This requires pykdump loaded before use. You can find pykdump binary at [https://sourceforge.net/projects/pykdump/](https://sourceforge.net/projects/pykdump/).
 
-![edis -lrg](https://github.com/sungju/pycrashext/docs/edis_example.png)
+![edis -lrg](https://github.com/sungju/pycrashext/blob/master/docs/edis_example.png)
 
 ### How to install
 
