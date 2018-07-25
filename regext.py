@@ -207,3 +207,12 @@ rprog("edis", "Enhanced disasm",
       "-h       - list available options",
       help)
 
+
+heop = '''
+system call table checking
+'''
+
+rprog("syscallinfo", "System call table checking",
+      "-h       - list available options",
+      help)
+
