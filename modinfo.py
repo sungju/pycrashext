@@ -63,13 +63,22 @@ def module_info(options):
                       "MODULE_NAME",
                       "SIZE"))
 
+    tainted_count = 0
     for module in module_list:
-        if not is_our_module(module):
+        tainted = not is_our_module(module)
+        if options.shows_tainted and not tainted:
+            continue
+        if tainted:
+            tainted_count = tainted_count + 1
             crashcolor.set_color(crashcolor.LIGHTRED)
         print("0x%x %-25s %10d" % (long(module),
                                  module.name,
                                  module.core_size))
         crashcolor.set_color(crashcolor.RESET)
+
+    if tainted_count > 0:
+        print("=" * 75)
+        print("There are %d tainted modules" % (tainted_count))
 
 
 def find_module(module_name):
@@ -194,6 +203,9 @@ def modinfo():
     op.add_option("--details", dest="module_detail", default=None,
                   action="store", type="string",
                   help="Show details")
+    op.add_option("-t", dest="shows_tainted", default=False,
+                  action="store_true",
+                  help="Shows tainted modules only")
 
     (o, args) = op.parse_args()
 
