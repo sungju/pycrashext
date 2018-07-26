@@ -16,7 +16,11 @@ pattern = re.compile(r"(.+)/linux-(?P<releaseversion>[^/]+)/(?P<filepath>.*)")
 def get_file_path(words):
     if len(words) >= 4 and words[3].startswith("/"):
         m = pattern.search(words[3])
-        filepath = m.group('filepath') + " " + words[4]
+        filepath = m.group('filepath')
+        if len(words) > 4:
+            filepath = filepath + " " + words[4]
+    elif len(words) == 3:
+        filepath = ""
     else:
         filepath = words[3]
         crashcolor.set_color(crashcolor.LIGHTRED)
@@ -33,6 +37,17 @@ def show_syscall_table(options):
 
         print("%3d %s %s %-25s %s" % (idx, words[0], words[1], words[2], filepath))
         crashcolor.set_color(crashcolor.RESET)
+
+
+def show_syscall_details(options):
+    sys_call_table = readSymbol("sys_call_table")
+    if options.syscall_no >= len(sys_call_table):
+        print("Invalid system call number %d.  Available range is %d~%d" %
+              (options.syscall_no, 0, len(sys_call_table) - 1))
+        return
+
+    pass
+
 
 invalid_start_list = [ "jmp", "callq" ]
 
@@ -55,7 +70,7 @@ def check_syscall_table(options):
         result = exec_crash_command("sym 0x%x" % sys_call_table[idx])
         words = result.split()
         filepath = get_file_path(words)
-        if len(words) == 4:
+        if len(words) == 4 and not words[3].startswith("/"):
             hook_call_no = hook_call_no + 1
             crashcolor.set_color(crashcolor.LIGHTRED)
             print("%3d %s"  % (idx, result), end='')
@@ -74,11 +89,13 @@ def check_syscall_table(options):
 
     if hook_call_no > 0 or trap_call_no > 0:
         print("=" * 75)
-    if hook_call_no > 0:
-        print("%d system calls were replaced" % hook_call_no)
+        if hook_call_no > 0:
+            print("%d system calls were replaced" % hook_call_no)
 
-    if trap_call_no > 0:
-        print("%d system calls were modified" % trap_call_no)
+        if trap_call_no > 0:
+            print("%d system calls were modified" % trap_call_no)
+    else:
+        print("No issues detected")
 
 
 def syscallinfo():
@@ -87,11 +104,19 @@ def syscallinfo():
                   action="store_true",
                   help="Check for any modifications in syscall table")
 
+    op.add_option("-n", dest="syscall_no", default=-1,
+                  type="int", action="store",
+                  help="Shows detailed information for a specific syscall no")
+
     (o, args) = op.parse_args()
 
     if (o.syscall_check):
         check_syscall_table(o)
-        sys.exit(0);
+        sys.exit(0)
+
+    if (o.syscall_no > -1):
+        show_syscall_details(o)
+        sys.exit(0)
 
     show_syscall_table(o)
 
