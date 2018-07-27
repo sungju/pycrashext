@@ -16,25 +16,7 @@ from os.path import expanduser
 import time
 
 import crashcolor
-
-
-def run_gdb_command(command):
-    """exec_gdb_command() is failing to capture the output
-    if the command is with '!' which is important to execute
-    shell commands. Below will capture it properly."""
-    temp_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-edis")
-    command = command + " > " + temp_name
-    exec_gdb_command(command)
-    lines = ""
-    if os.path.exists(temp_name):
-        with open(temp_name, 'r') as f:
-            try:
-                lines = "".join(f.readlines())
-            except:
-                lines = "Failed to read " + temp_name
-
-    os.remove(temp_name)
-    return lines
+import crashhelper
 
 
 def get_kernel_version():
@@ -171,8 +153,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
         print (disasm_str)
         return
 
-    result_str = run_gdb_command("!echo '%s' | python %s %s" % \
-                                  (disasm_str, disasm_path, cmd_options))
+    result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
+                                        (disasm_str, disasm_path, cmd_options))
 
 
     set_asm_colors()
