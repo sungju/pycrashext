@@ -96,12 +96,12 @@ def set_asm_colors():
         }
     if (sys_info.machine.startswith("arm")):
         asm_color_dict = {
-            "bl" : crshcolor.BLUE | crashcolor.BOLD,
+            "bl" : crashcolor.BLUE | crashcolor.BOLD,
             "b" : crashcolor.CYAN | crashcolor.BOLD,
         }
     if (sys_info.machine.startswith("ppc")):
         asm_color_dict = {
-            "bl" : crshcolor.BLUE | crashcolor.BOLD,
+            "bl" : crashcolor.BLUE | crashcolor.BOLD,
             "b" : crashcolor.CYAN | crashcolor.BOLD,
         }
 
@@ -218,7 +218,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 print(line)
                 continue
 
-            idx = line.find(words[2])
+            idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
             print(line[:idx], end='')
             if color_str != None:
                 crashcolor.set_color(color_str)
