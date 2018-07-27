@@ -94,15 +94,25 @@ def set_asm_colors():
             "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    if (sys_info.machine.startswith("arm")):
+    if (arch.startswith("arm")):
         asm_color_dict = {
             "bl" : crashcolor.BLUE | crashcolor.BOLD,
             "b" : crashcolor.CYAN | crashcolor.BOLD,
         }
-    if (sys_info.machine.startswith("ppc")):
+    if (arch.startswith("ppc")):
         asm_color_dict = {
             "bl" : crashcolor.BLUE | crashcolor.BOLD,
             "b" : crashcolor.CYAN | crashcolor.BOLD,
+        }
+        arg_color_dict = {
+            "r3" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r4" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r5" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r6" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r7" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r10" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
 
 
@@ -214,10 +224,6 @@ def disasm(ins_addr, o, args, cmd_path_list):
         words = line.split()
         if len(words) > 2:
             color_str = get_colored_asm(words[2].strip())
-            if color_str == None:
-                print(line)
-                continue
-
             idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
             print(line[:idx], end='')
             if color_str != None:
