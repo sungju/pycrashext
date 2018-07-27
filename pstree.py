@@ -60,19 +60,32 @@ EXIT_ZOMBIE = 16
 EXIT_DEAD = 32
 TASK_DEAD = 64
 
-task_state_color_list = {
-    TASK_RUNNING : crashcolor.BLUE,
-    TASK_INTERRUPTIBLE : crashcolor.RESET,
-    TASK_UNINTERRUPTIBLE : crashcolor.RED,
-    __TASK_STOPPED : crashcolor.CYAN,
-    __TASK_TRACED : crashcolor.MAGENTA,
-    EXIT_ZOMBIE : crashcolor.YELLOW,
-    EXIT_DEAD : crashcolor.LIGHTRED,
-    TASK_DEAD : crashcolor.LIGHTRED,
-}
+def task_state_color(state):
+    if isinstance(state, int):
+        state = state & 0x7f
+
+    return {
+        TASK_RUNNING : crashcolor.BLUE,
+        TASK_INTERRUPTIBLE : crashcolor.RESET,
+        TASK_UNINTERRUPTIBLE : crashcolor.RED,
+        __TASK_STOPPED : crashcolor.CYAN,
+        __TASK_TRACED : crashcolor.MAGENTA,
+        EXIT_ZOMBIE : crashcolor.YELLOW,
+        EXIT_DEAD : crashcolor.LIGHTRED,
+        TASK_DEAD : crashcolor.LIGHTRED,
+        "TASK_RUNNING" : crashcolor.BLUE,
+        "TASK_INTERRUPTIBLE" : crashcolor.RESET,
+        "TASK_UNINTERRUPTIBLE" : crashcolor.RED,
+        "TASK_STOPPED" : crashcolor.CYAN,
+        "TASK_ZOMBIE" : crashcolor.YELLOW,
+        "TASK_DEAD" : crashcolor.LIGHTRED,
+    }[state]
 
 
-def task_status_str(status):
+def task_state_str(state):
+    if isinstance(state, int):
+        state = state & 0x7f
+
     return {
         TASK_RUNNING: "RU",
         TASK_INTERRUPTIBLE: "IN",
@@ -88,7 +101,7 @@ def task_status_str(status):
         "TASK_STOPPED" : "ST",
         "TASK_ZOMBIE" : "ZO",
         "TASK_DEAD" : "DE",
-    }[status]
+    }[state]
 
 
 def print_branch(depth, first):
@@ -138,14 +151,13 @@ def print_task(task, depth, first, options):
     if (task.comm != 0):
         comm_str = task.comm
 
-    if (task.state & 0xff) in task_state_color_list:
-        crashcolor.set_color(task_state_color_list[task.state & 0xff])
+    crashcolor.set_color(task_state_color(task.state))
 
     print_str = ("%s%s%s%s " %
            (comm_str,
             "(" + str(task.pid) + ")"
                 if options.print_pid else "",
-            "[" + task_status_str(task.state) +"]"
+            "[" + task_state_str(task.state) +"]"
                 if options.print_state else "",
             thread_str))
     print ("%s" % (print_str), end='')
