@@ -515,12 +515,14 @@ def disasm():
     except:
         full_source = ""
 
+    error_str = ""
+
     result = set_kernel_version(asm_str)
     if result.startswith("FAIL"):
-        return result + "\n" + asm_str
+        error_str = error_str + result + "\n"
 
     if full_source != "":
-        return read_a_function(asm_str) # Read function and return
+        return error_str + read_a_function(asm_str) # Read function and return
 
 
     result = ""
@@ -529,16 +531,16 @@ def disasm():
     has_header = False
     for line in asm_lines:
         result = result + line + "\n"
-        if has_header == False:
+        if has_header == False and error_str == "":
             result = result + read_source_line(line, has_header)
             has_header = True
             continue
 
-        if  line.startswith("/"):
+        if  line.startswith("/") and error_str == "":
             source_line = read_source_line(line, has_header)
             result = result + source_line
 
     if jump_graph != "":
         result = draw_branches(result, jump_op_list)
 
-    return result.rstrip()
+    return error_str + result.rstrip()
