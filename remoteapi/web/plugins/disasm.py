@@ -517,7 +517,7 @@ def disasm():
 
     result = set_kernel_version(asm_str)
     if result.startswith("FAIL"):
-        return result
+        return result + "\n" + asm_str
 
     if full_source != "":
         return read_a_function(asm_str) # Read function and return
