@@ -96,13 +96,13 @@ def set_asm_colors():
         }
     if (arch.startswith("arm")):
         asm_color_dict = {
-            "bl" : crashcolor.BLUE | crashcolor.BOLD,
-            "b" : crashcolor.CYAN | crashcolor.BOLD,
+            "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "b" : crashcolor.BLUE | crashcolor.BOLD,
         }
     if (arch.startswith("ppc")):
         asm_color_dict = {
-            "bl" : crashcolor.BLUE | crashcolor.BOLD,
-            "b" : crashcolor.CYAN | crashcolor.BOLD,
+            "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "b" : crashcolor.BLUE | crashcolor.BOLD,
         }
         arg_color_dict = {
             "r3" : crashcolor.UNDERLINE | crashcolor.CYAN,
