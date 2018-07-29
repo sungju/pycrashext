@@ -280,8 +280,13 @@ def draw_branches(disasm_str, jump_op_list):
                     break
 
                 # Consider a situation that implies the jumping address
-                if len(words) > 3 and words[3] in asm_addr_dict:
-                    target_idx = asm_addr_dict[words[3]]
+                jmpaddr = ""
+                if len(words) > 3:
+                    jmp_op_words = words[3].split(",")
+                    jmpaddr = jmp_op_words[len(jmp_op_words) - 1]
+
+                if jmpaddr != "" and jmpaddr in asm_addr_dict:
+                    target_idx = asm_addr_dict[jmpaddr]
                 else:
                     target_idx = total_num
 
