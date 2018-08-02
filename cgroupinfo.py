@@ -63,8 +63,14 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         cgroup_name = "<default>"
         if (cgroup.dentry != 0):
             cgroup_name = dentry_to_filename(cgroup.dentry)
-        print ("%s%s%s at 0x%x" %
-               ("  " * idx, "+--" if idx > 0 else "", cgroup_name, cgroup))
+        if cgroup.count.counter == 0:
+            crashcolor.set_color(crashcolor.RED)
+        else:
+            crashcolor.set_color(crashcolor.RESET)
+
+        print ("%s%s%s at 0x%x (%d)" %
+               ("  " * idx, "+--" if idx > 0 else "",
+                cgroup_name, cgroup, cgroup.count.counter))
         if (cgroup.parent == 0):
             top_cgroup = cgroup
 
@@ -78,6 +84,8 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
 #            print ("")
         if (cgroup == top_cgroup):
             continue
+
+    crashcolor.set_color(crashcolor.RESET)
 
     return
 
