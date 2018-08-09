@@ -38,13 +38,20 @@ fi
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
 echo '' >> ~/.bash_profile
-echo "export PYKDUMPPATH=$PWD:\$PYKDUMPPATH" >> ~/.bash_profile
+INSTALL_PATH=`echo "$(cd "$(dirname "$0")"; pwd)"`
+echo "export PYKDUMPPATH=$INSTALL_PATH:\$PYKDUMPPATH" >> ~/.bash_profile
 echo " [DONE]"
 
 # Make it load the registeration code during crash start
 echo -n "Making it load the registeration code during crash start ..."
-echo '' >> ~/.crashrc
-echo "epython $PWD/regext.py" >> ~/.crashrc
+REG_COMMAND="epython $INSTALL_PATH/regext.py"
+                          
+grep "$REG_COMMAND" ~/.crashrc >/dev/null 2>&1
+if (( $? != 0 ))          
+then                      
+	echo '' >> ~/.crashrc
+	echo $REG_COMMAND >> ~/.crashrc
+fi
 echo " [DONE]"
 
 
