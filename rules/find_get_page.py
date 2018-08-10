@@ -28,7 +28,7 @@ def run_rule(sysinfo):
     result = exec_crash_command("log")
     idx = result.find("find_get_page+0x")
     if idx == -1:
-        return True
+        return 0
 
     print("=" * 75)
     crashcolor.set_color(crashcolor.LIGHTRED)
@@ -49,6 +49,8 @@ def run_rule(sysinfo):
     print("     Upgrade kernel to kernel-2.6.32-754.el6 or later version")
     crashcolor.set_color(crashcolor.RESET)
     print("-" * 75)
+
+    return 1
 
 def find_get_page():
     run_rule(None)

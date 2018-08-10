@@ -8,6 +8,8 @@ import sys
 import re
 import importlib
 
+import crashcolor
+
 modules = []
 sysinfo = {}
 
@@ -53,9 +55,20 @@ def run_rules():
     global modules
     global sysinfo
 
+    issue_count = 0
+
     for module in modules:
-        if module.run_rule(sysinfo) == False:
-            break # Let's not continue if it returns False
+        issue_count = issue_count + module.run_rule(sysinfo)
+
+    if issue_count > 0:
+        print("*" * 75)
+        crashcolor.set_color(crashcolor.RED | crashcolor.BLINK)
+        print("\tWARNING: %d issue%s detected" %
+              (issue_count, "s" if issue_count > 1 else ""))
+        crashcolor.set_color(crashcolor.RESET)
+        print("*" * 75)
+    else:
+        print("No issues detected")
 
 def autocheck():
     get_system_info()
