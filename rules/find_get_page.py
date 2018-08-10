@@ -13,8 +13,6 @@ import sys
 import ntpath
 import operator
 
-import crashcolor
-
 def add_rule(sysinfo):
     if sysinfo is None or "RELEASE" not in sysinfo:
         return True
@@ -28,29 +26,19 @@ def run_rule(sysinfo):
     result = exec_crash_command("log")
     idx = result.find("find_get_page+0x")
     if idx == -1:
-        return 0
+        return None
 
-    print("=" * 75)
-    crashcolor.set_color(crashcolor.LIGHTRED)
-    print("!!! Known BUG on this system detected by %s !!!" % ntpath.basename(__file__))
-    crashcolor.set_color(crashcolor.RESET)
-    print("-" * 75)
+    result_dict = {}
+    result_dict["TITLE"] = "find_get_page() softlockup BZ detected by %s" % \
+                            ntpath.basename(__file__)
     startidx = max(idx - 380, 0)
     endidx = min(idx + 800, len(result))
-    print(result[startidx:endidx])
-    print("-" * 75)
-    print("KCS:")
-    print("     softlockup in find_get_pages after installing kernel-2.6.32-696.23.1")
-    crashcolor.set_color(crashcolor.BLUE)
-    print("     https://access.redhat.com/solutions/3390081")
-    crashcolor.set_color(crashcolor.RESET)
-    print("Resolution:")
-    crashcolor.set_color(crashcolor.RED)
-    print("     Upgrade kernel to kernel-2.6.32-754.el6 or later version")
-    crashcolor.set_color(crashcolor.RESET)
-    print("-" * 75)
+    result_dict["MSG"] = result[startidx:endidx]
+    result_dict["KCS_TITLE"] = "softlockup in find_get_pages after installing kernel-2.6.32-696.23.1"
+    result_dict["KCS_URL"] = "https://access.redhat.com/solutions/3390081"
+    result_dict["RESOLUTION"] = "Upgrade kernel to kernel-2.6.32-754.el6 or later version"
 
-    return 1
+    return [result_dict]
 
 def find_get_page():
     run_rule(None)

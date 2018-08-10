@@ -51,6 +51,44 @@ def load_rules():
     return modules
 
 
+def print_result(result_list):
+    for result_dict in result_list:
+        print("=" * 75)
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        if "TITLE" in result_dict:
+            print("ISSUE: %s" % result_dict["TITLE"])
+        else:
+            print("No title given")
+        crashcolor.set_color(crashcolor.RESET)
+        print("-" * 75)
+        if "MSG" in result_dict:
+            print(result_dict["MSG"])
+        else:
+            print("No message given")
+        print("-" * 75)
+
+        print("KCS:")
+        if "KCS_TITLE" in result_dict:
+            print("\t%s" % result_dict["KCS_TITLE"])
+        else:
+            print("\tNo subject for KCS")
+        crashcolor.set_color(crashcolor.BLUE)
+        if "KCS_URL" in result_dict:
+            print("\t%s" % result_dict["KCS_URL"])
+        else:
+            print("\tNo URL for KCS")
+        crashcolor.set_color(crashcolor.RESET)
+
+        print("Resolution:")
+        crashcolor.set_color(crashcolor.RED)
+        if "RESOLUTION" in result_dict:
+            print("\t%s" % result_dict["RESOLUTION"])
+        else:
+            print("\tNo resolution given")
+        crashcolor.set_color(crashcolor.RESET)
+        print("-" * 75)
+
+
 def run_rules():
     global modules
     global sysinfo
@@ -58,7 +96,10 @@ def run_rules():
     issue_count = 0
 
     for module in modules:
-        issue_count = issue_count + module.run_rule(sysinfo)
+        result_list = module.run_rule(sysinfo)
+        if result_list != None:
+            issue_count = issue_count + len(result_list)
+            print_result(result_list)
 
     if issue_count > 0:
         print("*" * 75)
