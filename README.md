@@ -15,6 +15,68 @@ $ logout
 
 ## Commands ##
 
+### autocheck ###
+It runs rules implemented under ./rules directory which will try to detect any known issues.
+
+```
+crash> autocheck
+===========================================================================
+ISSUE: find_get_page() softlockup BZ detected by find_get_page.py
+---------------------------------------------------------------------------
+ll_after_swapgs+0x156/0x220
+ [<ffffffff815576d6>] ? system_call_fastpath+0x16/0x1b
+ [<ffffffff8155756a>] ? system_call_after_swapgs+0xca/0x220
+Code: d0 48 3b 34 c5 20 11 c2 81 77 3c 8d 0c 52 8d 4c 09 fa eb 09 66 0f 1f 44 00 00 83 e9 06 48 89 f0 48 d3 e8 83 e0 3f 48 8d 44 c7 18 <48> 8b 38 48 85 ff 74 14 83 ea 01 75 e2 c9 c3 0f 1f 84 00 00 00 
+Call Trace:
+ [<ffffffff8112ed5e>] ? find_get_page+0x1e/0xa0
+ [<ffffffff8113097c>] ? generic_file_aio_read+0x24c/0x700
+ [<ffffffff8119a6ba>] ? do_sync_read+0xfa/0x140
+ [<ffffffff810a7280>] ? autoremove_wake_function+0x0/0x40
+ [<ffffffff81248d1b>] ? selinux_file_permission+0xfb/0x150
+ [<ffffffff8123b9c6>] ? security_file_permission+0x16/0x20
+ [<ffffffff8119afb5>] ? vfs_read+0xb5/0x1a0
+ [<ffffffff8119bd76>] ? fget_light_pos+0x16/0x50
+ [<ffffffff81557627>] ? system_call_after_swapgs+0x187/0x220
+ [<ffffffff8119b301>] ? sys_read+0x51/0xb0
+ [<ffffffff815575fd>] ? system_call_after_swapgs+0x15d/0x220
+ [<ffffffff815575f6>] ? system_call_after_swapgs+0x156/0x220
+ [<ffffffff815576d6>] ? system_call_fastpath+0x16/0x1b
+ [<ffffffff8155756a>] ? system_call_after_swapgs+0xca/0x220
+BUG: soft lockup - CPU#1 stuck for 67s! [bpbkar:1837]
+Module
+---------------------------------------------------------------------------
+KCS:
+	softlockup in find_get_pages after installing kernel-2.6.32-696.23.1
+	https://access.redhat.com/solutions/3390081
+Resolution:
+	Upgrade kernel to kernel-2.6.32-754.el6 or later version
+---------------------------------------------------------------------------
+***************************************************************************
+	WARNING: 1 issue detected
+***************************************************************************
+```
+
+- The rules can be implemented by having below two functions.
+
+```
+def add_rule(sysinfo):
+	# Check if the rule can be applied on this vmcore
+	# sysinfo is the output of 'sys' which can be used
+	# to check kernel version/architecutre and panic message
+	pass
+	
+def run_rule(sysinfo):
+	# Actual checking is happening here
+	# The result will be a list of dictionary
+	# Each dictionary should contains the below key/value pairs
+	"TITLE" : "title message"
+	"MSG" : "Usually can be a proof message"
+	"KCS_TITLE" : "Related article title"
+	"KCS_URL" : "Related article URL"
+	"RESOLUTION" : "Resolution message"
+	pass
+```
+
 ### syscallinfo ###
 Shows system call list and can check for any modifications.
 
