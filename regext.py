@@ -208,11 +208,20 @@ rprog("edis", "Enhanced disasm",
       help)
 
 
-heop = '''
+help = '''
 system call table checking
 '''
 
 rprog("syscallinfo", "System call table checking",
+      "-h       - list available options",
+      help)
+
+
+help = '''
+Diagnose some known issues automatically
+'''
+
+rprog("autocheck", "Diagnose some known issues",
       "-h       - list available options",
       help)
 
