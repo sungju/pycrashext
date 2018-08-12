@@ -45,9 +45,13 @@ def load_rules():
     importlib.import_module('rules')
     for rule in rules:
         if not rule.startswith('.__'):
-            new_module = importlib.import_module(rule, package="rules")
-            if new_module.add_rule(sysinfo) == True:
-               modules.append(new_module)
+            try:
+                new_module = importlib.import_module(rule, package="rules")
+                if new_module.add_rule(sysinfo) == True:
+                   modules.append(new_module)
+            except:
+                print("Error in adding rule %s" % (rule))
+
     return modules
 
 
@@ -96,10 +100,13 @@ def run_rules():
     issue_count = 0
 
     for module in modules:
-        result_list = module.run_rule(sysinfo)
-        if result_list != None:
-            issue_count = issue_count + len(result_list)
-            print_result(result_list)
+        try:
+            result_list = module.run_rule(sysinfo)
+            if result_list != None:
+                issue_count = issue_count + len(result_list)
+                print_result(result_list)
+        except:
+            print("Error running rule %s" % (module))
 
     if issue_count > 0:
         print("*" * 75)
