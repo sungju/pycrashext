@@ -189,7 +189,7 @@ def show_task_group():
         if (cgroup == 0):
             continue
         count = count + 1
-        cgroup_name = "<default>"
+        cgroup_name = ""
         cgroup_counter = 0
         if member_offset("struct cgroup", "dentry") > -1:
             if (cgroup.dentry != 0):
@@ -198,6 +198,9 @@ def show_task_group():
         elif member_offset("struct cgroup", "kn") > -1:
             cgroup_name = cgroup.kn.name
             cgroup_counter = cgroup.kn.count
+
+        if cgroup_name == "":
+            cgroup_name = "<default>"
 
         if cgroup_counter == 0:
             crashcolor.set_color(crashcolor.RED)
