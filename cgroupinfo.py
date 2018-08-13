@@ -11,6 +11,9 @@ from optparse import OptionParser
 
 import crashcolor
 
+empty_count = 0
+cgroup_count = 0
+
 def dentry_to_filename (dentry) :
     if (dentry == 0):
         return "<>"
@@ -25,6 +28,9 @@ def dentry_to_filename (dentry) :
         return "<invalid>"
 
 def show_cgroup_tree():
+    global cgroup_count
+    global empty_count
+
     rootnode = readSymbol("rootnode")
     if (rootnode == 0):
         return
@@ -45,12 +51,22 @@ def show_cgroup_tree():
     sys.setrecursionlimit(1000)
     print_cgroup_entry(top_cgroup, top_cgroup, 0)
     sys.setrecursionlimit(curlimit)
+    print ("-" * 70)
+    crashcolor.set_color(crashcolor.BLUE)
+    print ("Total number of cgroup(s) = %d, %d had 0 count" %
+           (cgroup_count, empty_count))
+    crashcolor.set_color(crashcolor.RESET)
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
+    global empty_count
+    global cgroup_count
+
     if (idx > 0 and top_cgroup == cur_cgroup):
         return
     if (cur_cgroup == 0):
         return
+
+    e_count = 0
     for css_addr in cur_cgroup.subsys:
         if (css_addr == 0):
             continue
@@ -65,6 +81,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
             cgroup_name = dentry_to_filename(cgroup.dentry)
         if cgroup.count.counter == 0:
             crashcolor.set_color(crashcolor.RED)
+            e_count = 1
         else:
             crashcolor.set_color(crashcolor.RESET)
 
@@ -85,13 +102,20 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         if (cgroup == top_cgroup):
             continue
 
+
+    cgroup_count = cgroup_count + 1
+    empty_count = empty_count + e_count
+
     crashcolor.set_color(crashcolor.RESET)
 
     return
 
 
 def show_task_group():
+    global empty_count
+
     count = 0
+    empty_count = 0
     for task_group in readSUListFromHead(sym2addr('task_groups'),
                                          'list', 'struct task_group'):
         css = readSU('struct cgroup_subsys_state', task_group.css)
@@ -106,17 +130,30 @@ def show_task_group():
         cgroup_name = "<default>"
         if (cgroup.dentry != 0):
             cgroup_name = dentry_to_filename(cgroup.dentry)
-        print ("task_group = 0x%16x, cgroup = 0x%16x\n\t(%s)" %
-                (task_group, cgroup, cgroup_name))
+
+        if cgroup.count.counter == 0:
+            crashcolor.set_color(crashcolor.RED)
+            empty_count = empty_count + 1
+        else:
+            crashcolor.set_color(crashcolor.RESET)
+
+        print ("task_group = 0x%16x, cgroup = 0x%16x, counter=%d\n\t(%s)" %
+                (task_group, cgroup, cgroup.count.counter, cgroup_name))
+
+        crashcolor.set_color(crashcolor.RESET)
 
     print ("-" * 70)
     crashcolor.set_color(crashcolor.BLUE)
-    print ("Total number of task_group(s) = %d" % (count))
+    print ("Total number of task_group(s) = %d, %d had 0 count" %
+           (count, empty_count))
     crashcolor.set_color(crashcolor.RESET)
 
 
 
 def cgroupinfo():
+    global empty_count
+    global cgroup_count
+
     op = OptionParser()
     op.add_option("--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
@@ -127,6 +164,9 @@ def cgroupinfo():
                   help="hierarchial display of cgroups")
 
     (o, args) = op.parse_args()
+
+    cgroup_count = 0
+    empty_count = 0
 
     if (o.taskgroup_list):
         show_task_group()
