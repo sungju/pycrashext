@@ -31,9 +31,22 @@ def show_cgroup_tree():
     global cgroup_count
     global empty_count
 
-    rootnode = readSymbol("rootnode")
-    if (rootnode == 0):
+    try:
+        rootnode = readSymbol("rootnode")
+        show_cgroup_tree_from_rootnode(rootnode)
         return
+    except:
+        pass
+
+    try:
+        cgroup_roots = readSymbol("cgroup_roots")
+        show_cgroup_tree_from_cgroup_roots(cgroup_roots)
+        return
+    except:
+        pass
+
+
+def show_cgroup_tree_from_rootnode(rootnode):
     crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup subsystems **")
     crashcolor.set_color(crashcolor.RESET)
@@ -57,6 +70,23 @@ def show_cgroup_tree():
            (cgroup_count, empty_count))
     crashcolor.set_color(crashcolor.RESET)
 
+
+def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
+    crashcolor.set_color(crashcolor.BLUE)
+    print ("** cgroup tree **")
+    crashcolor.set_color(crashcolor.RESET)
+    for cgroup_root in readSUListFromHead(cgroup_roots,
+                                          'root_list',
+                                          'struct cgroup_root'):
+        top_cgroup = cgroup_root.cgrp
+        print_cgroup_entry(top_cgroup, top_cgroup, 0)
+        print ("-" * 70)
+        crashcolor.set_color(crashcolor.BLUE)
+        print ("Total number of cgroup(s) = %d, %d had 0 count" %
+               (cgroup_count, empty_count))
+        crashcolor.set_color(crashcolor.RESET)
+
+
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
     global empty_count
     global cgroup_count
@@ -76,7 +106,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         if (subsys.cgroup == 0):
             continue
         cgroup = subsys.cgroup
-        cgroup_name = "<default>"
+        cgroup_name = ""
         cgroup_counter = 0
         if member_offset("struct cgroup", "dentry") > -1:
             if (cgroup.dentry != 0):
@@ -84,7 +114,10 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
             cgroup_counter = cgroup.count.counter
         elif member_offset("struct cgroup", "kn") > -1:
             cgroup_name = cgroup.kn.name
-            cgroup_counter = cgroup.kn.count
+            cgroup_counter = cgroup.kn.count.counter
+
+        if cgroup_name == "":
+            cgroup_name = "<default>"
 
         if cgroup_counter == 0:
             crashcolor.set_color(crashcolor.RED)
