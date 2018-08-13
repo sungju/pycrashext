@@ -77,9 +77,16 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
             continue
         cgroup = subsys.cgroup
         cgroup_name = "<default>"
-        if (cgroup.dentry != 0):
-            cgroup_name = dentry_to_filename(cgroup.dentry)
-        if cgroup.count.counter == 0:
+        cgroup_counter = 0
+        if member_offset("struct cgroup", "dentry") > -1:
+            if (cgroup.dentry != 0):
+                cgroup_name = dentry_to_filename(cgroup.dentry)
+            cgroup_counter = cgroup.count.counter
+        elif member_offset("struct cgroup", "kn") > -1:
+            cgroup_name = cgroup.kn.name
+            cgroup_counter = cgroup.kn.count
+
+        if cgroup_counter == 0:
             crashcolor.set_color(crashcolor.RED)
             e_count = 1
         else:
@@ -87,7 +94,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
 
         print ("%s%s%s at 0x%x (%d)" %
                ("  " * idx, "+--" if idx > 0 else "",
-                cgroup_name, cgroup, cgroup.count.counter))
+                cgroup_name, cgroup, cgroup_counter))
         if (cgroup.parent == 0):
             top_cgroup = cgroup
 
@@ -128,17 +135,23 @@ def show_task_group():
             continue
         count = count + 1
         cgroup_name = "<default>"
-        if (cgroup.dentry != 0):
-            cgroup_name = dentry_to_filename(cgroup.dentry)
+        cgroup_counter = 0
+        if member_offset("struct cgroup", "dentry") > -1:
+            if (cgroup.dentry != 0):
+                cgroup_name = dentry_to_filename(cgroup.dentry)
+            cgroup_counter = cgroup.count.counter
+        elif member_offset("struct cgroup", "kn") > -1:
+            cgroup_name = cgroup.kn.name
+            cgroup_counter = cgroup.kn.count
 
-        if cgroup.count.counter == 0:
+        if cgroup_counter == 0:
             crashcolor.set_color(crashcolor.RED)
             empty_count = empty_count + 1
         else:
             crashcolor.set_color(crashcolor.RESET)
 
         print ("task_group = 0x%16x, cgroup = 0x%16x, counter=%d\n\t(%s)" %
-                (task_group, cgroup, cgroup.count.counter, cgroup_name))
+                (task_group, cgroup, cgroup_counter, cgroup_name))
 
         crashcolor.set_color(crashcolor.RESET)
 
