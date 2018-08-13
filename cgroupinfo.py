@@ -28,9 +28,6 @@ def dentry_to_filename (dentry) :
         return "<invalid>"
 
 def show_cgroup_tree():
-    global cgroup_count
-    global empty_count
-
     try:
         rootnode = readSymbol("rootnode")
         show_cgroup_tree_from_rootnode(rootnode)
@@ -47,6 +44,9 @@ def show_cgroup_tree():
 
 
 def show_cgroup_tree_from_rootnode(rootnode):
+    global empty_count
+    global cgroup_count
+
     crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup subsystems **")
     crashcolor.set_color(crashcolor.RESET)
@@ -72,6 +72,12 @@ def show_cgroup_tree_from_rootnode(rootnode):
 
 
 def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
+    global empty_count
+    global cgroup_count
+
+    empty_count = 0
+    cgroup_count = 0
+
     crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup tree **")
     crashcolor.set_color(crashcolor.RESET)
@@ -79,12 +85,16 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
                                           'root_list',
                                           'struct cgroup_root'):
         top_cgroup = cgroup_root.cgrp
+        curlimit = sys.getrecursionlimit()
+        sys.setrecursionlimit(1000)
         print_cgroup_entry(top_cgroup, top_cgroup, 0)
-        print ("-" * 70)
-        crashcolor.set_color(crashcolor.BLUE)
-        print ("Total number of cgroup(s) = %d, %d had 0 count" %
-               (cgroup_count, empty_count))
-        crashcolor.set_color(crashcolor.RESET)
+        sys.setrecursionlimit(curlimit)
+
+    print ("-" * 70)
+    crashcolor.set_color(crashcolor.BLUE)
+    print ("Total number of cgroup(s) = %d, %d had 0 count" %
+            (cgroup_count, empty_count))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
@@ -128,13 +138,25 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         print ("%s%s%s at 0x%x (%d)" %
                ("  " * idx, "+--" if idx > 0 else "",
                 cgroup_name, cgroup, cgroup_counter))
-        if (cgroup.parent == 0):
-            top_cgroup = cgroup
+#        if (cgroup.parent == 0):
+#            top_cgroup = cgroup
 
+        head_of_list = None
+        if member_offset("struct cgroup", "children") > -1:
+            head_of_list = cgroup.children
+            struct_name = "struct cgroup"
+        elif member_offset("struct cgroup_subsys_state", "children") > -1:
+            head_of_list = subsys.children
+            struct_name = "struct cgroup_subsys_state"
 
-        for childaddr in readSUListFromHead(cgroup.children,
-                                            'sibling', 'struct cgroup'):
-            cgroup = readSU('struct cgroup', childaddr)
+        for childaddr in readSUListFromHead(head_of_list,
+                                            'sibling', struct_name):
+            if struct_name == "struct cgroup":
+                cgroup = readSU(struct_name, childaddr)
+            else:
+                subsys_state = readSU(struct_name, childaddr)
+                cgroup = subsys_state.cgroup
+
             print_cgroup_entry(top_cgroup, cgroup, idx + 1)
 
 #        if (idx == 0):
@@ -183,7 +205,7 @@ def show_task_group():
         else:
             crashcolor.set_color(crashcolor.RESET)
 
-        print ("task_group = 0x%16x, cgroup = 0x%16x, counter=%d\n\t(%s)" %
+        print ("task_group = 0x%x, cgroup = 0x%x, counter=%d\n\t(%s)" %
                 (task_group, cgroup, cgroup_counter, cgroup_name))
 
         crashcolor.set_color(crashcolor.RESET)
