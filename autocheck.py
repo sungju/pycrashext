@@ -24,21 +24,25 @@ def get_system_info():
 
 def load_rules():
     global modules
+
+    cmd_path_list = os.environ["PYKDUMPPATH"]
+    path_list = cmd_path_list.split(':')
+    source_path = ""
+    for path in path_list:
+        try:
+            if os.path.exists(path + "/rules"):
+                source_path = path + "/rules"
+                load_rules_in_a_path(source_path)
+        except:
+            print ("Couldn't find %s/rules directory" % (path))
+
+    return modules
+
+def load_rules_in_a_path(source_path):
+    global modules
     global sysinfo
 
     pysearchre = re.compile('.py$', re.IGNORECASE)
-    try:
-        cmd_path_list = os.environ["PYKDUMPPATH"]
-        path_list = cmd_path_list.split(':')
-        source_path = ""
-        for path in path_list:
-            if os.path.exists(path + "/rules"):
-                source_path = path + "/rules"
-                break
-    except:
-        print ("Couldn't find ./rules directory")
-        return
-
     rulefiles = filter(pysearchre.search, os.listdir(source_path))
     form_module = lambda fp: '.' + os.path.splitext(fp)[0]
     rules = map(form_module, rulefiles)
@@ -51,8 +55,6 @@ def load_rules():
                    modules.append(new_module)
             except:
                 print("Error in adding rule %s" % (rule))
-
-    return modules
 
 
 def print_result(result_list):
