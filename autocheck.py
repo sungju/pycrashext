@@ -54,7 +54,10 @@ def show_rules_list():
         crashcolor.set_color(crashcolor.BLUE)
         print("[%s]" % (module.__name__), end='')
         crashcolor.set_color(crashcolor.RESET)
-        print(": %s" % (module.description()))
+        try:
+            print(": %s" % (module.description()))
+        except:
+            print(": No description available")
 
     print("-" * 75)
     print("There are %d rules available for this vmcore" % (count))
