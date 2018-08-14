@@ -16,6 +16,11 @@ import math
 
 import crashhelper
 
+
+def description():
+    return "Checking hung tasks"
+
+
 def add_rule(sysinfo):
     return True
 

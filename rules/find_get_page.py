@@ -13,6 +13,11 @@ import sys
 import ntpath
 import operator
 
+
+def description():
+    return "Checking find_get_page() bug in the system"
+
+
 def add_rule(sysinfo):
     if sysinfo is None or "RELEASE" not in sysinfo:
         return True

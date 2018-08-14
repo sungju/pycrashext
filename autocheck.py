@@ -3,6 +3,9 @@ Written by Daniel Sungju Kwon
 
 This is running extra rules to detect known issues.
 """
+from __future__ import print_function
+from __future__ import division
+
 import os
 import sys
 import re
@@ -37,6 +40,26 @@ def load_rules():
             print ("Couldn't find %s/rules directory" % (path))
 
     return modules
+
+def show_rules_list():
+    global modules
+
+    count = len(modules)
+    if count == 0:
+        print("No rules available for this vmcore")
+        return
+
+    print("-" * 75)
+    for module in modules:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("[%s]" % (module.__name__), end='')
+        crashcolor.set_color(crashcolor.RESET)
+        print(": %s" % (module.description()))
+
+    print("-" * 75)
+    print("There are %d rules available for this vmcore" % (count))
+    print("=" * 75)
+
 
 def load_rules_in_a_path(source_path):
     global modules
@@ -121,8 +144,22 @@ def run_rules():
         print("No issues detected")
 
 def autocheck():
+    op = OptionParser()
+
+    op.add_option("-l", "--list",
+                  action="store_true",
+                  dest="list",
+                  default=False,
+                  help="Shows the currently available rules")
+
+    (o, args) = op.parse_args()
     get_system_info()
     load_rules()
+
+    if o.list == True:
+        show_rules_list()
+        sys.exit(0)
+
     run_rules()
 
 
