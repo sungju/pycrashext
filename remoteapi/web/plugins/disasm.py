@@ -101,7 +101,7 @@ def is_function_header(a_line):
     if my_line is not None and len(my_line) > 0:
         return True, my_line[0];
 
-    my_line = re.findall(r"[a-zA-Z]*[ \n\t]*[a-zA-Z_][a-zA-Z0-9_]*[ \n\t]+[\*]?[a-zA-Z0-9_]+[ \n\t]*\(", a_line)
+    my_line = re.findall(r"[a-zA-Z]*[ \n\t]*[a-zA-Z_][a-zA-Z0-9_]*[ \n\t]+[\*]*[a-zA-Z0-9_]+[ \n\t]*\(", a_line)
     if my_line is None or len(my_line) == 0:
         return False, None;
 
