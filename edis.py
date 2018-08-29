@@ -153,8 +153,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
         print (disasm_str)
         return
 
-    result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
-                                        (disasm_str, disasm_path, cmd_options))
+    if (o.noaction):
+        result_str = disasm_str
+    else:
+        result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
+                                                (disasm_str, disasm_path, cmd_options))
 
 
     set_asm_colors()
@@ -284,6 +287,13 @@ def edis():
                   default="",
                   dest="jump_op_list",
                   help="Shows graph for the specified jump operations only")
+
+    op.add_option("-n", "--noaction",
+                  action="store_true",
+                  dest="noaction",
+                  default=False,
+                  help="Only colorising the output and not connection to server")
+
 
     (o, args) = op.parse_args()
     disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
