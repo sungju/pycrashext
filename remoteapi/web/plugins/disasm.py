@@ -61,17 +61,18 @@ def set_kernel_version(asm_str):
                                    stdout=subprocess.PIPE,
                                    stderr=subprocess.PIPE)
         result = process.wait()
-        out = process.stdout.read()
-        err = process.stderr.read()
+        out = b"".join(process.stdout.readlines())
+        err = b"".join(process.stderr.readlines())
         if err != None and \
-           (err.startswith("error:") or err.startswith("fatal:")):
-            return 'FAILED to git checkout\n' + err
+           (err.startswith(b"error:") or err.startswith(b"fatal:")):
+            return 'FAILED to git checkout\n' + err.decode("utf-8")
         cur_kernel_version = kernel_version
         cur_release_version = release_version.split("/")[0]
-    except:
+    except Exception as e:
         cur_kernel_version = ""
         cur_release_version = ""
-        return "FAILED to git checkout %s" % (kernel_version)
+        return "FAILED to git checkout %s" % (kernel_version) + str(e)
+
 
     return kernel_version
 
@@ -493,7 +494,7 @@ def disasm():
         return 'error getting asm_str data'
 
     try:
-        asm_str = base64.b64decode(asm_str)
+        asm_str = base64.b64decode(asm_str).decode("utf-8")
     except:
         return 'error found in base64'
 

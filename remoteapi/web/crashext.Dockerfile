@@ -9,9 +9,7 @@ LABEL maintainer dkwon@redhat.com
 MAINTAINER dkwon@redhat.com
 
 RUN apt-get update -y
-RUN apt-get install -y python-pip python-dev build-essential git
+RUN apt-get install -y python3 python3-pip python3-dev build-essential git-core python3-venv
 COPY . /app
 WORKDIR /app
-RUN pip install -r requirements.txt
-ENTRYPOINT ["python"]
-CMD ["app.py"]
+ENTRYPOINT ["/app/entrypoint.sh"]

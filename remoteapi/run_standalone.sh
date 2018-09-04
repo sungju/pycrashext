@@ -48,8 +48,4 @@ if [ -z $RHEL_SOURCE_DIR ] || [ $RHEL_SOURCE_DIR == "" ]; then
 fi
 
 cd web
-virtualenv .  >/dev/null 2>&1 || { usage; exit -2; }
-source bin/activate
-pip install -r requirements.txt  >/dev/null 2>&1 || { usage; exit -3; }
-
-python app.py 
+sh ./entrypoint.sh

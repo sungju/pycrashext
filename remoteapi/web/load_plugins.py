@@ -20,7 +20,10 @@ def load_plugins(app):
     modules = []
     for plugin in plugins:
              if not plugin.startswith('.__'):
-                 new_module = importlib.import_module(plugin, package="plugins")
-                 new_module.add_plugin_rule(app)
-                 modules.append(new_module)
+                 try:
+                     new_module = importlib.import_module(plugin, package="plugins")
+                     new_module.add_plugin_rule(app)
+                     modules.append(new_module)
+                 except:
+                     pass
     return modules

@@ -1,0 +1,3 @@
+[submodule "remoteapi/web/insights-core"]
+	path = remoteapi/web/insights-core
+	url = https://github.com/RedHatInsights/insights-core.git
