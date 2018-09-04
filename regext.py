@@ -225,3 +225,10 @@ rprog("autocheck", "Diagnose some known issues",
       "-h       - list available options",
       help)
 
+help = '''
+Checking the data through insights
+'''
+
+rprog("insights", "Run insights with the currently available data",
+      "-h       - list available options",
+      help)
