@@ -7,7 +7,7 @@ from __future__ import division
 
 from pykdump.API import *
 
-from LinuxDump import Tasks
+from LinuxDump import Tasks, sysctl
 
 import sys
 import operator
@@ -33,6 +33,26 @@ def get_system_info():
         words = line.split(":")
         sysinfo[words[0].strip()] = words[1].strip()
 
+def check_sysctl():
+    ctbl = sysctl.getCtlTables()
+    names = sorted(ctbl.keys())
+    result_str = ""
+
+    for n in names:
+        ct = ctbl[n]
+        try:
+            dall_val = sysctl.getCtlData(ct)
+            if type(dall_val) is list:
+                dall = ""
+                for d_one in dall_val:
+                    dall = dall + "{0}".format(d_one) + " "
+            else:
+                dall = dall_val
+        except:
+            dall = '(?)'
+        result_str = result_str + ("%s = %s\n" % (n.ljust(20), dall))
+
+    return result_str
 
 def get_sysdata_dict():
     global sysinfo
@@ -44,6 +64,7 @@ def get_sysdata_dict():
             (sysinfo["NODENAME"], sysinfo["RELEASE"], sysinfo["VERSION"],
              machine, machine, machine)
     dict["dmesg"] = exec_crash_command("log")
+    dict["sysctl"] = check_sysctl()
 
     return dict
 
