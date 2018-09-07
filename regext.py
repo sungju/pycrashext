@@ -7,6 +7,18 @@ from crash import register_epython_prog as rprog
 from pykdump.API import *
 
 import os
+import sys
+
+try:
+    if "PYTHON_LIB" in os.environ:
+        additional_lib = os.environ["PYTHON_LIB"]
+        python_path_list = additional_lib.split(':')
+        for python_path in python_path_list:
+            python_lib = python_path
+            if python_lib not in sys.path:
+                sys.path.insert(0, python_lib)
+except Exception as e:
+    print('Error: ' + str(e))
 
 
 """

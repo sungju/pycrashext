@@ -14,10 +14,14 @@ import operator
 import os
 from os.path import expanduser
 import time
-import urllib
 
 import crashcolor
 import crashhelper
+
+import json
+import base64
+import urllib.parse
+import urllib.request
 
 sysinfo={}
 
@@ -44,43 +48,28 @@ def get_sysdata_dict():
     return dict
 
 
-def convert_to_base64(string):
-    # There's a high chance that it is going to conflict due to single quote
-    # but, let's see how it goes for now.
-    result_str = crashhelper.run_gdb_command_with_file("!base64 -w 0", string)
-    return result_str
-
-def dump_to_json(sysdata_dict):
-    result_str = "{"
-    for key, value in sysdata_dict.items():
-        result_str = result_str + "\"%s\" : \"%s\"," % (key, convert_to_base64(value))
-
-    result_str = result_str + "}"
-    print (result_str)
-    return result_str
-
-
 def exec_insights(o, args, cmd_path_list):
-    path_list = cmd_path_list.split(':')
-    insights_path = ""
-    for path in path_list:
-        if os.path.exists(path + "/insights_call.py"):
-            insights_path = path + "/insights_call.py"
-            break
-
-    if insights_path == "":
-        print("Can't find insights_call.py in path")
-        return
-
     sysdata_dict = get_sysdata_dict()
-    sysdata_str = dump_to_json(sysdata_dict)
+    sysdata_str = json.dumps(sysdata_dict)
     cmd_options = ""
 
-    result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
-                                            (sysdata_str, insights_path, cmd_options))
+    try:
+        remoteapi_url = os.environ['CRASHEXT_SERVER'] + '/api/insights'
+    except:
+        remoteapi_url = ""
 
+    data = {"data" : base64.b64encode(sysdata_str.encode()) }
+    try:
+        url_data = urllib.parse.urlencode(data)
+        req = urllib.request.Request(remoteapi_url, url_data.encode())
+        response = urllib.request.urlopen(req)
+        res = response.read()
+    except Exception as e:
+        res = "\tServer is not reachable.\n" + \
+              "\tServer address is <" + remoteapi_url + ">" + \
+              "\n" + str(e)
 
-    print(result_str)
+    print(res)
 
 
 def insights():
