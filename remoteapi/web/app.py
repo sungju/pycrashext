@@ -7,6 +7,7 @@ due to limited libraries.
 """
 
 import os
+import sys
 
 from flask import Flask
 from flask import jsonify
@@ -17,7 +18,7 @@ from werkzeug.serving import run_simple
 
 to_reload = False
 
-
+sys.path.append("./support-rules")
 
 def get_app():
     app = Flask(__name__)
