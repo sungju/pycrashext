@@ -8,10 +8,11 @@ REGISTERS: i386 i686 x86_64 athlon
 %rsi - 2nd argument (%rsi:64, %esi:32, %si:16, %sl:8)
 %rdx - 3rd argument (%rdx:64, %edx:32, %dx:16, %dl:8)
 %rcx - 4th argument (%rcx:64, %ecx:32, %cx:16, %cl:8)
-%r8 - 5th argument (%r8:64, %r8d:32, %r8w:16, %r8b:8)
-%r9 - 6th argument (%r9:64, %r9d:32, %r9w:16, %r9b:8)
+%r8  - 5th argument (%r8:64, %r8d:32, %r8w:16, %r8b:8)
+%r9  - 6th argument (%r9:64, %r9d:32, %r9w:16, %r9b:8)
 %rsp - Stack pointer
 %rax - Return value
+%rip - Instruction pointer
 END_REGISTERS: i386 i686 x86_64 athlon
 
 -----------------------------------------------------------------
