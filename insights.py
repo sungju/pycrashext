@@ -36,14 +36,6 @@ def get_system_info():
         sysinfo[words[0].strip()] = words[1].strip()
 
 
-def get_entry_in_dict(dict_data, entry, extra):
-    result = ""
-    if entry in dict_data:
-        result = entry + ": " + "{0}".format(dict_data[entry]) + extra
-
-    return result
-
-
 def check_sysctl():
     ctbl = sysctl.getCtlTables()
     names = sorted(ctbl.keys())

@@ -17,6 +17,18 @@ import crashcolor
 
 page_size = 4096
 
+
+def get_entry_in_dict(dict_data, entry, extra):
+    result = ""
+    if entry in dict_data:
+        width = 30 - len(entry)
+        result = entry + ": " +\
+                "{0: >{width}}".format(dict_data[entry], width=width) +\
+                extra
+
+    return result
+
+
 def get_hugepages_details():
     hstates = readSymbol("hstates")
     default_hstate_idx = readSymbol("default_hstate_idx")
