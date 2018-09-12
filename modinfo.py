@@ -81,6 +81,13 @@ def module_info(options):
         print("There are %d tainted modules" % (tainted_count))
 
 
+    last_unloaded_module = readSymbol("last_unloaded_module")
+    if len(last_unloaded_module) > 0:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("\n\tLast unloaded module : %s" % (last_unloaded_module))
+        crashcolor.set_color(crashcolor.RESET)
+
+
 def find_module(module_name):
     global module_list
 
