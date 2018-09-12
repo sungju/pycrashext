@@ -16,7 +16,7 @@ import json
 ### ------------------------
 from insights import dr
 #from insights.formats.text import HumanReadableFormat as Formatter
-from insights.formats._json import JsonFormatter as Formatter
+from insights.formats._json import JsonFormat as Formatter
 
 from insights.specs import Specs
 from insights.tests import context_wrap
