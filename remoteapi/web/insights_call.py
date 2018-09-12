@@ -39,6 +39,9 @@ def insights_call():
         broker[Specs.hostname] = context_wrap(data_dict["hostname"])
         broker[Specs.uname] = context_wrap(data_dict["uname"])
         broker[Specs.dmesg] = context_wrap(data_dict["dmesg"])
+        broker[Specs.messages] = context_wrap(data_dict["dmesg"])
+        broker[Specs.sysctl] = context_wrap(data_dict["sysctl"])
+        broker[Specs.meminfo] = context_wrap(data_dict["meminfo"])
         with Formatter(broker):
             dr.run(broker=broker)
     except Exception as e:
