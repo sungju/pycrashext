@@ -22,6 +22,8 @@ import json
 import base64
 import urllib.parse
 import urllib.request
+import meminfo
+
 
 sysinfo={}
 
@@ -32,6 +34,15 @@ def get_system_info():
     for line in resultlines:
         words = line.split(":")
         sysinfo[words[0].strip()] = words[1].strip()
+
+
+def get_entry_in_dict(dict_data, entry, extra):
+    result = ""
+    if entry in dict_data:
+        result = entry + ": " + "{0}".format(dict_data[entry]) + extra
+
+    return result
+
 
 def check_sysctl():
     ctbl = sysctl.getCtlTables()
@@ -54,10 +65,15 @@ def check_sysctl():
 
     return result_str
 
+
 def get_sysdata_dict():
     global sysinfo
+    global page_size
+
+    page_size = 1 << get_page_shift()
     dict = {}
     get_system_info()
+
     machine = sysinfo["MACHINE"].split()[0]
     dict["hostname"] = sysinfo["NODENAME"]
     dict["uname"] = "Linux %s %s %s %s %s %s GNU/Linux" % \
@@ -65,6 +81,7 @@ def get_sysdata_dict():
              machine, machine, machine)
     dict["dmesg"] = exec_crash_command("log")
     dict["sysctl"] = check_sysctl()
+    dict["meminfo"] = get_meminfo()
 
     return dict
 

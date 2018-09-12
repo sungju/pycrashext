@@ -14,6 +14,296 @@ import operator
 
 import crashcolor
 
+
+page_size = 4096
+
+def get_hugepages_details():
+    hstates = readSymbol("hstates")
+    default_hstate_idx = readSymbol("default_hstate_idx")
+    h = hstates[default_hstate_idx]
+    return h.nr_huge_pages, h.free_huge_pages, h.resv_huge_pages,\
+            h.surplus_huge_pages, 1 << (h.order + get_page_shift() - 10)
+
+
+def get_directmap_details():
+    direct_pages_count = readSymbol("direct_pages_count")
+    idx = 0
+    dmval = [0, 0, 0, 0]
+    shift_val = [2, 11, 12, 20]
+    for dp in direct_pages_count:
+        dmval[idx] = dp << shift_val[idx]
+        idx = idx + 1
+
+    return dmval[0], dmval[1], dmval[2], dmval[3]
+
+
+def hugetlb_total_pages():
+    hstates = readSymbol("hstates")
+    hugetlb_max_hstate= readSymbol("hugetlb_max_hstate")
+    nr_total_pages = 0
+    count = 0
+    for hstate in hstates:
+        nr_total_pages = nr_total_pages + hstate.nr_huge_pages * \
+                (1 << hstate.order)
+        count = count + 1
+        if count == hugetlb_max_hstate:
+            break
+
+    return nr_total_pages
+
+
+def get_page_shift():
+    resultline = exec_crash_command("ptob 1")
+    if len(resultline) == 0:
+        return 0
+
+    words = resultline.split()
+    if len(words) < 2:
+        return 0
+
+    value = int(words[1], 16)
+    idx = 0
+    while (value > 0):
+        value = value >> 1
+        idx = idx + 1
+
+    return idx - 1
+
+def get_hardware_corrupted():
+    num_poisoned_pages = readSymbol("num_poisoned_pages")
+    return num_poisoned_pages.counter << (get_page_shift() - 10)
+
+
+def get_vmalloc_info():
+    resultlines = exec_crash_command("kmem -v").splitlines()
+    iterlines = iter(resultlines)
+    next(iterlines)
+    total_used = 0
+    prev_end = -1
+    largest_chunk = 0
+    vmalloc_start = -1
+    vmalloc_end = -1
+    for vmline in iterlines:
+        words = vmline.split()
+        total_used = total_used + int(words[5])
+        start = int(words[2], 16)
+        end = int(words[4], 16)
+        if prev_end == -1:
+            prev_end = start
+            vmalloc_start = start
+
+        vmalloc_end = end
+        if start - prev_end > largest_chunk:
+            largest_chunk = start - prev_end
+
+        prev_end = end
+
+
+    return vmalloc_end - vmalloc_start, total_used, largest_chunk
+
+
+def vm_commit_limit():
+    sysctl_overcommit_kbytes = readSymbol("sysctl_overcommit_kbytes")
+    totalram_pages = readSymbol("totalram_pages")
+    sysctl_overcommit_ratio = readSymbol("sysctl_overcommit_ratio")
+    total_swap_pages = readSymbol("total_swap_pages")
+    allowed = 0
+    if sysctl_overcommit_kbytes > 0:
+        allowed = sysctl_overcommit_kbytes >> (get_page_shift() - 10)
+    else:
+        allowed = ((totalram_pages - hugetlb_total_pages()) *\
+                   sysctl_overcommit_ratio / 100)
+
+    allowed += total_swap_pages
+
+    return round(allowed)
+
+
+def vm_committed_as():
+    vm_committed_as = readSymbol("vm_committed_as")
+    return vm_committed_as.count
+
+def total_swapcache_pages():
+    swapper_spaces = readSymbol("swapper_spaces")
+    swap_aops = readSymbol("swap_aops")
+    total = 0
+    count = 0
+    for swapper_space in swapper_spaces:
+        if swapper_space.a_ops != swap_aops: # As pykdump is not detecting
+                                             # array size properly
+            break
+        total = total + swapper_space.nrpages
+
+    return total
+
+def get_meminfo():
+    meminfo={}
+
+    resultlines = exec_crash_command("kmem -i").splitlines()
+    page_unit = page_size / 1024
+    for line in resultlines:
+        words = line.split()
+        if len(words) == 0:
+            continue
+        if words[0] == 'TOTAL':
+            if words[1] == 'MEM':
+                meminfo['MemTotal'] = round(int(words[2]) * page_unit) # Convert pages
+            elif words[1] == 'HUGE':
+                meminfo['HugePages_Total'] = int(words[2])
+            elif words[1] == 'SWAP':
+                meminfo['SwapTotal'] = round(int(words[2]) * page_unit)
+            else:
+                pass
+        elif words[0] == 'HUGE':
+            if words[1] == 'FREE':
+                meminfo['HugePages_Free'] = int(words[2])
+        elif words[0] == 'FREE':
+            meminfo['MemFree'] = round(int(words[1]) * page_unit) # Covert pages
+        elif words[0] == 'BUFFERS':
+            meminfo['Buffers'] = round(int(words[1]) * page_unit)
+        elif words[0] == 'CACHED':
+            meminfo['Cached'] = round(int(words[1]) * page_unit)
+        elif words[0] == 'SWAP':
+            if words[1] == 'FREE':
+                meminfo['SwapFree'] = round(int(words[2]) * page_unit)
+            else:
+                pass
+        else:
+            pass
+
+
+    meminfo["SwapCached"] = total_swapcache_pages()
+
+    resultlines = exec_crash_command("kmem -V").splitlines()
+    meminfo['Active'] = 0
+    meminfo['Inactive'] = 0
+    meminfo['Slab'] = 0
+    for line in resultlines:
+        words = line.split()
+        if len(words) == 0:
+            continue
+        if words[0] == "NR_ACTIVE_ANON:":
+            meminfo["Active(anon)"] = int(words[1])
+            meminfo["Active"] = meminfo["Active"] + meminfo["Active(anon)"]
+        elif words[0] == "NR_INACTIVE_ANON:":
+            meminfo["Inactive(anon)"] = int(words[1])
+            meminfo["Inactive"] = meminfo["Inactive"] + meminfo["Inactive(anon)"]
+        elif words[0] == "NR_ACTIVE_FILE:":
+            meminfo["Active(file)"] = int(words[1])
+            meminfo["Active"] = meminfo["Active"] + meminfo["Active(file)"]
+        elif words[0] == "NR_INACTIVE_FILE:":
+            meminfo["Inactive(file)"] = int(words[1])
+            meminfo["Inactive"] = meminfo["Inactive"] + meminfo["Inactive(file)"]
+        elif words[0] == "NR_UNEVICTABLE:":
+            meminfo["Unevictable"] = int(words[1])
+        elif words[0] == "NR_MLOCK:":
+            meminfo["Mlocked"] = int(words[1])
+        elif words[0] == "NR_FILE_DIRTY:":
+            meminfo["Dirty"] = int(words[1])
+        elif words[0] == "NR_WRITEBACK:":
+            meminfo["Writeback"] = int(words[1])
+        elif words[0] == "NR_ANON_PAGES:":
+            meminfo["AnonPages"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_FILE_MAPPED:":
+            meminfo["Mapped"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_SHMEM:":
+            meminfo["Shmem"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_SLAB_RECLAIMABLE:":
+            meminfo["SReclaimable"] = round(int(words[1]) * page_unit)
+            meminfo["Slab"] = meminfo["Slab"] + meminfo["SReclaimable"]
+        elif words[0] == "NR_SLAB_UNRECLAIMABLE:":
+            meminfo["SUnreclaim"] = round(int(words[1]) * page_unit)
+            meminfo["Slab"] = meminfo["Slab"] + meminfo["SUnreclaim"]
+        elif words[0] == "NR_KERNEL_STACK:":
+            meminfo["KernelStack"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_PAGETABLE:":
+            meminfo["PageTables"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_UNSTABLE_NFS:":
+            meminfo["NFS_Unstable"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_BOUNCE:":
+            meminfo["Bounce"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_WRITEBACK_TEMP:":
+            meminfo["WritebackTmp"] = round(int(words[1]) * page_unit)
+        elif words[0] == "NR_ANON_TRANSPARENT_HUGEPAGES:":
+            meminfo["AnonHugePages"] = round(int(words[1]) * page_unit)
+
+
+    meminfo["CommitLimit"] = vm_commit_limit()
+    meminfo["Committed_AS"] = vm_committed_as()
+
+    if 'MemTotal' in meminfo and 'MemFree' in meminfo:
+        meminfo['MemAvailable'] = round(round(meminfo['MemTotal'] - meminfo['MemFree']))
+
+    vmalloctotal, vmallocused, vmallocchunk = get_vmalloc_info()
+    meminfo['VmallocTotal'] = vmalloctotal
+    meminfo['VmallocUsed'] = vmallocused
+    meminfo['VmallocChunk'] = vmallocchunk
+
+    meminfo['HardwareCorrupted'] = get_hardware_corrupted()
+
+    hp_total, hp_free, hp_rsvd, hp_surp, hp_size = get_hugepages_details()
+    meminfo['HugePages_Total'] = hp_total
+    meminfo['HugePages_Free'] = hp_free
+    meminfo['HugePages_Rsvd'] = hp_rsvd
+    meminfo['HugePages_Surp'] = hp_surp
+    meminfo['Hugepagesize'] = hp_size
+    dm4k, dm2m, dm4m, dm1g = get_directmap_details()
+    if dm4k > 0:
+        meminfo["DirectMap4k"] = dm4k
+    if dm2m > 0:
+        meminfo["DirectMap2M"] = dm2m
+    if dm4m > 0:
+        meminfo["DirectMap4M"] = dm4m
+    if dm4k > 0:
+        meminfo["DirectMap1G"] = dm1g
+    result_str = "" + get_entry_in_dict(meminfo, "MemTotal", " kB\n") +\
+                get_entry_in_dict(meminfo, "MemFree", " kB\n") +\
+                get_entry_in_dict(meminfo, "MemAvailable", " kB\n") +\
+                get_entry_in_dict(meminfo, "Buffers", " kB\n") +\
+                get_entry_in_dict(meminfo, "Cached", " kB\n") +\
+                get_entry_in_dict(meminfo, "SwapCached", " kB\n") +\
+                get_entry_in_dict(meminfo, "Active", " kB\n") +\
+                get_entry_in_dict(meminfo, "Inactive", " kB\n") +\
+                get_entry_in_dict(meminfo, "Active(anon)", " kB\n") +\
+                get_entry_in_dict(meminfo, "Inactive(anon)", " kB\n") +\
+                get_entry_in_dict(meminfo, "Active(file)", " kB\n") +\
+                get_entry_in_dict(meminfo, "Inactive(file)", " kB\n") +\
+                get_entry_in_dict(meminfo, "Unevictable", " kB\n") +\
+                get_entry_in_dict(meminfo, "Mlocked", " kB\n") +\
+                get_entry_in_dict(meminfo, "SwapTotal", " kB\n") +\
+                get_entry_in_dict(meminfo, "SwapFree", " kB\n") +\
+                get_entry_in_dict(meminfo, "Dirty", " kB\n") +\
+                get_entry_in_dict(meminfo, "Writeback", " kB\n") +\
+                get_entry_in_dict(meminfo, "AnonPages", " kB\n") +\
+                get_entry_in_dict(meminfo, "Mapped", " kB\n") +\
+                get_entry_in_dict(meminfo, "Shmem", " kB\n") +\
+                get_entry_in_dict(meminfo, "Slab", " kB\n") +\
+                get_entry_in_dict(meminfo, "SReclaimable", " kB\n") +\
+                get_entry_in_dict(meminfo, "SUnreclaim", " kB\n") +\
+                get_entry_in_dict(meminfo, "KernelStack", " kB\n") +\
+                get_entry_in_dict(meminfo, "PageTables", " kB\n") +\
+                get_entry_in_dict(meminfo, "NFS_Unstable", " kB\n") +\
+                get_entry_in_dict(meminfo, "Bounce", " kB\n") +\
+                get_entry_in_dict(meminfo, "WritebackTmp", " kB\n") +\
+                get_entry_in_dict(meminfo, "CommitLimit", " kB\n") +\
+                get_entry_in_dict(meminfo, "Committed_AS", " kB\n") +\
+                get_entry_in_dict(meminfo, "VmallocTotal", " kB\n") +\
+                get_entry_in_dict(meminfo, "VmallocUsed", " kB\n") +\
+                get_entry_in_dict(meminfo, "VmallocChunk", " kB\n") +\
+                get_entry_in_dict(meminfo, "HardwareCorrupted", " kB\n") +\
+                get_entry_in_dict(meminfo, "HugePages_Total", "\n") +\
+                get_entry_in_dict(meminfo, "HugePages_Free", "\n") +\
+                get_entry_in_dict(meminfo, "HugePages_Rsvd", "\n") +\
+                get_entry_in_dict(meminfo, "HugePages_Surp", "\n") +\
+                get_entry_in_dict(meminfo, "Hugepagesize", " kB\n") +\
+                get_entry_in_dict(meminfo, "DirectMap4k", " kB\n") +\
+                get_entry_in_dict(meminfo, "DirectMap2M", " kB\n") +\
+                get_entry_in_dict(meminfo, "DirectMap4M", " kB\n") +\
+                get_entry_in_dict(meminfo, "DirectMap1G", " kB\n")
+
+    return result_str
+
+
 def show_tasks_memusage(options):
     mem_usage_dict = {}
     if (options.nogroup):
@@ -114,6 +404,9 @@ def meminfo():
     op.add_option("--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
+    op.add_option("--meminfo", dest="meminfo", default=1,
+                  action="store_true",
+                  help="Show /proc/meminfo-like output")
 
     (o, args) = op.parse_args()
 
@@ -122,6 +415,10 @@ def meminfo():
 
     if (o.slabtop):
         show_slabtop(o)
+
+    if (o.meminfo):
+        print(get_meminfo())
+
 
 if ( __name__ == '__main__'):
     meminfo()
