@@ -60,9 +60,7 @@ def check_sysctl():
 
 def get_sysdata_dict():
     global sysinfo
-    global page_size
 
-    page_size = 1 << get_page_shift()
     dict = {}
     get_system_info()
 
@@ -73,7 +71,7 @@ def get_sysdata_dict():
              machine, machine, machine)
     dict["dmesg"] = exec_crash_command("log")
     dict["sysctl"] = check_sysctl()
-    dict["meminfo"] = get_meminfo()
+    dict["meminfo"] = meminfo.get_meminfo()
 
     return dict
 
