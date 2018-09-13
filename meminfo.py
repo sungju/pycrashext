@@ -141,7 +141,6 @@ def total_swapcache_pages():
     total = 0
     count = 0
     for swapper_space in swapper_spaces:
-        print(swapper_space)
         if swapper_space is None or swapper_space == 0:
             break
         if swapper_space.a_ops != swap_aops: # As pykdump is not detecting
