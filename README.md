@@ -674,6 +674,7 @@ Options:
   --nogroup   Show data in individual tasks
   --all       Show all the output
   --slabtop   Show slabtop-like output
+  --meminfo   Show /proc/meminfo-like output
 
 crash> meminfo --memusage
 ======================================================================
@@ -707,6 +708,23 @@ kmem_cache         NAME                                TOTAL OBJSIZE
 0xffff88102f870bc0 task_struct                         5824K    2672
 0xffff88102f850b40 anon_vma_chain                      5652K      48
 ====================================================================
+
+crash> meminfo
+MemTotal:             32394624.0 kB
+MemFree:               2166016.0 kB
+MemAvailable:         30228608.0 kB
+Buffers:                     0.0 kB
+Cached:                 700928.0 kB
+SwapCached:                    0 kB
+Active:                    52197 kB
+...
+VmallocChunk:      8795764752384 kB
+HardwareCorrupted:             0 kB
+HugePages_Total:               0
+HugePages_Free:                0
+HugePages_Rsvd:                0
+HugePages_Surp:                0
+Hugepagesize:              16384 kB
 ```
 
 ### revs ###
