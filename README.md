@@ -15,6 +15,25 @@ $ logout
 
 ## Commands ##
 
+### insights ###
+
+- Insights is a rule based engine to detect known issues. [https://github.com/RedHatInsights/insights-core](https://github.com/RedHatInsights/insights-core)
+- In this exteion, it is cowork with 'remoteapi' server located under ./remoteapi/ directory. For details, how to use 'remoteapi', please check README.md under ./remoteapi directory
+
+```
+crash> insights
+===========================================================================
+RULE ID : softlockup_find_get_pages|FIND_GET_PAGES_SOFTLOCKUP
+	ERROR KEY      : FIND_GET_PAGES_SOFTLOCKUP
+	Kernel version : 2.6.32-696.23.1.el6.x86_64
+	Message        : The system had softlockup due to find_get_pages() bug
+	KCS            : https://access.redhat.com/solutions/3390081
+
+---------------------------------------------------------------------------
+1 rules matched with the issued system
+===========================================================================
+```
+
 ### autocheck ###
 It runs rules implemented under ./rules directory which will try to detect any known issues.
 
@@ -709,7 +728,7 @@ kmem_cache         NAME                                TOTAL OBJSIZE
 0xffff88102f850b40 anon_vma_chain                      5652K      48
 ====================================================================
 
-crash> meminfo
+crash> meminfo --meminfo
 MemTotal:             32394624.0 kB
 MemFree:               2166016.0 kB
 MemAvailable:         30228608.0 kB
