@@ -38,4 +38,20 @@ upstream/
 $ export INSIGHTS_RULES="/home/sungju/support-rules:/home/sungju/new-rules"
 ```
 
+## Launching the server ##
 
+- The default port for the server is '5000', but you can change it by specifying the port number in 'PYCRASHEXT_PORT' shell environment variable.
+
+```
+$ export PYCRASHEXT_PORT=5000
+```
+
+- Starting as a docker server or standalone
+
+```
+$ cd remotepai
+
+$ ./start_docker.sh
+or
+$ ./run_standalone.sh
+```
