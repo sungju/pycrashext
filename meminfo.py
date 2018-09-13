@@ -51,7 +51,15 @@ def get_directmap_details():
 
 def hugetlb_total_pages():
     hstates = readSymbol("hstates")
-    hugetlb_max_hstate= readSymbol("hugetlb_max_hstate")
+    try:
+        hugetlb_max_hstate = readSymbol("hugetlb_max_hstate")
+    except:
+        hugetlb_max_hstate = None
+        pass
+
+    if hugetlb_max_hstate is None or hugetlb_max_hstate == 0:
+        hugetlb_max_hstate = 3 # Intel = 2, PPC = 3
+
     nr_total_pages = 0
     count = 0
     for hstate in hstates:
@@ -136,6 +144,14 @@ def vm_committed_as():
     return vm_committed_as.count
 
 def total_swapcache_pages():
+    try:
+        swapper_space = readSymbol("swapper_space") # For RHEL6 or earlier
+    except:
+        swapper_space = None
+
+    if swapper_space is not None:
+        return swapper_space.nrpages
+
     swapper_spaces = readSymbol("swapper_spaces")
     swap_aops = readSymbol("swap_aops")
     total = 0
