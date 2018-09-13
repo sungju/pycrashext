@@ -38,7 +38,11 @@ def get_hugepages_details():
 
 
 def get_directmap_details():
-    direct_pages_count = readSymbol("direct_pages_count")
+    try:
+        direct_pages_count = readSymbol("direct_pages_count")
+    except: # This feature is only available on x86 arch
+        return 0, 0, 0, 0
+
     idx = 0
     dmval = [0, 0, 0, 0]
     shift_val = [2, 11, 12, 20]
@@ -445,12 +449,15 @@ def meminfo():
 
     if (o.memusage):
         show_tasks_memusage(o)
+        sys.exit(0)
 
     if (o.slabtop):
         show_slabtop(o)
+        sys.exit(0)
 
     if (o.meminfo):
         print(get_meminfo())
+        sys.exit(0)
 
 
 if ( __name__ == '__main__'):
