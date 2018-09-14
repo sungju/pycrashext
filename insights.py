@@ -122,10 +122,8 @@ def print_one_rule(rule):
     print("RULE ID : %s" % (rule["rule_id"]))
     crashcolor.set_color(crashcolor.RESET)
     details = rule["details"]
-    print("\tERROR KEY      : %s" % (details["error_key"]))
-    print("\tKernel version : %s" % (details["kinfo"]))
-    print("\tMessage        : %s" % (details["message"]))
-    print("\tKCS            : %s" % (details["kcs"]))
+    for key in details:
+        print("\t%15s : %s" % (key, details[key]))
     print("")
 
 def print_report_list(report_list):
