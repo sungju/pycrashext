@@ -22,7 +22,7 @@ fi
 echo
 echo "To use 'edis' properly, it's recommended to configure source server"
 echo "in another system which has all source repositories and running"
-echo "the server by run './start_server.sh' under 'remoteapi' directory"
+echo "the server by run './run_standalone.sh' or './start_docker.sh' under 'remoteapi' directory"
 echo
 echo "If it's configured, please provide the server address in the below"
 echo "format."
