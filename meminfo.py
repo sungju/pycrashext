@@ -93,6 +93,65 @@ def get_page_shift():
 
     return idx - 1
 
+
+vm_stat = None
+
+def global_page_state(idx):
+    global vm_stat
+
+    x = vm_stat[idx].counter
+    if x < 0:
+        x = 0
+
+    return x
+
+
+def si_mem_available():
+    global vm_stat
+
+    pages = []
+    lru_list = EnumInfo("enum lru_list")
+    LRU_INACTIVE_ANON = lru_list.LRU_INACTIVE_ANON
+    LRU_BASE = LRU_INACTIVE_ANON
+    LRU_ACTIVE_FILE = lru_list.LRU_ACTIVE_FILE
+    LRU_INACTIVE_FILE = lru_list.LRU_INACTIVE_FILE
+    NR_LRU_LISTS = lru_list.NR_LRU_LISTS
+    vm_stat = readSymbol("vm_stat")
+
+    for i in range(LRU_BASE, NR_LRU_LISTS):
+        pages.append(global_page_state(i))
+
+    zone_stat_lines = exec_crash_command("kmem -z").splitlines()
+    zone_watermarks = EnumInfo("enum zone_watermarks")
+    WMARK_LOW = zone_watermarks.WMARK_LOW
+    wmark_low = 0
+    for line in zone_stat_lines:
+        if not line.startswith("NODE:"):
+            continue
+        words = line.split()
+        task_addr = words[5]
+        zone = readSU("struct zone", int(task_addr, 16))
+        wmark_low = wmark_low + zone.watermark[WMARK_LOW]
+
+    zone_state_item = EnumInfo("enum zone_stat_item")
+    NR_FREE_PAGES = zone_state_item.NR_FREE_PAGES
+    NR_SLAB_RECLAIMABLE = zone_state_item.NR_SLAB_RECLAIMABLE
+    totalreserve_pages = readSymbol("totalreserve_pages")
+    available = global_page_state(NR_FREE_PAGES) - totalreserve_pages
+
+    pagecache = pages[LRU_ACTIVE_FILE] + pages[LRU_INACTIVE_FILE]
+    pagecache = pagecache - min(pagecache / 2, wmark_low)
+    available = available + pagecache
+
+    available = available + global_page_state(NR_SLAB_RECLAIMABLE) - \
+            min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low)
+
+    if (available < 0):
+        available = 0
+
+    return round(available) << (get_page_shift() - 10)
+
+
 def get_hardware_corrupted():
     num_poisoned_pages = readSymbol("num_poisoned_pages")
     return num_poisoned_pages.counter << (get_page_shift() - 10)
@@ -178,6 +237,7 @@ def get_meminfo():
 
     resultlines = exec_crash_command("kmem -i").splitlines()
     page_unit = page_size / 1024
+    meminfo['MemFree'] = 0
     for line in resultlines:
         words = line.split()
         if len(words) == 0:
@@ -195,7 +255,11 @@ def get_meminfo():
             if words[1] == 'FREE':
                 meminfo['HugePages_Free'] = int(words[2])
         elif words[0] == 'FREE':
-            meminfo['MemFree'] = round(int(words[1]) * page_unit) # Covert pages
+            val = words[1]
+            if words[1] == 'HIGH' or words[1] == 'LOW':
+                val = words[2]
+            meminfo['MemFree'] = meminfo['MemFree'] + \
+                    round(int(val) * page_unit)
         elif words[0] == 'BUFFERS':
             meminfo['Buffers'] = round(int(words[1]) * page_unit)
         elif words[0] == 'CACHED':
@@ -269,7 +333,7 @@ def get_meminfo():
     meminfo["Committed_AS"] = vm_committed_as()
 
     if 'MemTotal' in meminfo and 'MemFree' in meminfo:
-        meminfo['MemAvailable'] = round(round(meminfo['MemTotal'] - meminfo['MemFree']))
+        meminfo['MemAvailable'] = si_mem_available()
 
     vmalloctotal, vmallocused, vmallocchunk = get_vmalloc_info()
     meminfo['VmallocTotal'] = vmalloctotal
