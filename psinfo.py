@@ -206,7 +206,7 @@ def get_ps_output():
         task_struct = readSU("struct task_struct", int(pid_data["TASK"], 16))
         pid_data["ST"] = convert_to_ps_state(words[idx + 4], task_struct)
         pid_data["%MEM"] = float(words[idx + 5])
-        pid_data["%CPU"] = "n/a"
+        pid_data["%CPU"] = 0  # "n/a"
         pid_data["C"] = "0" # n/a
         pid_data["TTY"] = get_tty_name(task_struct)
         pid_data["VSZ"] = int(words[idx + 6])
