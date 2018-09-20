@@ -23,6 +23,7 @@ import base64
 import urllib.parse
 import urllib.request
 import meminfo
+import psinfo
 
 
 sysinfo={}
@@ -114,6 +115,11 @@ def get_sysdata_dict():
     dict["dmesg"] = exec_crash_command("log")
     dict["sysctl"] = check_sysctl()
     dict["meminfo"] = meminfo.get_meminfo()
+    dict["ps_aux"] = cpuinfo.get_ps_aux()
+    dict["ps_aux"] = cpuinfo.get_ps_aux()
+    dict["ps_auxcww"] = cpuinfo.get_ps_auxcww()
+    dict["ps_auxww"] = cpuinfo.get_ps_auxww()
+    dict["ps_ef"] = cpuinfo.get_ps_ef()
 
     return dict
 

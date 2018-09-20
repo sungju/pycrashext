@@ -244,3 +244,12 @@ Checking the data through insights
 rprog("insights", "Run insights with the currently available data",
       "-h       - list available options",
       help)
+
+
+help = '''
+Show process information
+'''
+
+rprog("psinfo", " ps output",
+      "-h    - list available options",
+      help)

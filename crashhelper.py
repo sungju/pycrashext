@@ -11,7 +11,7 @@ import os
 import sys
 
 
-def run_gdb_command_with_file(command, file_content):
+def run_command_with_file(func, command, file_content):
     """exec_gdb_command() is failing to capture the output
     if the command is with '!' which is important to execute
     shell commands. Below will capture it properly."""
@@ -24,7 +24,7 @@ def run_gdb_command_with_file(command, file_content):
                 f.write(file_content)
             command = command + " < " + temp_input_name
 
-        exec_gdb_command(command)
+        func(command)
         lines = ""
         if os.path.exists(temp_output_name):
             with open(temp_output_name, 'r') as f:
@@ -44,5 +44,21 @@ def run_gdb_command_with_file(command, file_content):
     return lines
 
 
+def run_command(func, command):
+    return run_command_with_file(func, command, "")
+
+
 def run_gdb_command(command):
-    return run_gdb_command_with_file(command, "")
+    return run_command(exec_gdb_command, command)
+
+
+def run_crash_command(command):
+    return run_command(exec_crash_command, command)
+
+
+def run_gdb_command_with_file(command, file_content):
+    return run_command_with_file(exec_gdb_command, command, file_content)
+
+
+def run_crash_command_with_file(command, file_content):
+    return run_command_with_file(exec_crash_command, command, file_content)
