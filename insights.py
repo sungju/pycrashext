@@ -115,10 +115,10 @@ def get_sysdata_dict():
     dict["dmesg"] = exec_crash_command("log")
     dict["sysctl"] = check_sysctl()
     dict["meminfo"] = meminfo.get_meminfo()
-    dict["ps_aux"] = cpuinfo.get_ps_aux()
-    dict["ps_auxcww"] = cpuinfo.get_ps_auxcww()
-    dict["ps_auxww"] = cpuinfo.get_ps_auxww()
-    dict["ps_ef"] = cpuinfo.get_ps_ef()
+    dict["ps_aux"] = psinfo.get_ps_aux()
+    dict["ps_auxcww"] = dict["ps_aux"]
+    dict["ps_auxww"] = dict["ps_aux"]
+    dict["ps_ef"] = psinfo.get_ps_ef()
 
     return dict
 

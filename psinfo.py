@@ -168,12 +168,19 @@ def get_comm_args(task_struct):
     return task_struct.comm
 
 
+ps_G_output_lines = None
+
 def get_ps_output():
     '''
        PID    PPID  CPU       TASK        ST  %MEM     VSZ    RSS  COMM
     '''
-    resultlines = exec_crash_command("ps -G").splitlines()
-    iterlines = iter(resultlines)
+    global ps_G_output_lines
+
+    check_userdata_available()
+
+    if ps_G_output_lines == None:
+        ps_G_output_lines = exec_crash_command("ps -G").splitlines()
+    iterlines = iter(ps_G_output_lines)
     next(iterlines)
     ps_list = []
     for pid in iterlines:
@@ -313,8 +320,6 @@ def psinfo():
                   help="ps -ef")
 
     (o, args) = op.parse_args()
-
-    check_userdata_available()
 
     if (o.aux):
         print(get_ps_aux())
