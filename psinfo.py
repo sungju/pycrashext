@@ -219,14 +219,14 @@ def get_ps_output():
 
 def get_ps():
     ps_list = get_ps_output()
-    result_str = "%-12s %6s %4s %4s %8s %8s %-8s %-5s %10s %8s %s\n" % \
+    result_str = "%-12s %8s %4s %4s %8s %8s %-8s %-5s %10s %8s %s\n" % \
                 ("USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT",\
                  "START", "TIME", "COMMAND")
 
     for task in ps_list:
         try:
             result_str = result_str + \
-                    "%-12s %6s %4s %4s %8s %8s %-8s %-5s %10s %8s %s\n" % \
+                    "%-12s %8s %4s %4s %8s %8s %-8s %-5s %10s %8s %s\n" % \
                   (task["UID"], task["PID"], task["%CPU"], task["%MEM"], \
                    task["VSZ"], task["RSS"], task["TTY"], task["ST"], \
                    task["STIME"], task["TIME"], task["COMM"])
@@ -272,14 +272,14 @@ def get_ps_ef():
     root          2      0  0 Aug21 ?        00:00:02 [kthreadd]
     '''
     ps_list = get_ps_output()
-    result_str = "%-12s %6s %6s %2s %8s %8s %8s %s\n" % \
+    result_str = "%-12s %8s %8s %2s %8s %8s %8s %s\n" % \
                 ("UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD")
 
 
     for task in ps_list:
         try:
             result_str = result_str + \
-                    "%-12s %6s %6s %2s %8s %8s %8s %s\n" % \
+                    "%-12s %8s %8s %2s %8s %8s %8s %s\n" % \
                     (task["UID"], task["PID"], task["PPID"], \
                      task["C"], task["STIME"], task["TTY"], \
                      task["TIME"], task["COMM"])
@@ -323,15 +323,17 @@ def psinfo():
 
     if (o.aux):
         print(get_ps_aux())
+        sys.exit(0)
 
     if (o.auxcww):
         print(get_ps_auxcww())
+        sys.exit(0)
 
     if (o.auxww):
         print(get_ps_auxww())
+        sys.exit(0)
 
-    if (o.ef):
-        print(get_ps_ef())
+    print(get_ps_ef())
 
 
 if ( __name__ == '__main__'):
