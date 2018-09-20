@@ -48,6 +48,10 @@ def insights_call(data_str):
         broker[Specs.messages] = context_wrap(data_dict["dmesg"])
         broker[Specs.sysctl] = context_wrap(data_dict["sysctl"])
         broker[Specs.meminfo] = context_wrap(data_dict["meminfo"])
+        broker[Specs.ps_aux] = context_wrap(data_dict["ps_aux"])
+        broker[Specs.ps_auxcww] = context_wrap(data_dict["ps_auxcww"])
+        broker[Specs.ps_auxww] = context_wrap(data_dict["ps_auxww"])
+        broker[Specs.ps_ef] = context_wrap(data_dict["ps_ef"])
 
         output = six.StringIO()
         with Formatter(broker, stream=output):
