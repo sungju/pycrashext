@@ -116,8 +116,8 @@ def get_sysdata_dict():
     dict["sysctl"] = check_sysctl()
     dict["meminfo"] = meminfo.get_meminfo()
     dict["ps_aux"] = psinfo.get_ps_aux()
-    dict["ps_auxcww"] = dict["ps_aux"]
-    dict["ps_auxww"] = dict["ps_aux"]
+    dict["ps_auxcww"] = psinfo.get_ps_auxcww()
+    dict["ps_auxww"] = psinfo.get_ps_auxww()
     dict["ps_ef"] = psinfo.get_ps_ef()
 
     return dict
