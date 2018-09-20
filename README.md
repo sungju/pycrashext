@@ -788,3 +788,43 @@ lea - Load effective address
      lea val(,1), %eax - the value val is placed in EAX.
 
 ```
+
+
+### psinfo ###
+
+Provides 'ps'-like output.
+
+```
+crash> psinfo -h
+Usage: psinfo.py [options]
+
+Options:
+  -h, --help  show this help message and exit
+  --aux       ps aux
+  --auxcww    ps auxcww
+  --auxww     ps auxww
+  --ef        ps -ef
+
+crash> psinfo --aux | head
+USER              PID %CPU %MEM      VSZ      RSS TTY      STAT       START     TIME COMMAND
+root                0  n/a  0.0        0        0 ?        R          May26  116,05:21:33 [swapper]
+root                0  n/a  0.0        0        0 ?        R          May26  116,05:21:33 [swapper]
+root                1  n/a  0.0    33644     1096 ?        S          May26  116,05:21:33 init
+root                2  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [kthreadd]
+root                3  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [migration/0]
+root                4  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [ksoftirqd/0]
+root                5  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [stopper/0]
+root                6  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [watchdog/0]
+root                7  n/a  0.0        0        0 ?        S          May26  116,05:21:33 [migration/1]
+crash> psinfo --ef | head
+UID               PID     PPID  C    STIME      TTY     TIME CMD
+root                0        0  0    May26        ?  116,05:21:33 [swapper]
+root                0        0  0    May26        ?  116,05:21:33 [swapper]
+root                1        0  0    May26        ?  116,05:21:33 init
+root                2        0  0    May26        ?  116,05:21:33 [kthreadd]
+root                3        2  0    May26        ?  116,05:21:33 [migration/0]
+root                4        2  0    May26        ?  116,05:21:33 [ksoftirqd/0]
+root                5        2  0    May26        ?  116,05:21:33 [stopper/0]
+root                6        2  0    May26        ?  116,05:21:33 [watchdog/0]
+root                7        2  0    May26        ?  116,05:21:33 [migration/1]
+```

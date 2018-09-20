@@ -21,6 +21,14 @@ from datetime import datetime, timedelta
 is_userdata_avail = False
 
 
+def get_tty_name(task_struct):
+    tty = task_struct.signal.tty
+    if tty == 0 or tty == None:
+        return "?"
+
+    return tty.name
+
+
 def get_uid(task_struct):
     try:
         val = task_struct.loginuid.val
@@ -200,7 +208,7 @@ def get_ps_output():
         pid_data["%MEM"] = float(words[idx + 5])
         pid_data["%CPU"] = "n/a"
         pid_data["C"] = "0" # n/a
-        pid_data["TTY"] = "n/a"
+        pid_data["TTY"] = get_tty_name(task_struct)
         pid_data["VSZ"] = int(words[idx + 6])
         pid_data["RSS"] = int(words[idx + 7])
         pid_data["COMM"] = pid[pid.find(words[idx + 8]):]
