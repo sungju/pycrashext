@@ -10,6 +10,27 @@ from pykdump.API import *
 from LinuxDump import Tasks
 
 import sys
+import datetime
+
+timekeeper = None
+xtime = None
+
+def show_vmcore_date_time():
+    global timekeeper
+    global xtime
+
+    if timekeeper == None:
+        timekeeper = readSymbol("timekeeper")
+
+    if xtime == None:
+        if member_offset('struct timekeeper', 'xtime') > -1:
+            xtime = timekeeper.xtime
+        else:
+            xtime = readSymbol("xtime")
+
+    print("Captured on '%s'" %
+          datetime.datetime.fromtimestamp(xtime.tv_sec).strftime('%c'))
+
 
 def show_clocksource_details(clocksource_addr):
     clocksource = readSU('struct clocksource', clocksource_addr)
@@ -54,6 +75,10 @@ def timeinfo():
 
     if (o.timesource):
         show_timesources(o.show_details)
+        sys.exit(0)
+
+    show_vmcore_date_time()
+
 
 if ( __name__ == '__main__'):
     timeinfo()
