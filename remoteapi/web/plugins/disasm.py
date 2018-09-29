@@ -36,7 +36,7 @@ def set_kernel_version(asm_str):
     kernel_version = m.group('kernelversion')
     release_version = m.group('releaseversion')
     # Below 'gitdir' is going to be used to find source directory
-    if release_version.find(".el5.") >= 0:
+    if release_version.find(".el5.") >= 0 or release_version.find("2.6.18.") >= 0:
         gitdir = 'rhel5'
         kernel_version = release_version[:release_version.rfind(".")]
     elif release_version.find(".fc") >= 0:
