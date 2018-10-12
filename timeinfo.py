@@ -13,23 +13,32 @@ import sys
 import datetime
 
 timekeeper = None
-xtime = None
+xtime_sec = None
 
-def show_vmcore_date_time():
+
+def get_vmcore_date_time():
     global timekeeper
-    global xtime
+    global xtime_sec
 
     if timekeeper == None:
         timekeeper = readSymbol("timekeeper")
 
-    if xtime == None:
+    if xtime_sec == None:
         if member_offset('struct timekeeper', 'xtime') > -1:
-            xtime = timekeeper.xtime
+            xtime_sec = timekeeper.xtime.tv_sec
+        if member_offset('struct timekeeper', 'xtime_sec') > -1:
+            xtime_sec = timekeeper.xtime_sec
         else:
-            xtime = readSymbol("xtime")
+            try:
+                xtime_sec = readSymbol("xtime").tv_sec
+            except:
+                xtime_sec = 0
 
-    print("Captured on '%s'" %
-          datetime.datetime.fromtimestamp(xtime.tv_sec).strftime('%c'))
+    return datetime.datetime.fromtimestamp(xtime_sec).strftime('%c')
+
+
+def show_vmcore_date_time():
+    print("Captured on '%s'" % (get_vmcore_date_time()))
 
 
 def show_clocksource_details(clocksource_addr):

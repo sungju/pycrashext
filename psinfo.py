@@ -59,7 +59,7 @@ def get_uid_from_task(task_struct):
 
 
 timekeeper = None
-xtime = None
+xtime_sec = None
 
 
 def get_datetime(nsec):
@@ -114,7 +114,7 @@ def display_time(seconds, granularity=2):
 
 def get_time_from_task(task_struct):
     global timekeeper
-    global xtime
+    global xtime_sec
 
     runtime = task_struct.se.sum_exec_runtime
     start_time = task_struct.start_time.tv_sec
@@ -122,11 +122,16 @@ def get_time_from_task(task_struct):
     if timekeeper == None:
         timekeeper = readSymbol("timekeeper")
 
-    if xtime == None:
+    if xtime_sec == None:
         if member_offset('struct timekeeper', 'xtime') > -1:
-            xtime = timekeeper.xtime
+            xtime_sec = timekeeper.xtime.tv_sec
+        elif member_offset('struct timekeeper', 'xtime_sec') > -1:
+            xtime_sec = timekeeper.xtime_sec
         else:
-            xtime = readSymbol("xtime")
+            try:
+                xtime_sec = readSymbol("xtime").tv_sec
+            except:
+                xtime_sec = 0
 
     if member_offset("struct timekeeper", "raw_time") > -1:
         stime = timekeeper.raw_time.tv_sec - stime
@@ -136,10 +141,10 @@ def get_time_from_task(task_struct):
         else:
             wall_to_monotonic = readSymbol("wall_to_monotonic")
 
-        adjusted_val = xtime.tv_sec + wall_to_monotonic.tv_sec
+        adjusted_val = xtime_sec + wall_to_monotonic.tv_sec
         stime = adjusted_val - stime
 
-    return display_date(xtime.tv_sec - stime, xtime.tv_sec), convert_sec_to_str(stime)
+    return display_date(xtime_sec - stime, xtime_sec), convert_sec_to_str(stime)
 
 
 def convert_state(state):

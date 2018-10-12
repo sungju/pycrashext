@@ -22,6 +22,8 @@ import json
 import base64
 import urllib.parse
 import urllib.request
+
+import timeinfo
 import meminfo
 import psinfo
 
@@ -119,6 +121,10 @@ def get_sysdata_dict():
     dict["ps_auxcww"] = psinfo.get_ps_auxcww()
     dict["ps_auxww"] = psinfo.get_ps_auxww()
     dict["ps_ef"] = psinfo.get_ps_ef()
+    dict["date"] = timeinfo.get_vmcore_date_time()
+    dict["date_iso"] = timeinfo.get_vmcore_date_time()
+    dict["date_utc"] = timeinfo.get_vmcore_date_time()
+#    dict["uptime"] = timeinfo.get_uptime()  Need to implement using 'sys' output
 
     return dict
 
