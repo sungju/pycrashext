@@ -44,14 +44,26 @@ struct context {
 
 SIDTAB_SIZE=128
 
-def get_sidtab_info(o):
+
+def get_sidtab_node_detail(sidtab_node, isprint):
+    result = "%s" % (exec_crash_command("struct sidtab_node 0x%x" % sidtab_node))
+    if isprint:
+        print(result)
+
+    return result
+
+
+def get_sidtab_info(total_only, print_detail, is_print):
     result = ""
     total_count = 0
     entry_count = 0
 
     sidtab = readSymbol("sidtab")
     if sidtab == None or sidtab == 0:
-        return "No sidtab symbol found"
+        result = "No sidtab symbol found"
+        if is_print:
+            print(result)
+        return result
 
     for sidtab_node in sidtab.htable:
         count = 0
@@ -61,13 +73,22 @@ def get_sidtab_info(o):
 
         sidtab_node_orig = sidtab_node
         while sidtab_node != None and sidtab_node != 0:
+            if print_detail:
+                result = result + get_sidtab_node_detail(sidtab_node, is_print) + "\n"
+
             sidtab_node = sidtab_node.next
             count = count + 1
         total_count = total_count + count
-        if o.total == 0:
-            result = result + ("0x%x %d\n" % (sidtab_node_orig, count))
+        if not total_only:
+            entry_str = "struct sidtab_node 0x%x has %d entries" % (sidtab_node_orig, count)
+            if is_print:
+                print(entry_str)
+            result = result + entry_str + "\n"
 
-    result  = result + ("Total sidtab_node entries = %d\n" % (total_count))
+    result_str = "Total sidtab_node entries = %d" % (total_count)
+    if is_print:
+        print(result_str)
+    result  = result + result_str + "\n"
 
     return result
 
@@ -79,11 +100,14 @@ def seinfo():
     op.add_option("--total", dest="total", default=0,
                   action="store_true",
                   help="Show total")
+    op.add_option("--detail", dest="detail", default=0,
+                  action="store_true",
+                  help="Show details")
 
     (o, args) = op.parse_args()
 
     if (o.sidtab):
-        print(get_sidtab_info(o))
+        get_sidtab_info(o.total, o.detail, True)
         sys.exit(0)
 
 
