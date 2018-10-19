@@ -253,3 +253,13 @@ Show process information
 rprog("psinfo", " ps output",
       "-h    - list available options",
       help)
+
+
+help = '''
+Show selinux related information
+'''
+
+rprog("seinfo", "SELinux output",
+      "-h    - list available options",
+      help)
+
