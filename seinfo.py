@@ -13,7 +13,6 @@ import sys
 import operator
 
 import crashcolor
-import pstree
 import crashhelper
 from datetime import datetime, timedelta
 
