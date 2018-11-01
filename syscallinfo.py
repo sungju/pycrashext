@@ -35,7 +35,11 @@ def sys_call_table_info():
         sys_call_table = readULong(sys_call_table)
     else:
         sys_call_table = readSymbol("sys_call_table")
-        max_syscalls = len(sys_call_table)
+        try:
+            max_syscalls = len(sys_call_table)
+        except:
+            sys_call_table = sym2addr("sys_call_table")
+            pass
 
     return sys_call_table, max_syscalls
 
@@ -62,6 +66,9 @@ def show_syscall_table(options):
             call_addr = readULong(sys_call_table + idx * 8)
 
         if kernel_start_addr > 0 and call_addr < kernel_start_addr:
+            break
+
+        if call_addr == 0:
             break
 
         result = exec_crash_command("sym 0x%x" % call_addr)
@@ -115,6 +122,9 @@ def check_syscall_table(options):
             call_addr = readULong(sys_call_table + idx * 8)
 
         if kernel_start_addr > 0 and call_addr < kernel_start_addr:
+            break
+
+        if call_addr == 0:
             break
 
         result = exec_crash_command("sym 0x%x" % call_addr)
