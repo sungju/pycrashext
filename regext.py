@@ -96,7 +96,7 @@ scheduling information
 --details    - Show details
 '''
 
-rprog("sched", "scheduling information",
+rprog("schedinfo", "scheduling information",
       "-h    - list available options",
       help)
 
