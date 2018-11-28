@@ -159,10 +159,10 @@ def disasm(ins_addr, o, args, cmd_path_list):
         result_str = disasm_str
     else:
         try:
-            result_str = crashhelper.run_gdb_command("!echo '%s' | python3 %s %s" % \
+            result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
                                                 (disasm_str, disasm_path, cmd_options))
         except:
-            result_str = crashhelper.run_gdb_command("!echo '%s' | python2 %s %s" % \
+            result_str = crashhelper.run_gdb_command("!echo '%s' | python3 %s %s" % \
                                                 (disasm_str, disasm_path, cmd_options))
 
 
