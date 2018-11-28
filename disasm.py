@@ -36,6 +36,13 @@ def disasm():
                   default="",
                   help="Shows graph for the specified jump operations only")
 
+
+    op.add_option("-s", "--sourceonly",
+                  action="store_true",
+                  dest="sourceonly",
+                  default=False,
+                  help="Shows source lines only")
+
     (o, args) = op.parse_args()
 
 
@@ -48,13 +55,18 @@ def disasm():
     if o.fullsource:
         full_source = "fullsource"
 
+    source_only = ""
+    if o.sourceonly:
+        source_only = "sourceonly"
+
 
     jump_op_list = ""
     if o.jump_op_list != "":
         jump_op_list = o.jump_op_list
 
     data = {"asm_str" : encoded_asm, "jump_graph" : draw_graph,
-            "full_source" : full_source, "jump_op_list" : jump_op_list}
+            "full_source" : full_source, "jump_op_list" : jump_op_list,
+            "source_only" : source_only}
     try:
         res = r.post(encode_url, data = data).text
     except r.exceptions.RequestException as e:

@@ -119,6 +119,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
     cmd_options = ""
     if (o.graph):
         cmd_options = cmd_options + " -g"
+    if (o.sourceonly):
+        cmd_options = cmd_options + " -s"
     if (o.fullsource):
         cmd_options = cmd_options + " -f"
         if (not o.reverse):
@@ -156,7 +158,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
     if (o.noaction):
         result_str = disasm_str
     else:
-        result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
+        try:
+            result_str = crashhelper.run_gdb_command("!echo '%s' | python3 %s %s" % \
+                                                (disasm_str, disasm_path, cmd_options))
+        except:
+            result_str = crashhelper.run_gdb_command("!echo '%s' | python2 %s %s" % \
                                                 (disasm_str, disasm_path, cmd_options))
 
 
@@ -293,6 +299,13 @@ def edis():
                   dest="noaction",
                   default=False,
                   help="Only colorising the output and not connection to server")
+
+
+    op.add_option("-s", "--sourceonly",
+                  action="store_true",
+                  dest="sourceonly",
+                  default=False,
+                  help="Display source lines only, but not based on function")
 
 
     (o, args) = op.parse_args()
