@@ -521,6 +521,14 @@ def disasm():
     except:
         full_source = ""
 
+
+    # Print source lines only
+    try:
+        source_only = request.form["source_only"]
+    except:
+        source_only = ""
+
+
     error_str = ""
 
     result = set_kernel_version(asm_str)
@@ -536,7 +544,11 @@ def disasm():
     asm_lines = asm_str.splitlines()
     has_header = False
     for line in asm_lines:
-        result = result + line + "\n"
+        if not line.startswith("/") and source_only != "":
+            continue
+
+        if source_only == "":
+            result = result + line + "\n"
         if has_header == False and error_str == "":
             result = result + read_source_line(line, has_header)
             has_header = True
