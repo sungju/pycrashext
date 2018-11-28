@@ -117,10 +117,18 @@ def get_time_from_task(task_struct):
     global xtime_sec
 
     runtime = task_struct.se.sum_exec_runtime
-    start_time = task_struct.start_time.tv_sec
+    try:
+        start_time = task_struct.start_time.tv_sec
+    except:
+        start_time = task_struct.start_time / 1000000000
+
     stime = start_time
     if timekeeper == None:
-        timekeeper = readSymbol("timekeeper")
+        try:
+            tk_core = readSymbol("tk_core")
+            timekeeper = tk_core.timekeeper
+        except:
+            timekeeper = readSymbol("timekeeper")
 
     if xtime_sec == None:
         if member_offset('struct timekeeper', 'xtime') > -1:
@@ -196,6 +204,7 @@ def get_ps_output():
     iterlines = iter(ps_G_output_lines)
     next(iterlines)
     ps_list = []
+    exec_crash_command("kmem -i") # This is here to prevent exec_crash_command bug
     for pid in iterlines:
         words = pid.split()
         pid_data = {}
