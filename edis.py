@@ -158,13 +158,15 @@ def disasm(ins_addr, o, args, cmd_path_list):
     if (o.noaction):
         result_str = disasm_str
     else:
-        try:
-            result_str = crashhelper.run_gdb_command("!echo '%s' | python %s %s" % \
-                                                (disasm_str, disasm_path, cmd_options))
-        except:
-            result_str = crashhelper.run_gdb_command("!echo '%s' | python3 %s %s" % \
-                                                (disasm_str, disasm_path, cmd_options))
-
+        python_list = { "python", "python3", "python2" }
+        for python_cmd in python_list:
+            try:
+                result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
+                                                    (disasm_str, python_cmd, \
+                                                     disasm_path, cmd_options))
+                break
+            except:
+                pass
 
     set_asm_colors()
     crashcolor.set_color(crashcolor.RESET)
