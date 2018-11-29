@@ -19,6 +19,12 @@ import crashcolor
 import crashhelper
 
 
+def is_command_exist(name):
+    from shutil import which
+
+    return which(name) is not None
+
+
 def get_kernel_version():
     sys_output = exec_crash_command("sys")
     for line in sys_output.splitlines():
@@ -160,13 +166,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
     else:
         python_list = { "python", "python3", "python2" }
         for python_cmd in python_list:
-            try:
+            if (is_command_exist(python_cmd)):
                 result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
                                                     (disasm_str, python_cmd, \
                                                      disasm_path, cmd_options))
                 break
-            except:
-                pass
 
     set_asm_colors()
     crashcolor.set_color(crashcolor.RESET)
