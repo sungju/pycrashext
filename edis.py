@@ -20,9 +20,14 @@ import crashhelper
 
 
 def is_command_exist(name):
-    from shutil import which
+    try:
+        devnull = open(os.devnull)
+        subprocess.Popen([name], stdout=devnull, stderr=devnull).communicate()
+    except OSError as e:
+        if e.errno == os.errno.ENOENT:
+            return False
 
-    return which(name) is not None
+    return True
 
 
 def get_kernel_version():
