@@ -21,11 +21,14 @@ import crashhelper
 
 def is_command_exist(name):
     try:
+        import subprocess
         devnull = open(os.devnull)
         subprocess.Popen([name], stdout=devnull, stderr=devnull).communicate()
     except OSError as e:
         if e.errno == os.errno.ENOENT:
             return False
+    except:
+        return False
 
     return True
 
