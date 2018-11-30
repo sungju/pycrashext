@@ -326,6 +326,144 @@ def check_userdata_available():
             break
 
 
+def task_policy(policy_str):
+    return {
+        "SCHED_OTHER": 0,
+        "NORMAL": 0,
+        "0": 0,
+        "SCHED_FIFO" : 1,
+        "FIFO" : 1,
+        "1" : 1,
+        "SCHED_RR" : 2,
+        "RR" : 2,
+        "2" : 2,
+        "SCHED_BATCH" : 3,
+        "BATCH" : 3,
+        "3" : 3,
+
+        "SCHED_ISO" : 4,
+        "ISO" : 4,
+        "4" : 4,
+
+        "SCHED_IDLE" : 5,
+        "IDLE" : 5,
+        "5" : 5,
+        "SCHED_DEADLINE" : 6,
+        "DEADLINE" : 6,
+        "6" : 6,
+    }[policy_str.upper()]
+
+
+dl_util_percent = 0
+dl_util_calc_str = ""
+
+def init_policy_data():
+    global dl_util_percent
+    global dl_util_calc_str
+
+    dl_util_percent = 0
+    dl_util_calc_str = ""
+
+
+def get_policy_sched_other(task_struct):
+    return "static_prio = %d, normal_prio = %d, prio = %d" % \
+            (task_struct.static_prio, task_struct.normal_prio, task_struct.prio)
+
+
+def get_policy_sched_fifo(task_struct):
+    return "rt_priority = %d" % (task_struct.rt_priority)
+
+
+def get_policy_sched_rr(task_struct):
+    return get_policy_sched_fifo(task_struct)
+
+
+def get_policy_sched_deadline(task_struct):
+    global dl_util_percent
+    global dl_util_calc_str
+
+    sched_dl = task_struct.dl
+    if len(dl_util_calc_str) > 0:
+        dl_util_calc_str = dl_util_calc_str + " + "
+
+    dl_util_calc_str = dl_util_calc_str + ("%d/%d" % (sched_dl.dl_runtime, sched_dl.dl_period))
+    dl_util_percent = dl_util_percent + \
+            (sched_dl.dl_runtime / sched_dl.dl_period) * 100
+
+    return "runtime = %d ns, period = %d ns, deadline = %d ns" % \
+            (sched_dl.dl_runtime / 1000, sched_dl.dl_period / 1000, sched_dl.dl_deadline / 1000)
+
+
+def get_policy_details(task_struct):
+    policy = task_struct.policy
+    if (policy == 0):
+        return get_policy_sched_other(task_struct)
+    elif (policy == 1):
+        return get_policy_sched_fifo(task_struct)
+    elif (policy == 2):
+        return get_policy_sched_rr(task_struct)
+    elif (policy == 6):
+        return get_policy_sched_deadline(task_struct)
+    else:
+        return ""
+
+
+def get_policy_summary_other():
+    return ""
+
+
+def get_policy_summary_fifo():
+    return ""
+
+
+def get_policy_summary_rr():
+    return ""
+
+
+def get_policy_summary_deadline():
+    return "SCHED_DEADLINE utilization = %s = %d%%" % (dl_util_calc_str, dl_util_percent)
+
+
+def get_policy_summary(policy_no):
+    if policy_no == 0:
+        return get_policy_summary_other()
+    elif policy_no == 1:
+        return get_policy_summary_fifo()
+    elif policy_no == 2:
+        return get_policy_summary_rr()
+    elif policy_no == 6:
+        return get_policy_summary_deadline()
+    else:
+        return ""
+
+
+def processes_with_policy(policy_no):
+    if policy_no < 0 or policy_no > 6:
+        return "Invalid policy number : %d" % (policy_no)
+
+    init_policy_data()
+
+    resultlines = exec_crash_command("ps -y %d" % (policy_no)).splitlines()
+    result_str = ""
+    for line_str in resultlines[1:]:
+        words = line_str.split()
+        if words[0] == ">":
+            task_addr = words[4]
+        else:
+            task_addr = words[3]
+        task_struct = readSU("struct task_struct", int(task_addr, 16))
+        policy_based_str = get_policy_details(task_struct)
+        result_str = result_str + "0x%s %s %s %s\n" % (task_addr, task_struct.pid, task_struct.comm, policy_based_str)
+
+    if len(result_str) > 0:
+        result_str = result_str + get_policy_summary(policy_no)
+
+
+    if len(result_str) > 0:
+        result_str = "task_struct        PID    COMM\t\tpolicy details\n" + result_str
+    return result_str
+
+
 def psinfo():
     op = OptionParser()
     op.add_option("--aux", dest="aux", default=0,
@@ -340,6 +478,12 @@ def psinfo():
     op.add_option("--ef", dest="ef", default=0,
                   action="store_true",
                   help="ps -ef")
+    op.add_option("-y", dest="policy_type", default="",
+                  type="string",
+                  action="store",
+                  help="Shows specific policy type of processes only. "
+                        "0 : NORMAL, 1 : FIFO, 2 : RR, 3 : BATCH, "
+                        "5 : IDLE, 6 : DEADLINE")
 
     (o, args) = op.parse_args()
 
@@ -353,6 +497,10 @@ def psinfo():
 
     if (o.auxww):
         print(get_ps_auxww())
+        sys.exit(0)
+
+    if (o.policy_type != ""):
+        print(processes_with_policy(task_policy(o.policy_type)))
         sys.exit(0)
 
     print(get_ps_ef())
