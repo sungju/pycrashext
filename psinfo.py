@@ -390,7 +390,7 @@ def get_policy_sched_deadline(task_struct):
     dl_util_percent = dl_util_percent + \
             (sched_dl.dl_runtime / sched_dl.dl_period) * 100
 
-    return "runtime = %d ns, period = %d ns, deadline = %d ns" % \
+    return "runtime = %d us, period = %d us, deadline = %d us" % \
             (sched_dl.dl_runtime / 1000, sched_dl.dl_period / 1000, sched_dl.dl_deadline / 1000)
 
 
