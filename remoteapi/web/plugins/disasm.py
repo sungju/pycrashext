@@ -42,6 +42,8 @@ def set_kernel_version(asm_str):
     elif release_version.find(".fc") >= 0:
         gitdir = 'fedora'
         kernel_version = "kernel-" + release_version[:release_version.rfind(".")]
+    elif kernel_version.find("-alt-") >= 0:
+        gitdir = 'alt'
     else:
         gitdir = 'rh' + kernel_version.split('.')[-1]
 
