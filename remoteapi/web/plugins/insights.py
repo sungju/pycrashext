@@ -64,11 +64,11 @@ def insights_call(data_str):
         return str(e)
 
 
+
 def add_plugin_rule(app):
     app.add_url_rule('/api/insights', 'insights', insights, methods=['POST'])
 
 
-    return False
 
 def get_data_from_post(entity):
     result = ""

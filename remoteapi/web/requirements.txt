@@ -1,2 +1,4 @@
 Flask==0.12.3
 pyopenssl
+pyyaml
+six

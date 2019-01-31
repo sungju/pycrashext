@@ -15,10 +15,7 @@ from flask import jsonify
 from load_plugins import load_plugins
 from werkzeug.serving import run_simple
 
-
 to_reload = False
-
-sys.path.append("./support-rules")
 
 def get_app():
     app = Flask(__name__)

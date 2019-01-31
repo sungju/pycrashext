@@ -3,10 +3,15 @@ Written by Daniel Sungju Kwon
 
 This is loading extra plugins which can be added at runtime
 """
+from __future__ import print_function
 import os
 import sys
 import re
 import importlib
+
+def eprint(*args, **kwargs):
+    print(*args, file=sys.stderr, **kwargs)
+
 
 def load_plugins(app):
     pysearchre = re.compile('.py$', re.IGNORECASE)
@@ -21,9 +26,13 @@ def load_plugins(app):
     for plugin in plugins:
              if not plugin.startswith('.__'):
                  try:
+                     eprint("Trying to load module '%s'..." % plugin)
                      new_module = importlib.import_module(plugin, package="plugins")
+                     eprint("module '%s' is loaded" % plugin)
                      new_module.add_plugin_rule(app)
                      modules.append(new_module)
-                 except:
+                     eprint("rules from '%s' are added" % plugin)
+                 except Exception as e:
+                     eprint("Module loading error for %s : %s" % (plugin, e))
                      pass
     return modules
