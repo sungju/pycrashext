@@ -15,7 +15,7 @@ services:
       - "5000:5000"
     volumes:
       - ./web/plugins:/app/plugins:z
-      - ./insights-rules:/insights-rules:z
+      - ./insights-rules:/insights-rules:z,cached
       - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
     environment:
       - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
