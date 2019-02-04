@@ -35,6 +35,8 @@ def insights_call(data_str):
             for rule_path in rules_list:
                 if len(rule_path) == 0:
                     continue
+                if rule_path.endswith("/"):
+                    rule_path = rule_path[:-1]
                 if rule_path not in sys.path:
                     sys.path.append(rule_path)
                 dr.load_components(os.path.basename(rule_path))
