@@ -120,10 +120,35 @@ if [[ -z "$RHEL_SOURCE_DIR" ]]; then
 	exit 5
 fi
 
+if [ ! -z $INSIGHTS_RULES ]; then
+	OLD_INSIGHTS_RULES_SAVED=$INSIGHTS_RULES
+fi
+
+if [ -d "./insights-rules" ]; then
+	INSIGHTS_RULES=""
+	for dentry in ./insights-rules/*/; do
+		bname=$(basename $dentry)
+		if [ "$bname" = '*' ]; then
+			break
+		fi
+		name="/insights-rules/$bname"
+		if [ -z $INSIGHTS_RULES ]; then
+			INSIGHTS_RULES=$name
+		else
+			INSIGHTS_RULES="$INSIGHTS_RULES:$name"
+		fi
+	done
+	export INSIGHTS_RULES
+fi
+
 #docker-compose run --service-ports crashext
 docker-compose up crashext
 sleep 1
 docker-compose down crashext --rmi all
+
+if [ ! -z $OLD_INSIGHTS_RULES_SAVED ]; then
+	INSIGHTS_RULES=$OLD_INSIGHTS_RULES_SAVED
+fi
 
 #container_id=$(docker container ls -a | grep crashext | awk '{ print $1 }')
 #docker container rm $container_id

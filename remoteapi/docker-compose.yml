@@ -15,7 +15,9 @@ services:
       - "5000:5000"
     volumes:
       - ./web/plugins:/app/plugins:z
+      - ./insights-rules:/insights-rules:z
       - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
     environment:
       - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
       - PYCRASHEXT_PORT=${PYCRASHEXT_PORT}
+      - INSIGHTS_RULES=${INSIGHTS_RULES}
