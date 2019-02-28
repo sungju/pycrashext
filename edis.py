@@ -72,7 +72,7 @@ def set_asm_colors():
             "callq" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "j" : crashcolor.BLUE | crashcolor.BOLD,
             "mov" : crashcolor.GREEN,
-            "push" : crashcolor.CYAN | crashcolor.UNDERLINE,
+            "push" : crashcolor.RED | crashcolor.UNDERLINE,
         }
         arg_color_dict = {
             "di" : crashcolor.UNDERLINE | crashcolor.CYAN,
