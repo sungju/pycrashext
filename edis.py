@@ -67,6 +67,8 @@ funcname = ""
 stack_op_dict = {}
 cur_count = 0
 stack_unit = 0
+stack_offset = 0
+register_dict = []
 
 
 def read_stack_data(addr, unit):
@@ -79,11 +81,17 @@ def read_stack_data(addr, unit):
     return data
 
 
-def check_stack_data(one_line):
+def interpret_one_line(one_line):
     global stack_op_dict
     global stackaddr_list
     global cur_count
     global stack_unit
+    global stack_offset
+    global register_dict
+
+
+    if len(register_dict) == 0:
+        register_dict= { "%rsp" : stackaddr_list, }
 
     result_str = one_line
     words = one_line.split()
@@ -92,13 +100,12 @@ def check_stack_data(one_line):
 
     for op in stack_op_dict:
         if words[2].startswith(op):
-            offset = stack_op_dict[op]
             internal_count = 0
             for stackaddr in stackaddr_list:
-                actual_addr = stackaddr - offset - (cur_count * stack_unit)
+                actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
                 data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                 if internal_count == 0:
-                    result_str = "%s   ; 0x%s" % (result_str, data)
+                    result_str = "%s    # 0x%s" % (result_str, data)
                 else:
                     result_str = "%s, 0x%s" % (result_str, data)
                 internal_count = internal_count + 1
@@ -106,7 +113,62 @@ def check_stack_data(one_line):
             cur_count = cur_count + 1
             break
 
+    if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
+        if words[2] == "mov" and words[3] == "%rsp,%rbp":
+            reg_list = []
+            for stackaddr in register_dict["%rsp"]:
+                actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
+                reg_list.append(actual_addr)
+            register_dict["%rbp"] = reg_list
+
+        elif words[2] == "sub" and words[3].endswith(",%rsp"):
+            # sub    $0x40,%rsp
+            op_words = words[3].split(",")
+            value_to_sub = int(op_words[0][1:], 16)
+            reg_list = []
+            for stackaddr in register_dict["%rsp"]:
+                actual_addr = stackaddr - value_to_sub - (cur_count * stack_unit)
+                reg_list.append(actual_addr)
+            register_dict["%rsp"] = reg_list
+
+        elif "(%rbp)" in words[3]: # mov    %rax,-0x30(%rbp)
+            op_words = words[3].split(",")
+            for op in op_words:
+                if "(%rbp)" in op:
+                    offset = int(op[:-6], 16)
+                    internal_count = 0
+                    for stackaddr in register_dict["%rbp"]:
+                        actual_addr = stackaddr + offset
+                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                        if internal_count == 0:
+                            result_str = "%s    # 0x%s" % (result_str, data)
+                        else:
+                            result_str = "%s, 0x%s" % (result_str, data)
+                        internal_count = internal_count + 1
+
+                    break
+
+        elif "(%rsp)" in words[3]: # mov    %rdx,0x18(%rsp)
+            op_words = words[3].split(",")
+            for op in op_words:
+                if "(%rsp)" in op:
+                    offset = int(op[:-6], 16)
+                    internal_count = 0
+                    for stackaddr in register_dict["%rsp"]:
+                        actual_addr = stackaddr + offset
+                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                        if internal_count == 0:
+                            result_str = "%s    # 0x%s" % (result_str, data)
+                        else:
+                            result_str = "%s, 0x%s" % (result_str, data)
+                        internal_count = internal_count + 1
+
+                    break
+
+
     return result_str
+
+
 
 
 def set_stack_data(disasm_str, disaddr_str):
@@ -115,6 +177,7 @@ def set_stack_data(disasm_str, disaddr_str):
     global stack_op_dict
     global cur_count
     global stack_unit
+    global stack_offset
 
     stackaddr_list = []
     cur_count = 0
@@ -146,10 +209,11 @@ def set_stack_data(disasm_str, disaddr_str):
 
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
-        stack_op_dict = { #  8 bytes used for return address
-            "push" : 8,
+        stack_op_dict = {
+            "push" : 0,
         }
-        stack_unit = 8
+        stack_unit = 8 
+        stack_offset = 8
 
 
 
@@ -314,7 +378,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if idx == crashcolor.MAX_COLOR:
                 idx = 2
 
-        line = check_stack_data(line) # Retreive stack data if possible
+        line = interpret_one_line(line) # Retreive stack data if possible
         words = line.split()
         if len(words) > 2:
             color_str = get_colored_asm(words[2].strip())
