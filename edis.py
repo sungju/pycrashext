@@ -62,6 +62,97 @@ def get_colored_arg(opvalue):
     return None
 
 
+stackaddr_list = []
+funcname = ""
+stack_op_dict = {}
+cur_count = 0
+stack_unit = 0
+
+
+def read_stack_data(addr, unit):
+    data = 0
+    if (unit == 8):
+        data = readULong(addr)
+    elif (unit == 4):
+        data = readUInt(addr)
+
+    return data
+
+
+def check_stack_data(one_line):
+    global stack_op_dict
+    global stackaddr_list
+    global cur_count
+    global stack_unit
+
+    result_str = one_line
+    words = one_line.split()
+    if len(words) < 3:
+        return result_str
+
+    for op in stack_op_dict:
+        if words[2].startswith(op):
+            offset = stack_op_dict[op]
+            internal_count = 0
+            for stackaddr in stackaddr_list:
+                actual_addr = stackaddr - offset - (cur_count * stack_unit)
+                data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                if internal_count == 0:
+                    result_str = "%s   ; 0x%s" % (result_str, data)
+                else:
+                    result_str = "%s, 0x%s" % (result_str, data)
+                internal_count = internal_count + 1
+
+            cur_count = cur_count + 1
+            break
+
+    return result_str
+
+
+def set_stack_data(disasm_str, disaddr_str):
+    global funcname
+    global stackaddr_list
+    global stack_op_dict
+    global cur_count
+    global stack_unit
+
+    stackaddr_list = []
+    cur_count = 0
+
+    bt_str = exec_crash_command("bt")
+    funcname = ""
+    for one_line in disasm_str.splitlines():
+        if one_line.startswith("/"):
+            continue
+        words = one_line.split()
+        funcname = words[1][1:-2]
+        break
+
+    if funcname == "":  # Not matching with any
+        return
+
+    stackfound = 0
+    for one_line in bt_str.splitlines():
+        words = one_line.split()
+        if (len(words) < 5):
+            continue
+        if stackfound == 1:
+            stackaddr_list.append(int(words[1][1:-1], 16))
+            stackfound = 0
+
+        if words[2] == funcname and words[4] == disaddr_str:
+            stackfound = 1
+
+
+    arch = sys_info.machine
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        stack_op_dict = { #  8 bytes used for return address
+            "push" : 8,
+        }
+        stack_unit = 8
+
+
+
 def set_asm_colors():
     global asm_color_dict
     global arg_color_dict
@@ -106,6 +197,10 @@ def set_asm_colors():
 
 def disasm(ins_addr, o, args, cmd_path_list):
     global asm_color_dict
+
+    global funcname
+    global stackaddr_list
+    global stack_op_dict
 
     path_list = cmd_path_list.split(':')
     disasm_path = ""
@@ -172,6 +267,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                                                      disasm_path, cmd_options))
                 break
 
+    set_stack_data(disasm_str, ins_addr) # To retreive stack data
     set_asm_colors()
     crashcolor.set_color(crashcolor.RESET)
     for one_line in result_str.splitlines():
@@ -218,6 +314,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if idx == crashcolor.MAX_COLOR:
                 idx = 2
 
+        line = check_stack_data(line) # Retreive stack data if possible
         words = line.split()
         if len(words) > 2:
             color_str = get_colored_asm(words[2].strip())
