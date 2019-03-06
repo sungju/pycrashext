@@ -105,7 +105,7 @@ def interpret_one_line(one_line):
                 actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
                 data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                 if internal_count == 0:
-                    result_str = "%s    # 0x%s" % (result_str, data)
+                    result_str = "%s    ; 0x%s" % (result_str, data)
                 else:
                     result_str = "%s, 0x%s" % (result_str, data)
                 internal_count = internal_count + 1
@@ -141,7 +141,7 @@ def interpret_one_line(one_line):
                         actual_addr = stackaddr + offset
                         data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                         if internal_count == 0:
-                            result_str = "%s    # 0x%s" % (result_str, data)
+                            result_str = "%s    ; 0x%s" % (result_str, data)
                         else:
                             result_str = "%s, 0x%s" % (result_str, data)
                         internal_count = internal_count + 1
@@ -158,7 +158,7 @@ def interpret_one_line(one_line):
                         actual_addr = stackaddr + offset
                         data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                         if internal_count == 0:
-                            result_str = "%s    # 0x%s" % (result_str, data)
+                            result_str = "%s    ; 0x%s" % (result_str, data)
                         else:
                             result_str = "%s, 0x%s" % (result_str, data)
                         internal_count = internal_count + 1
@@ -414,7 +414,10 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     line = line[next_idx:]
 
                 crashcolor.set_color(crashcolor.RESET)
+                if len(words) >= 5 and words[4] == ";": # comment
+                    crashcolor.set_color(crashcolor.LIGHTYELLOW)
                 print(line)
+                crashcolor.set_color(crashcolor.RESET)
             else:
                 print(line[idx+len(words[2]):])
             crashcolor.set_color(crashcolor.RESET)
