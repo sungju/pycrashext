@@ -414,8 +414,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     line = line[next_idx:]
 
                 crashcolor.set_color(crashcolor.RESET)
-                if len(words) >= 5 and words[4] == ";": # comment
-                    crashcolor.set_color(crashcolor.LIGHTYELLOW)
+                if len(words) >= 5:
+                    if words[4] == ";" or words[4] == "#":
+                        crashcolor.set_color(crashcolor.LIGHTYELLOW)
+                    elif words[4].startswith("<"):
+                        crashcolor.set_color(crashcolor.LIGHTMAGENTA)
                 print(line)
                 crashcolor.set_color(crashcolor.RESET)
             else:
