@@ -229,6 +229,9 @@ END_ARCHITECTURE: i386 i686 x86_64 athlon
 
 ARCHITECTURE: arm
 
+# ARM instructions can be found at the below link
+# http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0068b/BABJAJIB.html
+
 INSTRUCTION: mov mvn neg
 Move, Move NOT, and Negate.
 
@@ -282,6 +285,41 @@ Incorrect examples
     NEG r0,#3   ; immediate value not allowed with MVN or NEG
 
 END_INSTRUCTION: mov mvn neg
+
+INSTRUCTION: push
+Push registers onto a full descending stack.
+
+Syntax
+  PUSH{cond} reglist
+
+where:
+cond: is an optional condition code.
+reglist: is a non-empty list of registers, enclosed in braces. It can contain register ranges. It must be comma separated if it contains more than one register or register range.
+
+Usage
+  PUSH is a synonym for STMDB sp!, reglist. PUSH is the preferred mnemonic.
+
+  Note
+  STMFD is a synonym of STMDB.
+
+Registers are stored on the stack in numerical order, with the lowest numbered register at the lowest address.
+
+Thumb instructions
+  The following restriction applies to the 16-bit PUSH instruction:
+    - reglist can only include the Lo registers and the LR
+
+  The following restrictions apply to the 32-bit PUSH instruction:
+    - reglist must not include the SP
+     - reglist must not include the PC
+
+  Restrictions on reglist in ARM instructions
+  ARM PUSH instructions can have SP and PC in the reglist but these instructions that include SP or PC in the reglist are deprecated in ARMv6T2 and above.
+
+Examples
+      PUSH    {r0,r4-r7}
+      PUSH    {r2,lr}
+
+END_INSTRUCTION: push
 
 END_ARCHITECTURE: arm
 
