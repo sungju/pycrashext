@@ -73,10 +73,13 @@ register_dict = []
 
 def read_stack_data(addr, unit):
     data = 0
-    if (unit == 8):
-        data = readULong(addr)
-    elif (unit == 4):
-        data = readUInt(addr)
+    try:
+        if (unit == 8):
+            data = readULong(addr)
+        elif (unit == 4):
+            data = readUInt(addr)
+    except:
+        pass
 
     return data
 
