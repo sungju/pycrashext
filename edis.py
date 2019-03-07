@@ -193,7 +193,10 @@ def x86_stack_reg_op(words, result_str):
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rsp)" in op:
-                offset = int(op[:-6], 16)
+                if len(op) > 6: # check the case with no offset
+                    offset = int(op[:-6], 16)
+                else: # (%rsp)
+                    offset = 0
                 internal_count = 0
                 for stackaddr in register_dict["%rsp"]:
                     actual_addr = stackaddr + offset
