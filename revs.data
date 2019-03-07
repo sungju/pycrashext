@@ -2,6 +2,7 @@
 reng.py uses this to get instructions.
 -----------------------------------------------------------------
 
+ARCHITECTURE: i386 i686 x86_64 athlon
 REGISTERS: i386 i686 x86_64 athlon
 ** function parameters for x86_64 **
 %rdi - 1st argument (%rdi:64, %edi:32, %di:16, %dl:8)
@@ -14,25 +15,32 @@ REGISTERS: i386 i686 x86_64 athlon
 %rax - Return value
 %rip - Instruction pointer
 END_REGISTERS: i386 i686 x86_64 athlon
+END_ARCHITECTURE: i386 i686 x86_64 athlon
 
 -----------------------------------------------------------------
 ** Everything in between main keywords will be ignored 
    unless the word is matching with the predefined keywords. 
 -----------------------------------------------------------------
 
+ARCHITECTURE: arm
 REGISTERS: arm
 ** function parameters for ARM **
-X0 - X29: General Purpose Registers
-    X0 - X7     : Arguments & Result
-    X8          : Indirect result (struct) location
-    X9 - X15    : Spare temp registers
-    X16 - X17   : Intra-call registers (PLT, linker)
-    X18         : Platform specific (TLS)
-    X19 - X28   : Callee-saved registers
-    X29         : Frame pointer
-X30: This is the Link Register (LR)
-END_REGISTERS: arm
+r0 - r29: General Purpose Registers
+    r0 - r7     : Arguments & Result
+    r8          : Indirect result (struct) location
+    r9 - r15    : Spare temp registers
+    r16 - r17   : Intra-call registers (PLT, linker)
+    r18         : Platform specific (TLS)
+    r19 - r28   : Callee-saved registers
+    r29         : Frame pointer
+r30: This is the Link Register (LR)
 
+Procedure Call Standard for the Arm 64-bit Architecture
+https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
+END_REGISTERS: arm
+END_ARCHITECTURE: arm
+
+ARCHITECTURE: ppc
 REGISTERS: ppc
 ** function parameters for PPC **
 R0 : Instruction pointer 
@@ -65,7 +73,9 @@ crash> rd 0xc000002542703b68
 c000002542703b68:  c000003b387cf6e8                    ...;8|..
 
 END_REGISTERS: ppc
+END_ARCHITECTURE: ppc
 
+ARCHITECTURE: i386 i686 x86_64 athlon
 INSTRUCTION: lea
 lea - Load effective address
      The lea instruction places the address specified by its
@@ -212,4 +222,66 @@ shl, shr - Shift left and right
 			Caution: for negative integers, it is different from
 			the C semantics of division!
 END_INSTRUCTION: shl shr
+
+END_ARCHITECTURE: i386 i686 x86_64 athlon
+
+
+
+ARCHITECTURE: arm
+
+INSTRUCTION: mov mvn neg
+Move, Move NOT, and Negate.
+
+  Syntax
+    MOV Rd, #expr
+    MOV Rd, Rm
+    MVN Rd, Rm
+    NEG Rd, Rm
+
+where:
+Rd
+  is the destination register.
+expr
+  is an expression that evaluates (at assembly time)to an integer in the range 0-255.
+Rm
+  is the source register.
+
+Usage
+  The MOV instruction places #expr, or the value from Rm, in Rd.
+  The MVN instruction takes the value in Rm, performs a bitwise logical NOT operation on the value, and places the result in Rd.
+  The NEG instruction takes the value in Rm, multiplies it by -1, and places the result in Rd.
+
+Restrictions
+
+  In MOV Rd,#expr, MVN, and NEG instructions, Rd and Rm must be in the range r0 to r7.
+  In MOV Rd, Rm instructions, Rd and Rm can be any register r0 to r15, but see Condition flags.
+
+Condition flags
+  MOV Rd,#expr and MVN instructions update the N and Z flags. They have no effect on the C or V flags.
+  NEG instructions update the N, Z, C, and V flags.
+  MOV Rd, Rm behaves as follows:
+    - if either Rd or Rm is a high register (r8-r15), the flags are unaffected
+    - if both Rd and Rm are low registers (r0-r7), the N and Z flags are updated, and C and V flags are cleared.
+
+    Note
+    You can use LSL, with a shift of zero, to move between low registers without clearing the C and V flags (see ASR, LSL, LSR, and ROR).
+
+Architectures
+  These instructions are available in all T variants of the ARM architecture.
+
+Examples
+    MOV r3,#0
+    MOV r0,r12  ; does not update flags
+    MVN r7,r1
+    NEG r2,r2
+
+Incorrect examples
+    MOV r2,#256 ; immediate value out of range
+    MOV r8,#3   ; cannot move immediate to high register
+    MVN r8,r2   ; high registers not allowed with MVN or NEG
+    NEG r0,#3   ; immediate value not allowed with MVN or NEG
+
+END_INSTRUCTION: mov mvn neg
+
+END_ARCHITECTURE: arm
 
