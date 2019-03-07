@@ -95,7 +95,7 @@ def interpret_one_line(one_line):
 
     result_str = one_line
     words = one_line.split()
-    if len(words) < 3:
+    if len(words) < 3 or one_line.startswith("/") or one_line.startswith(" "):
         return result_str
 
     for op in stack_op_dict:
@@ -114,56 +114,76 @@ def interpret_one_line(one_line):
             break
 
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
-        if words[2] == "mov" and words[3] == "%rsp,%rbp":
-            reg_list = []
-            for stackaddr in register_dict["%rsp"]:
-                actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
-                reg_list.append(actual_addr)
-            register_dict["%rbp"] = reg_list
+        result_str = stack_reg_op(words, result_str)
 
-        elif words[2] == "sub" and words[3].endswith(",%rsp"):
-            # sub    $0x40,%rsp
-            op_words = words[3].split(",")
-            value_to_sub = int(op_words[0][1:], 16)
-            reg_list = []
-            for stackaddr in register_dict["%rsp"]:
-                actual_addr = stackaddr - value_to_sub - (cur_count * stack_unit)
-                reg_list.append(actual_addr)
-            register_dict["%rsp"] = reg_list
 
-        elif "(%rbp)" in words[3]: # mov    %rax,-0x30(%rbp)
-            op_words = words[3].split(",")
-            for op in op_words:
-                if "(%rbp)" in op:
-                    offset = int(op[:-6], 16)
-                    internal_count = 0
-                    for stackaddr in register_dict["%rbp"]:
-                        actual_addr = stackaddr + offset
-                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
-                        if internal_count == 0:
-                            result_str = "%s    ; 0x%s" % (result_str, data)
-                        else:
-                            result_str = "%s, 0x%s" % (result_str, data)
-                        internal_count = internal_count + 1
+    return result_str
 
-                    break
 
-        elif "(%rsp)" in words[3]: # mov    %rdx,0x18(%rsp)
-            op_words = words[3].split(",")
-            for op in op_words:
-                if "(%rsp)" in op:
-                    offset = int(op[:-6], 16)
-                    internal_count = 0
-                    for stackaddr in register_dict["%rsp"]:
-                        actual_addr = stackaddr + offset
-                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
-                        if internal_count == 0:
-                            result_str = "%s    ; 0x%s" % (result_str, data)
-                        else:
-                            result_str = "%s, 0x%s" % (result_str, data)
-                        internal_count = internal_count + 1
+def stack_reg_op(words, result_str):
+    arch = sys_info.machine
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        result_str = x86_stack_reg_op(words, result_str)
+    elif (arch.startswith("arm")):
+        pass
+    elif (arch.startswith("ppc")):
+        pass
 
-                    break
+
+    return result_str
+
+
+def x86_stack_reg_op(words, result_str):
+    if words[2] == "mov" and words[3] == "%rsp,%rbp":
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
+            reg_list.append(actual_addr)
+        register_dict["%rbp"] = reg_list
+
+    elif words[2] == "sub" and words[3].endswith(",%rsp"):
+        # sub    $0x40,%rsp
+        op_words = words[3].split(",")
+        value_to_sub = int(op_words[0][1:], 16)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - value_to_sub - (cur_count * stack_unit)
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    elif "(%rbp)" in words[3]: # mov    %rax,-0x30(%rbp)
+        op_words = words[3].split(",")
+        for op in op_words:
+            if "(%rbp)" in op:
+                offset = int(op[:-6], 16)
+                internal_count = 0
+                for stackaddr in register_dict["%rbp"]:
+                    actual_addr = stackaddr + offset
+                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    if internal_count == 0:
+                        result_str = "%s    ; 0x%s" % (result_str, data)
+                    else:
+                        result_str = "%s, 0x%s" % (result_str, data)
+                    internal_count = internal_count + 1
+
+                break
+
+    elif "(%rsp)" in words[3]: # mov    %rdx,0x18(%rsp)
+        op_words = words[3].split(",")
+        for op in op_words:
+            if "(%rsp)" in op:
+                offset = int(op[:-6], 16)
+                internal_count = 0
+                for stackaddr in register_dict["%rsp"]:
+                    actual_addr = stackaddr + offset
+                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    if internal_count == 0:
+                        result_str = "%s    ; 0x%s" % (result_str, data)
+                    else:
+                        result_str = "%s, 0x%s" % (result_str, data)
+                    internal_count = internal_count + 1
+
+                break
 
 
     return result_str
