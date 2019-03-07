@@ -138,7 +138,10 @@ def ppc_stack_reg_op(words, result_str):
         op_words = words[3].split(",")
         for op in op_words:
             if "(r1)" in op:
-                offset = int(op[:-4], 10)
+                if len(op) > 4:
+                    offset = int(op[:-4], 10)
+                else:
+                    offset = 0
                 internal_count = 0
                 for stackaddr in register_dict["%rsp"]:
                     actual_addr = stackaddr + offset
@@ -176,7 +179,10 @@ def x86_stack_reg_op(words, result_str):
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rbp)" in op:
-                offset = int(op[:-6], 16)
+                if len(op) > 6:
+                    offset = int(op[:-6], 16)
+                else:
+                    offset = 0
                 internal_count = 0
                 for stackaddr in register_dict["%rbp"]:
                     actual_addr = stackaddr + offset + stack_unit
