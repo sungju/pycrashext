@@ -176,7 +176,7 @@ def x86_stack_reg_op(words, result_str):
                 offset = int(op[:-6], 16)
                 internal_count = 0
                 for stackaddr in register_dict["%rbp"]:
-                    actual_addr = stackaddr + offset
+                    actual_addr = stackaddr + offset + stack_unit
                     data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                     if internal_count == 0:
                         result_str = "%s    ; 0x%s" % (result_str, data)
