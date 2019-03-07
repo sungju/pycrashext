@@ -89,7 +89,6 @@ def interpret_one_line(one_line):
     global stack_offset
     global register_dict
 
-
     if len(register_dict) == 0:
         register_dict= { "%rsp" : stackaddr_list, }
 
@@ -116,7 +115,6 @@ def interpret_one_line(one_line):
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
         result_str = stack_reg_op(words, result_str)
 
-
     return result_str
 
 
@@ -127,8 +125,28 @@ def stack_reg_op(words, result_str):
     elif (arch.startswith("arm")):
         pass
     elif (arch.startswith("ppc")):
-        pass
+        result_str = ppc_stack_reg_op(words, result_str)
 
+    return result_str
+
+
+def ppc_stack_reg_op(words, result_str):
+    if "(r1)" in words[3]: # std     r17,-120(r1)
+        op_words = words[3].split(",")
+        for op in op_words:
+            if "(r1)" in op:
+                offset = int(op[:-4], 10)
+                internal_count = 0
+                for stackaddr in register_dict["%rsp"]:
+                    actual_addr = stackaddr + offset
+                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    if internal_count == 0:
+                        result_str = "%s    ; 0x%s" % (result_str, data)
+                    else:
+                        result_str = "%s, 0x%s" % (result_str, data)
+                    internal_count = internal_count + 1
+
+                break
 
     return result_str
 
@@ -185,10 +203,7 @@ def x86_stack_reg_op(words, result_str):
 
                 break
 
-
     return result_str
-
-
 
 
 def set_stack_data(disasm_str, disaddr_str):
@@ -205,7 +220,7 @@ def set_stack_data(disasm_str, disaddr_str):
     bt_str = exec_crash_command("bt")
     funcname = ""
     for one_line in disasm_str.splitlines():
-        if one_line.startswith("/"):
+        if one_line.startswith("/") or one_line.startswith(" "):
             continue
         words = one_line.split()
         funcname = words[1][1:-2]
@@ -214,27 +229,45 @@ def set_stack_data(disasm_str, disaddr_str):
     if funcname == "":  # Not matching with any
         return
 
-    stackfound = 0
-    for one_line in bt_str.splitlines():
-        words = one_line.split()
-        if (len(words) < 5):
-            continue
-        if stackfound == 1:
-            stackaddr_list.append(int(words[1][1:-1], 16))
-            stackfound = 0
-
-        if words[2] == funcname and words[4] == disaddr_str:
-            stackfound = 1
-
-
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
         stack_op_dict = {
             "push" : 0,
         }
-        stack_unit = 8 
+        stack_unit = 8
         stack_offset = 8
 
+        stackfound = 0
+        for one_line in bt_str.splitlines():
+            words = one_line.split()
+            if (len(words) < 5):
+                continue
+            if stackfound == 1:
+                stackaddr_list.append(int(words[1][1:-1], 16))
+                stackfound = 0
+
+            if words[2] == funcname and words[4] == disaddr_str:
+                stackfound = 1
+    elif (arch.startswith("arm")):
+        stack_op_dict = {}
+        stack_unit = 8
+        stack_offset = 0
+    elif (arch.startswith("ppc")):
+        stack_op_dict = {}
+        stack_unit = 8
+        stack_offset = 0
+
+        stackfound = 0
+        for one_line in bt_str.splitlines():
+            words = one_line.split()
+            if not words[0].startswith("#"):
+                continue
+            if stackfound == 1:
+                stackaddr_list.append(int(words[1][1:-1], 16))
+                stackfound = 0
+
+            if words[2] == funcname and words[4] == disaddr_str:
+                stackfound = 1
 
 
 def set_asm_colors():
@@ -257,12 +290,12 @@ def set_asm_colors():
             "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    if (arch.startswith("arm")):
+    elif (arch.startswith("arm")):
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
         }
-    if (arch.startswith("ppc")):
+    elif (arch.startswith("ppc")):
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
