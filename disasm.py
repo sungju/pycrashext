@@ -25,25 +25,11 @@ def disasm():
 
     # Additional options that can pass to the server
     op = OptionParser()
-    op.add_option("-g", "--graph",
-                  action="store_true",
-                  dest="graph",
-                  default=False,
-                  help="display jump graph on the left")
-
     op.add_option("-f", "--full",
                   action="store_true",
                   dest="fullsource",
                   default=False,
                   help="Display full source code")
-
-    op.add_option("-j", "--jump",
-                  action="store",
-                  type="string",
-                  dest="jump_op_list",
-                  default="",
-                  help="Shows graph for the specified jump operations only")
-
 
     op.add_option("-s", "--sourceonly",
                   action="store_true",

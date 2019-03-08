@@ -3,7 +3,6 @@ Written by Daniel Sungju Kwon
 
 It provides additional information into the disassembled code
 Currently it provides source lines if the proper source can be found
-and displays jump graphs as well
 """
 from flask import Flask
 from flask import request
@@ -213,136 +212,6 @@ def read_source_line(source_line, has_header):
     return result
 
 
-JUMP_ORIGIN = 0x10000
-JUMP_TARGET = 0x20000
-JUMP_CORNER = 0x30000
-
-MAX_JMP_LINES = 200
-
-def check_jump_op(op_code):
-    global cur_release_version
-
-    idx = cur_release_version.rfind(".")
-    if idx > -1:
-        arch = cur_release_version[idx + 1:]
-    else:
-        arch = 'x86_64'
-
-    jump_op_set = []
-    exclude_set = []
-
-    if arch == 'x86_64' or arch == 'i386':
-        jump_op_set = [ "j" ]
-    elif arch == 'ppc64le' or arch == 'ppc64':
-        jump_op_set = [ "b" ]
-        exclude_set = [ "bl", "bctrl" ]
-    elif arch.startswith("arm"):
-        jump_op_set = [ "b" ]
-        exclude_set = [ "bl", "bic", "bics", "blx" ]
-    else:
-        jump_op_set = [ "j" ]
-
-    if op_code in exclude_set:
-        return False
-
-    for op in jump_op_set:
-        if op_code.startswith(op):
-            return True
-
-    return False
-
-
-def draw_branches(disasm_str, jump_op_list):
-    result = ""
-    asm_addr_dict = {}
-    loc = 0
-    for line in disasm_str.splitlines():
-        if line.startswith("0x"):
-            words = line.split()
-            asm_addr_dict[words[0]] = loc
-        loc = loc + 1
-
-    total_num = loc
-    jmp_dict = [[0 for x in range(MAX_JMP_LINES)] for y in range(total_num)]
-    has_jmp_dict = [0 for x in range(total_num)]
-    loc = 0
-    jmp_found = 1
-    for line in disasm_str.splitlines():
-        if line.startswith("0x"):
-            words = line.split()
-            is_jump_op = False
-            if jump_op_list == None:
-                if check_jump_op(words[2]):
-                    is_jump_op = True
-            else:
-                if words[2] in jump_op_list:
-                    is_jump_op = True
-
-            if is_jump_op:
-                if jmp_found >= MAX_JMP_LINES:
-                    break
-
-                # Consider a situation that implies the jumping address
-                jmpaddr = ""
-                if len(words) > 3:
-                    jmp_op_words = words[3].split(",")
-                    jmpaddr = jmp_op_words[len(jmp_op_words) - 1]
-
-                if jmpaddr != "" and jmpaddr in asm_addr_dict:
-                    target_idx = asm_addr_dict[jmpaddr]
-                else:
-                    target_idx = total_num
-
-                current_idx = loc
-                start = min(current_idx, target_idx)
-                end = max(current_idx, target_idx)
-                if end >= total_num:
-                    end = total_num - 1
-
-                for i in range(start, end):
-                    jmp_dict[i][jmp_found - 1] = jmp_dict[i][jmp_found - 1] + 1
-                    has_jmp_dict[i] = has_jmp_dict[i] + 1
-                jmp_dict[current_idx][jmp_found] = JUMP_ORIGIN # current
-                jmp_dict[current_idx][jmp_found - 1] = JUMP_CORNER # current
-                if target_idx < total_num:
-                    jmp_dict[target_idx][jmp_found] = JUMP_TARGET # target
-                    jmp_dict[target_idx][jmp_found - 1] = JUMP_CORNER # target
-
-                jmp_found = jmp_found + 1
-        loc = loc + 1
-
-    result = ""
-    loc = 0
-    for line in disasm_str.splitlines():
-        jmp_str = " "
-        line_str = ""
-        for i in range(0, jmp_found):
-            if (jmp_dict[loc][i] & JUMP_ORIGIN) == JUMP_ORIGIN:
-                jmp_str = "-"
-            if (jmp_dict[loc][i] & JUMP_TARGET) == JUMP_TARGET:
-                jmp_str = "="
-            if (jmp_dict[loc][i] & JUMP_CORNER) == JUMP_CORNER:
-                jmp_str = "+"
-            if jmp_dict[loc][i] > 0 and jmp_str == " ":
-                jmp_str = "|"
-
-            if i == jmp_found - 1:
-                if jmp_str == "-":
-                    jmp_str = "*"
-                if jmp_str == "=":
-                    jmp_str = ">"
-
-            line_str = line_str + jmp_str
-            if jmp_str != "-" and jmp_str != "=" and \
-               jmp_str != ">" and jmp_str != '*':
-                jmp_str = " "
-
-        result = result + line_str + line + "\n"
-        loc = loc + 1
-
-    return result
-
-
 def read_a_function_header(file_lines, line_number):
     result = ""
     is_in_comment = False
@@ -500,23 +369,6 @@ def disasm():
     except:
         return 'error found in base64'
 
-
-    # Draw branch graphs
-    try:
-        jump_graph = request.form["jump_graph"]
-    except:
-        jump_gaph = ""
-
-    try:
-        jump_op_list = None
-        if jump_graph != "":
-            jump_op_str = request.form["jump_op_list"]
-        if jump_op_str != None and jump_op_str.strip() != "":
-            jump_op_list = jump_op_str.split(",")
-    except:
-        jump_op_list = None
-
-
     # Print source code only
     try:
         full_source = request.form["full_source"]
@@ -559,8 +411,5 @@ def disasm():
         if  line.startswith("/") and error_str == "":
             source_line = read_source_line(line, has_header)
             result = result + source_line
-
-    if jump_graph != "":
-        result = draw_branches(result, jump_op_list)
 
     return error_str + result.rstrip()

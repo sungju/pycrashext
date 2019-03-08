@@ -19,6 +19,139 @@ import crashcolor
 import crashhelper
 
 
+JUMP_ORIGIN = 0x10000
+JUMP_TARGET = 0x20000
+JUMP_CORNER = 0x30000
+
+MAX_JMP_LINES = 200
+
+jump_op_set = []
+exclude_set = []
+
+def check_jump_op(op_code):
+    global jump_op_set
+    global exclude_set
+
+    if op_code in exclude_set:
+        return False
+
+    for op in jump_op_set:
+        if op_code.startswith(op):
+            return True
+
+    return False
+
+
+def set_jump_op_list():
+    global jump_op_set
+    global exclude_set
+
+    arch = sys_info.machine
+
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        jump_op_set = [ "j" ]
+    elif (arch.startswith("ppc")):
+        jump_op_set = [ "b" ]
+        exclude_set = [ "bl", "bctrl" ]
+    elif (arch.startswith("arm")):
+        jump_op_set = [ "b" ]
+        exclude_set = [ "bl", "bic", "bics", "blx" ]
+    else:
+        jump_op_set = [ "j" ]
+
+
+def draw_branches(disasm_str, jump_op_list):
+    result = ""
+    asm_addr_dict = {}
+    loc = 0
+    for line in disasm_str.splitlines():
+        if line.startswith("0x"):
+            words = line.split()
+            asm_addr_dict[words[0]] = loc
+        loc = loc + 1
+
+    total_num = loc
+    jmp_dict = [[0 for x in range(MAX_JMP_LINES)] for y in range(total_num)]
+    has_jmp_dict = [0 for x in range(total_num)]
+    loc = 0
+    jmp_found = 1
+    set_jump_op_list()
+    for line in disasm_str.splitlines():
+        if line.startswith("0x"):
+            words = line.split()
+            is_jump_op = False
+            if jump_op_list == "":
+                if check_jump_op(words[2]):
+                    is_jump_op = True
+            else:
+                if words[2] in jump_op_list:
+                    is_jump_op = True
+
+            if is_jump_op:
+                if jmp_found >= MAX_JMP_LINES:
+                    break
+
+                # Consider a situation that implies the jumping address
+                jmpaddr = ""
+                if len(words) > 3:
+                    jmp_op_words = words[3].split(",")
+                    jmpaddr = jmp_op_words[len(jmp_op_words) - 1]
+
+                if jmpaddr != "" and jmpaddr in asm_addr_dict:
+                    target_idx = asm_addr_dict[jmpaddr]
+                else:
+                    target_idx = total_num
+
+                current_idx = loc
+                start = min(current_idx, target_idx)
+                end = max(current_idx, target_idx)
+                if end >= total_num:
+                    end = total_num - 1
+
+                for i in range(start, end):
+                    jmp_dict[i][jmp_found - 1] = jmp_dict[i][jmp_found - 1] + 1
+                    has_jmp_dict[i] = has_jmp_dict[i] + 1
+                jmp_dict[current_idx][jmp_found] = JUMP_ORIGIN # current
+                jmp_dict[current_idx][jmp_found - 1] = JUMP_CORNER # current
+                if target_idx < total_num:
+                    jmp_dict[target_idx][jmp_found] = JUMP_TARGET # target
+                    jmp_dict[target_idx][jmp_found - 1] = JUMP_CORNER # target
+
+                jmp_found = jmp_found + 1
+        loc = loc + 1
+
+    result = ""
+    loc = 0
+    for line in disasm_str.splitlines():
+        jmp_str = " "
+        line_str = ""
+        for i in range(0, jmp_found):
+            if (jmp_dict[loc][i] & JUMP_ORIGIN) == JUMP_ORIGIN:
+                jmp_str = "-"
+            if (jmp_dict[loc][i] & JUMP_TARGET) == JUMP_TARGET:
+                jmp_str = "="
+            if (jmp_dict[loc][i] & JUMP_CORNER) == JUMP_CORNER:
+                jmp_str = "+"
+            if jmp_dict[loc][i] > 0 and jmp_str == " ":
+                jmp_str = "|"
+
+            if i == jmp_found - 1:
+                if jmp_str == "-":
+                    jmp_str = "*"
+                if jmp_str == "=":
+                    jmp_str = ">"
+
+            line_str = line_str + jmp_str
+            if jmp_str != "-" and jmp_str != "=" and \
+               jmp_str != ">" and jmp_str != '*':
+                jmp_str = " "
+
+        result = result + line_str + line + "\n"
+        loc = loc + 1
+
+    return result
+
+
 def is_command_exist(name):
     from shutil import which
 
@@ -347,16 +480,12 @@ def disasm(ins_addr, o, args, cmd_path_list):
         options = options + " -r"
 
     cmd_options = ""
-    if (o.graph):
-        cmd_options = cmd_options + " -g"
     if (o.sourceonly):
         cmd_options = cmd_options + " -s"
     if (o.fullsource):
         cmd_options = cmd_options + " -f"
         if (not o.reverse):
             options = options + " -r"
-    if (o.jump_op_list != ""):
-        cmd_options = cmd_options + " -j '" + o.jump_op_list + "'"
 
     if ":" in ins_addr or \
        (not ins_addr.startswith(".") and "." in ins_addr): # It's for ppc
@@ -385,6 +514,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         print (disasm_str)
         return
 
+    result_str = ""
     if (o.noaction):
         result_str = disasm_str
     else:
@@ -395,6 +525,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
                                                     (disasm_str, python_cmd, \
                                                      disasm_path, cmd_options))
                 break
+
+    if (o.graph):
+        result_str = draw_branches(result_str, o.jump_op_list)
 
     set_stack_data(disasm_str, ins_addr) # To retreive stack data
     set_asm_colors()
