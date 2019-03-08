@@ -40,11 +40,6 @@ def disasm():
     (o, args) = op.parse_args()
 
 
-    # Draw jump lines
-    draw_graph = ""
-    if o.graph:
-        draw_graph = "draw"
-
     full_source = ""
     if o.fullsource:
         full_source = "fullsource"
@@ -53,13 +48,7 @@ def disasm():
     if o.sourceonly:
         source_only = "sourceonly"
 
-
-    jump_op_list = ""
-    if o.jump_op_list != "":
-        jump_op_list = o.jump_op_list
-
-    data = {"asm_str" : encoded_asm, "jump_graph" : draw_graph,
-            "full_source" : full_source, "jump_op_list" : jump_op_list,
+    data = {"asm_str" : encoded_asm, "full_source" : full_source,
             "source_only" : source_only}
     try:
         res = r.post(encode_url, data = data).text
