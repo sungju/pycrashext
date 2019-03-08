@@ -153,9 +153,10 @@ def draw_branches(disasm_str, jump_op_list):
 
 
 def is_command_exist(name):
-    from shutil import which
-
-    return which(name) is not None
+    result_str = crashhelper.run_gdb_command("!which %s" % (name))
+    if result_str.startswith("which"):
+        return False
+    return True
 
 
 def get_kernel_version():

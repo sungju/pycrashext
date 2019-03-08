@@ -17,8 +17,9 @@ def run_command_with_file(func, command, file_content):
     shell commands. Below will capture it properly."""
     try:
         temp_output_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-output-tmp")
+        temp_error_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-error-tmp")
         temp_input_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-input-tmp")
-        command = command + " > " + temp_output_name
+        command = command + " > " + temp_output_name + " 2> " + temp_error_name
         if file_content != "":
             with open(temp_input_name, 'w') as f:
                 f.write(file_content)
@@ -29,12 +30,20 @@ def run_command_with_file(func, command, file_content):
         if os.path.exists(temp_output_name):
             with open(temp_output_name, 'r') as f:
                 try:
-                    lines = "".join(f.readlines())
+                    lines = lines + "".join(f.readlines())
                 except:
                     lines = "Failed to read " + temp_output_name
 
+        if os.path.exists(temp_error_name):
+            with open(temp_error_name, 'r') as f:
+                try:
+                    lines = lines + "".join(f.readlines())
+                except:
+                    lines = "Failed to read " + temp_error_name
+
         try:
             os.remove(temp_output_name)
+            os.remove(temp_error_name)
             os.remove(temp_input_name)
         except:
             pass
