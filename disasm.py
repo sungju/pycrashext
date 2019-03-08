@@ -15,6 +15,14 @@ def disasm():
     except:
         encode_url = ""
 
+
+    if encode_url == "":
+        res = "\tCRASHEXT_SERVER environment variable not configured\n\n"\
+               + orig_asm
+        print(res, end='')
+        return
+
+
     # Additional options that can pass to the server
     op = OptionParser()
     op.add_option("-g", "--graph",
