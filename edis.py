@@ -538,6 +538,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         if idx >= 0:
             line = one_line[idx:]
             graph = one_line[:idx]
+            is_disasm_line = True
         else: # source line
             prog = re.compile(r"(?P<line_number>[0-9]+)")
             m = prog.search(one_line)
@@ -553,6 +554,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
             idx = one_line.find(line)
             line = one_line[idx:]
             graph = one_line[:idx]
+            is_disasm_line = False
 
         idx = 2
         default_color = crashcolor.RESET
@@ -613,20 +615,23 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     line = line[next_idx:]
 
                 crashcolor.set_color(crashcolor.RESET)
-                comment_idx = line.find(";")
 
-                if comment_idx > -1:
-                    print(line[:comment_idx], end='')
-                    crashcolor.set_color(crashcolor.LIGHTYELLOW)
-                    print(line[comment_idx:])
-                else:
-                    comment_idx = line.find("<")
+                if (is_disasm_line):
+                    comment_idx = line.find(";")
                     if comment_idx > -1:
                         print(line[:comment_idx], end='')
-                        crashcolor.set_color(crashcolor.LIGHTMAGENTA)
+                        crashcolor.set_color(crashcolor.LIGHTYELLOW)
                         print(line[comment_idx:])
                     else:
-                        print(line)
+                        comment_idx = line.find("<")
+                        if comment_idx > -1:
+                            print(line[:comment_idx], end='')
+                            crashcolor.set_color(crashcolor.LIGHTMAGENTA)
+                            print(line[comment_idx:])
+                        else:
+                            print(line)
+                else:
+                    print(line)
 
                 crashcolor.set_color(crashcolor.RESET)
             else:
