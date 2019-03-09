@@ -120,7 +120,7 @@ def cpuinfo():
         sys.exit(0)
 
     # default action
-    show_cpufreq()
+    show_cpuid(o)
 
 if ( __name__ == '__main__'):
     cpuinfo()
