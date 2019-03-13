@@ -386,14 +386,21 @@ def set_stack_data(disasm_str, disaddr_str):
         stackfound = 0
         for one_line in bt_str.splitlines():
             words = one_line.split()
+            if len(words) > 0:
+                if words[0] == "[exception":
+                    if words[2].startswith(funcname + "+"):
+                        stackfound = 1
+                    continue
+
             if (len(words) < 5):
                 continue
-            if stackfound == 1:
+            if words[0].startswith("#") and stackfound == 1:
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
             if words[2] == funcname and words[4] == disaddr_str:
                 stackfound = 1
+
     elif (arch.startswith("arm")):
         stack_op_dict = {}
         stack_unit = 8
