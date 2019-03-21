@@ -175,6 +175,7 @@ def module_info(options):
     tainted_count = 0
     prev_end_addr = 0
     for module in module_list:
+        start_addr = end_addr = 0
         if options.shows_gaps or options.shows_addr or options.shows_unloaded:
             alloc_size, start_addr, end_addr = get_module_alloc_data(module)
             if prev_end_addr == 0:
