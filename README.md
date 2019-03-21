@@ -320,6 +320,43 @@ crash> modinfo --disasm=oracleacfs
 ...
 ```
 
+This command also can be very useful to track down any recently unloaded modules. It can be useful to find rootkit modules which has just disappeared.
+
+```
+crash> modinfo -u
+struct module *    MODULE_NAME                     SIZE 
+0xffffffffa000ed00 dm_mod                         81692 
+0xffffffffa0016420 iTCO_vendor_support             3088 
+...
+0xffffffffa0138e60 dca                             7197 
+0xffffffffa013df40 main                            9385  <-- rootkit module
+0xffffffffa014bee0 ioatdma                        58482 
+...
+
+
+crash> modinfo -u -g
+struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
+0xffffffffa000ed00 dm_mod                         81692      86016          0
+...
+
+0xffffffffa0138e60 dca                             7197      12288       8192
+0xffffffffa013df40 main                            9385 ---------------------
+0xffffffffa014bee0 ioatdma                        58482      65536      20480
+...
+
+crash> modinfo -u -g -a
+struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
+0xffffffffa000ed00 dm_mod                         81692      86016          0
+...
+0xffffffffa0138e60 dca                             7197      12288       8192
+   addr range : 0xffffffffa0138000 - 0xffffffffa013b000
+0xffffffffa013df40 main                            9385 ---------------------
+   addr range : 0xffffffffa013c000 - 0xffffffffa0140000
+0xffffffffa014bee0 ioatdma                        58482      65536      20480
+   addr range : 0xffffffffa0140000 - 0xffffffffa0150000
+...
+```
+
 
 ### cpuinfo ###
 It provides CPU related information include how cores are constructed.

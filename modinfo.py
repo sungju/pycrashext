@@ -95,7 +95,7 @@ def do_check_unloaded_module(start_addr, end_addr):
             pass
 
     if real_start_addr == -1:
-        return
+        return None
 
     real_end_addr = real_start_addr
     for i in range(real_start_addr, end_addr):
@@ -124,7 +124,7 @@ def do_check_unloaded_module(start_addr, end_addr):
 
 
     if strtab_addr == 0:
-        return
+        return None
 
     strtab_addr_str = "%x" % strtab_addr
     result = exec_crash_command("rd 0x%x -e 0x%x" % (real_start_addr, real_end_addr))
@@ -135,33 +135,34 @@ def do_check_unloaded_module(start_addr, end_addr):
             strtab_line = line
             break
     if strtab_line == "":
-        return
+        return None
 
     words = strtab_line.split(':')
     if len(words) < 2:
-        return
+        return None
     addr = int(words[0], 16)
     values = words[1].split()
     strtab_offset = member_offset('struct module', 'strtab')
     module_addr = 0
     if len(values) < 2:
-        return
+        return None
     if values[0] == strtab_addr_str:
         module_addr = addr - strtab_offset
     elif values[1] == strtab_addr_str:
         module_addr = (addr + 8) - strtab_offset
 
     if module_addr == 0:
-        return
+        return None
 
     module = readSU("struct module", module_addr)
-    crashcolor.set_color(crashcolor.RED | crashcolor.BLINK | crashcolor.UNDERLINE)
-    print("{0x%x %-25s %10d}" % (module_addr, module.name, module.core_size))
-    crashcolor.set_color(crashcolor.RESET)
+    return module
 
+
+tainted_count = 0
 
 def module_info(options):
     global module_list
+    global tainted_count
 
     if (len(module_list) == 0):
         load_module_details()
@@ -179,32 +180,28 @@ def module_info(options):
             if prev_end_addr == 0:
                 prev_end_addr = start_addr
 
+        unloaded_module = None
         if options.shows_unloaded:
             if (start_addr - prev_end_addr) > 4096:
                 # Check it only if the gap is more than 1 page.
-                do_check_unloaded_module(prev_end_addr, start_addr - 1)
+                unloaded_module = do_check_unloaded_module(prev_end_addr, start_addr - 1)
 
-        tainted = not is_our_module(module)
-        if options.shows_tainted and not tainted:
-            continue
-        if tainted:
-            tainted_count = tainted_count + 1
-            crashcolor.set_color(crashcolor.LIGHTRED)
+        if unloaded_module != None:
+            um_alloc_size, um_start_addr, um_end_addr = get_module_alloc_data(unloaded_module)
+            gap_info_str = ""
+            if options.shows_gaps:
+                gap_info_str = "-" * 21
+            print_module(unloaded_module, options, gap_info_str,
+                         um_start_addr, um_end_addr, unloaded=True)
+
         gap_info_str = ""
         if options.shows_gaps:
             gap_info_str = "%10d %10d" % (alloc_size, start_addr - prev_end_addr)
+
+        print_module(module, options, gap_info_str, start_addr, end_addr)
+
         if options.shows_gaps or options.shows_unloaded:
             prev_end_addr = end_addr
-
-        print("0x%x %-25s %10d %s" % (long(module),
-                                 module.name,
-                                 module.core_size,
-                                 gap_info_str))
-        if options.shows_addr:
-            print(" " * 3, end="")
-            crashcolor.set_color(crashcolor.UNDERLINE)
-            print("addr range : 0x%x - 0x%x" % (start_addr, end_addr))
-        crashcolor.set_color(crashcolor.RESET)
 
     if tainted_count > 0:
         print("=" * 75)
@@ -216,6 +213,30 @@ def module_info(options):
         crashcolor.set_color(crashcolor.BLUE)
         print("\n\tLast unloaded module : %s" % (last_unloaded_module))
         crashcolor.set_color(crashcolor.RESET)
+
+
+def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=False):
+    global tainted_count
+
+    tainted = not is_our_module(module)
+    if options.shows_tainted and not tainted:
+        return
+    if tainted:
+        tainted_count = tainted_count + 1
+        crashcolor.set_color(crashcolor.LIGHTRED)
+    if unloaded:
+        crashcolor.set_color(crashcolor.MAGENTA | crashcolor.BOLD)
+
+    print("0x%x %-25s %10d %s" % (long(module),
+                             module.name,
+                             module.core_size,
+                             gap_info_str))
+    if options.shows_addr:
+        print(" " * 3, end="")
+        crashcolor.set_color(crashcolor.UNDERLINE)
+        print("addr range : 0x%x - 0x%x" % (start_addr, end_addr))
+    crashcolor.set_color(crashcolor.RESET)
+
 
 
 def find_module(module_name):
