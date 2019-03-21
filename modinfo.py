@@ -190,7 +190,7 @@ def module_info(options):
             um_alloc_size, um_start_addr, um_end_addr = get_module_alloc_data(unloaded_module)
             gap_info_str = ""
             if options.shows_gaps:
-                gap_info_str = "-" * 21
+                gap_info_str = "%10s %10s" % ("N/A", "N/A")
             print_module(unloaded_module, options, gap_info_str,
                          um_start_addr, um_end_addr, unloaded=True)
 

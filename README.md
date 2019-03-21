@@ -340,7 +340,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 ...
 
 0xffffffffa0138e60 dca                             7197      12288       8192
-0xffffffffa013df40 main                            9385 ---------------------
+0xffffffffa013df40 main                            9385        N/A        N/A
 0xffffffffa014bee0 ioatdma                        58482      65536      20480
 ...
 
@@ -350,7 +350,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 ...
 0xffffffffa0138e60 dca                             7197      12288       8192
    addr range : 0xffffffffa0138000 - 0xffffffffa013b000
-0xffffffffa013df40 main                            9385 ---------------------
+0xffffffffa013df40 main                            9385        N/A        N/A
    addr range : 0xffffffffa013c000 - 0xffffffffa0140000
 0xffffffffa014bee0 ioatdma                        58482      65536      20480
    addr range : 0xffffffffa0140000 - 0xffffffffa0150000
