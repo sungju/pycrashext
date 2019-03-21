@@ -687,12 +687,18 @@ def edis():
                   dest="jump_op_list",
                   help="Shows graph for the specified jump operations only")
 
-    op.add_option("-n", "--noaction",
-                  action="store_true",
-                  dest="noaction",
-                  default=False,
-                  help="Only colorising the output and not connection to server")
 
+    try:
+        encode_url = os.environ['CRASHEXT_SERVER'] + '/api/disasm'
+    except:
+        encode_url = ""
+
+    if encode_url != "":
+        op.add_option("-n", "--noaction",
+                      action="store_true",
+                      dest="noaction",
+                      default=False,
+                      help="Only colorising the output and not connection to server")
 
     op.add_option("-s", "--sourceonly",
                   action="store_true",
