@@ -9,6 +9,7 @@ from pykdump.API import *
 from LinuxDump import Tasks
 import sys
 import crashcolor
+import crashhelper
 
 module_list = []
 def load_module_details():
@@ -81,6 +82,83 @@ def get_module_alloc_data(module):
     return int(alloc_size), int(start_addr, 16), int(end_addr, 16)
 
 
+def do_check_unloaded_module(start_addr, end_addr):
+    real_start_addr = -1
+    real_end_addr = -1
+
+    for i in range(start_addr, end_addr):
+        try:
+            readLong(i)
+            real_start_addr = i
+            break
+        except:
+            pass
+
+    if real_start_addr == -1:
+        return
+
+    real_end_addr = real_start_addr
+    for i in range(real_start_addr, end_addr):
+        try:
+            readLong(i)
+            real_end_addr = i
+        except:
+            break
+
+    result = exec_crash_command("rd 0x%x -e 0x%x -a" % (real_start_addr, real_end_addr))
+    result_lines = result.splitlines()
+    prev_addr = 0
+    prev_str_len = 0
+    strtab_addr = 0
+    for line in result_lines:
+        words = line.split(':')
+        line_addr = int(words[0], 16)
+        if words[1].strip() == "__this_module":
+            break
+        if prev_addr != 0:
+            if line_addr != (prev_addr + prev_str_len + 1):
+                strtab_addr = line_addr - 1
+
+        prev_addr = line_addr
+        prev_str_len = len(words[1])
+
+
+    if strtab_addr == 0:
+        return
+
+    strtab_addr_str = "%x" % strtab_addr
+    result = exec_crash_command("rd 0x%x -e 0x%x" % (real_start_addr, real_end_addr))
+    result_lines = result.splitlines()
+    strtab_line = ""
+    for line in result_lines:
+        if strtab_addr_str in line:
+            strtab_line = line
+            break
+    if strtab_line == "":
+        return
+
+    words = strtab_line.split(':')
+    if len(words) < 2:
+        return
+    addr = int(words[0], 16)
+    values = words[1].split()
+    strtab_offset = member_offset('struct module', 'strtab')
+    module_addr = 0
+    if len(values) < 2:
+        return
+    if values[0] == strtab_addr_str:
+        module_addr = addr - strtab_offset
+    elif values[1] == strtab_addr_str:
+        module_addr = (addr + 8) - strtab_offset
+
+    if module_addr == 0:
+        return
+
+    module = readSU("struct module", module_addr)
+    crashcolor.set_color(crashcolor.RED | crashcolor.BLINK | crashcolor.UNDERLINE)
+    print("{0x%x %-25s %10d}" % (module_addr, module.name, module.core_size))
+    crashcolor.set_color(crashcolor.RESET)
+
 
 def module_info(options):
     global module_list
@@ -96,10 +174,15 @@ def module_info(options):
     tainted_count = 0
     prev_end_addr = 0
     for module in module_list:
-        if options.shows_gaps or options.shows_addr:
+        if options.shows_gaps or options.shows_addr or options.shows_unloaded:
             alloc_size, start_addr, end_addr = get_module_alloc_data(module)
             if prev_end_addr == 0:
                 prev_end_addr = start_addr
+
+        if options.shows_unloaded:
+            if (start_addr - prev_end_addr) > 4096:
+                # Check it only if the gap is more than 1 page.
+                do_check_unloaded_module(prev_end_addr, start_addr - 1)
 
         tainted = not is_our_module(module)
         if options.shows_tainted and not tainted:
@@ -110,6 +193,7 @@ def module_info(options):
         gap_info_str = ""
         if options.shows_gaps:
             gap_info_str = "%10d %10d" % (alloc_size, start_addr - prev_end_addr)
+        if options.shows_gaps or options.shows_unloaded:
             prev_end_addr = end_addr
 
         print("0x%x %-25s %10d %s" % (long(module),
@@ -265,6 +349,9 @@ def modinfo():
     op.add_option("-a", dest="shows_addr", default=False,
                   action="store_true",
                   help="Shows address range for the module")
+    op.add_option("-u", dest="shows_unloaded", default=False,
+                  action="store_true",
+                  help="Shows unloaded module data if possible")
 
     (o, args) = op.parse_args()
 
