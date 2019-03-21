@@ -96,7 +96,7 @@ def module_info(options):
     tainted_count = 0
     prev_end_addr = 0
     for module in module_list:
-        if options.shows_gaps:
+        if options.shows_gaps or options.shows_addr:
             alloc_size, start_addr, end_addr = get_module_alloc_data(module)
             if prev_end_addr == 0:
                 prev_end_addr = start_addr
@@ -116,6 +116,10 @@ def module_info(options):
                                  module.name,
                                  module.core_size,
                                  gap_info_str))
+        if options.shows_addr:
+            print(" " * 3, end="")
+            crashcolor.set_color(crashcolor.UNDERLINE)
+            print("addr range : 0x%x - 0x%x" % (start_addr, end_addr))
         crashcolor.set_color(crashcolor.RESET)
 
     if tainted_count > 0:
@@ -258,6 +262,9 @@ def modinfo():
     op.add_option("-g", dest="shows_gaps", default=False,
                   action="store_true",
                   help="Shows gaps between modules as well as phyiscally allocated sizes")
+    op.add_option("-a", dest="shows_addr", default=False,
+                  action="store_true",
+                  help="Shows address range for the module")
 
     (o, args) = op.parse_args()
 
