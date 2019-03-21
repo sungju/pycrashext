@@ -36,6 +36,9 @@ def load_module_details():
         pass
 
 
+    module_list = sorted(module_list, reverse=False)
+
+
 def is_our_module(module_addr):
     module = readSU("struct module", module_addr)
     if module == None:
@@ -53,27 +56,66 @@ def is_our_module(module_addr):
 
     return True
 
+
+def get_module_alloc_data(module):
+    result = exec_crash_command("kmem 0x%x" % (long(module)))
+    resultlines = result.splitlines()
+    found = 0
+    alloc_size = 0
+    start_addr = 0
+    end_addr = 0
+    for line in resultlines:
+        if found == 1:
+            words = line.split()
+            if len(words) < 6:
+                found = 0
+                continue
+            alloc_size = words[5]
+            start_addr = words[2]
+            end_addr = words[4]
+            break
+
+        if "ADDRESS RANGE" in line:
+            found = 1
+
+    return int(alloc_size), int(start_addr, 16), int(end_addr, 16)
+
+
+
 def module_info(options):
     global module_list
 
     if (len(module_list) == 0):
         load_module_details()
 
-    print("%-18s %-25s %10s" % ("struct module *",
+    print("%-18s %-25s %10s %s" % ("struct module *",
                       "MODULE_NAME",
-                      "SIZE"))
+                      "SIZE",
+                      "ALLOC_SIZE    GAPSIZE" if options.shows_gaps else ""))
 
     tainted_count = 0
+    prev_end_addr = 0
     for module in module_list:
+        if options.shows_gaps:
+            alloc_size, start_addr, end_addr = get_module_alloc_data(module)
+            if prev_end_addr == 0:
+                prev_end_addr = start_addr
+
         tainted = not is_our_module(module)
         if options.shows_tainted and not tainted:
             continue
         if tainted:
             tainted_count = tainted_count + 1
             crashcolor.set_color(crashcolor.LIGHTRED)
-        print("0x%x %-25s %10d" % (long(module),
+        gap_info_str = ""
+        if options.shows_gaps:
+            gap_info_str = "%10d %10d" % (alloc_size, start_addr - prev_end_addr)
+            prev_end_addr = end_addr
+
+        print("0x%x %-25s %10d %s" % (long(module),
                                  module.name,
-                                 module.core_size))
+                                 module.core_size,
+                                 gap_info_str))
         crashcolor.set_color(crashcolor.RESET)
 
     if tainted_count > 0:
@@ -213,6 +255,9 @@ def modinfo():
     op.add_option("-t", dest="shows_tainted", default=False,
                   action="store_true",
                   help="Shows tainted modules only")
+    op.add_option("-g", dest="shows_gaps", default=False,
+                  action="store_true",
+                  help="Shows gaps between modules as well as phyiscally allocated sizes")
 
     (o, args) = op.parse_args()
 
