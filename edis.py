@@ -495,6 +495,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
         if (not o.reverse):
             options = options + " -r"
 
+    if ins_addr.startswith("/"):
+        ins_addr = ins_addr[1:] # get rid of the first slash
+
     if ":" in ins_addr or \
        (not ins_addr.startswith(".") and "." in ins_addr): # It's for ppc
         if ":" not in ins_addr: # Let's make fake line number
