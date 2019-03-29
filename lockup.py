@@ -11,6 +11,8 @@ from pykdump.API import *
 from LinuxDump import Tasks
 from LinuxDump.trees import *
 
+import crashcolor
+
 import sys
 
 
@@ -210,18 +212,29 @@ def lockup_display(reverse_sort, show_tasks, options):
     else:
         now = rqsorted[-1].Timestamp
 
+    try:
+        watchdog_thresh = readSymbol("watchdog_thresh")
+    except:
+        watchdog_thresh = -1
+
     for rq in rqsorted:
         prio = rq.curr.prio
         if (rq.curr.policy != 0):
             prio = rq.curr.rt_priority
 
+        delayed_time = (now - rq.Timestamp) / 1000000000
+        if watchdog_thresh > 0 and delayed_time >= watchdog_thresh:
+            crashcolor.set_color(crashcolor.BLUE)
+
         print ("CPU %3d: %10.2f sec behind by "
                "0x%x, %s [%s:%3d] (%d in queue)" %
-               (rq.cpu, (now - rq.Timestamp) / 1000000000,
+               (rq.cpu, delayed_time,
                 rq.curr, rq.curr.comm,
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
+
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def lockup():
