@@ -26,7 +26,7 @@ ot_task_list = []
 def get_task_list(options, args):
     global ru_task_list
     global in_task_list
-    global run_task_list
+    global un_task_list
     global zo_task_list
     global ot_task_list
 
