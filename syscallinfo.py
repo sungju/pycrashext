@@ -58,18 +58,18 @@ def show_syscall_table(options):
     sys_call_table, max_syscalls = sys_call_table_info()
 
     idx = 0
-    kernel_start_addr = get_kernel_start_addr()
     while True:
         if max_syscalls > 0:
             call_addr = sys_call_table[idx]
         else:
             call_addr = readULong(sys_call_table + idx * 8)
 
-        if kernel_start_addr > 0 and call_addr < kernel_start_addr:
+        # sys_call_table boundary has the value 'warn_bad_vsyscall'
+        if call_addr == 0x6461625f6e726177: # '6461625f6e726177 warn_bad'
             break
 
         if call_addr == 0:
-            break
+            continue
 
         result = exec_crash_command("sym 0x%x" % call_addr)
         if result != None and result.startswith("sym"):
@@ -114,18 +114,18 @@ def check_syscall_table(options):
     hook_call_no = 0
     trap_call_no = 0
     idx = 0
-    kernel_start_addr = get_kernel_start_addr()
     while True:
         if max_syscalls > 0:
             call_addr = sys_call_table[idx]
         else:
             call_addr = readULong(sys_call_table + idx * 8)
 
-        if kernel_start_addr > 0 and call_addr < kernel_start_addr:
+        # sys_call_table boundary has the value 'warn_bad_vsyscall'
+        if call_addr == 0x6461625f6e726177: # '6461625f6e726177 warn_bad'
             break
 
         if call_addr == 0:
-            break
+            continue
 
         result = exec_crash_command("sym 0x%x" % call_addr)
         if result.startswith("sym"):
