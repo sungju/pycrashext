@@ -100,6 +100,33 @@ def show_cpufreq():
             except:
                 pass
 
+
+
+TLBSTATE_OK=1
+TLBSTATE_LAZY=2
+
+def tlb_str(state):
+    if state == TLBSTATE_OK:
+        return "TLBSTATE_OK"
+    elif state == TLBSTATE_LAZY:
+        return "TLBSTATE_LAZY"
+
+    return ""
+
+
+def show_tlb(options):
+    cpuinfo_addrs = percpu.get_cpu_var("cpu_tlbstate")
+    for cpu, addr in enumerate(cpuinfo_addrs):
+        tlb_state = readSU("struct tlb_state", addr)
+        if tlb_state.state == TLBSTATE_LAZY:
+            crashcolor.set_color(crashcolor.BLACK)
+        elif tlb_state.state == TLBSTATE_OK:
+            crashcolor.set_color(crashcolor.LIGHTGREEN)
+        print("CPU %3d : active_mm = 0x%x, state = %d (%s)" %
+              (cpu, tlb_state.active_mm, tlb_state.state, tlb_str(tlb_state.state)))
+        crashcolor.set_color(crashcolor.RESET)
+
+
 def cpuinfo():
     op = OptionParser()
     op.add_option("--cpufreq", dest="cpufreq", default=0,
@@ -108,6 +135,9 @@ def cpuinfo():
     op.add_option("--cpuid", dest="cpuid", default=0,
                   action="store_true",
                   help="Show CPU's physical and core ID")
+    op.add_option("--tlb", dest="tlb", default=0,
+                  action="store_true",
+                  help="Show CPU tlb state")
 
     (o, args) = op.parse_args()
 
@@ -117,6 +147,11 @@ def cpuinfo():
 
     if (o.cpuid):
         show_cpuid(o)
+        sys.exit(0)
+
+
+    if (o.tlb):
+        show_tlb(o)
         sys.exit(0)
 
     # default action
