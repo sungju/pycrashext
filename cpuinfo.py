@@ -118,12 +118,22 @@ def show_tlb(options):
     cpuinfo_addrs = percpu.get_cpu_var("cpu_tlbstate")
     for cpu, addr in enumerate(cpuinfo_addrs):
         tlb_state = readSU("struct tlb_state", addr)
+        task = None
+        if tlb_state.active_mm > 0:
+            active_mm = readSU("struct mm_struct", tlb_state.active_mm)
+            task = active_mm.owner
+
         if tlb_state.state == TLBSTATE_LAZY:
             crashcolor.set_color(crashcolor.BLACK)
         elif tlb_state.state == TLBSTATE_OK:
             crashcolor.set_color(crashcolor.LIGHTGREEN)
-        print("CPU %3d : active_mm = 0x%x, state = %d (%s)" %
-              (cpu, tlb_state.active_mm, tlb_state.state, tlb_str(tlb_state.state)))
+        if task != None:
+            task_name = task.comm
+        else:
+            task_name = ""
+
+        print("CPU %3d : state = %d [%-13s], active_mm = 0x%x (%s)" %
+              (cpu, tlb_state.state, tlb_str(tlb_state.state), tlb_state.active_mm, task_name))
         crashcolor.set_color(crashcolor.RESET)
 
 
