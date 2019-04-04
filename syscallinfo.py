@@ -30,7 +30,7 @@ def get_file_path(words):
 
 def sys_call_table_info():
     max_syscalls = 0
-    if sys_info.machine.startswith("ppc"):
+    if sys_info.machine == "ppc":
         sys_call_table = sym2addr("sys_call_table")
         sys_call_table = readULong(sys_call_table)
     else:
@@ -55,6 +55,7 @@ def get_kernel_start_addr():
 
 
 def show_syscall_table(options):
+    set_invalid_start_list()
     sys_call_table, max_syscalls = sys_call_table_info()
 
     idx = 0
@@ -65,7 +66,11 @@ def show_syscall_table(options):
             call_addr = readULong(sys_call_table + idx * 8)
 
         # sys_call_table boundary has the value 'warn_bad_vsyscall'
-        if call_addr == 0x6461625f6e726177: # '6461625f6e726177 warn_bad'
+        check_call_addr = call_addr
+        if call_addr != 0 and syscall_double_read == True:
+            check_call_addr = readULong(call_addr)
+
+        if check_call_addr == syscall_end_mark:
             break
 
         if call_addr == 0:
@@ -96,15 +101,28 @@ def show_syscall_details(options):
 
 
 invalid_start_list = [ "jmp", "callq" ]
+syscall_end_mark = 0
+syscall_double_read = False
 
 def set_invalid_start_list():
+    global syscall_end_mark
+    global syscall_double_read
+
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
         invalid_start_list = [ "jmp", "callq" ]
-    elif (sys_info.machine.startswith("arm")):
+        syscall_end_mark = 0x6461625f6e726177 # '6461625f6e726177 warn_bad'
+        syscall_double_read = False
+    elif (arch.startswith("arm")):
         invalid_start_list = [ "b", "bl" ]
-    elif (sys_info.machine.startswith("ppc")):
+    elif (arch.startswith("ppc")):
         invalid_start_list = [ "b", "bl" ]
+        if arch == "ppc64le":
+            syscall_end_mark = 0x0064656966696e55 # '0064656966696e55 Unified.'
+        elif arch == "ppc64":
+            syscall_end_mark = 0x556e696669656400 # '556e696669656400 Unified.'
+
+        syscall_double_read = True
 
 
 def check_syscall_table(options):
@@ -121,7 +139,11 @@ def check_syscall_table(options):
             call_addr = readULong(sys_call_table + idx * 8)
 
         # sys_call_table boundary has the value 'warn_bad_vsyscall'
-        if call_addr == 0x6461625f6e726177: # '6461625f6e726177 warn_bad'
+        check_call_addr = call_addr
+        if call_addr != 0 and syscall_double_read == True:
+            check_call_addr = readULong(call_addr)
+
+        if check_call_addr == syscall_end_mark:
             break
 
         if call_addr == 0:
