@@ -263,3 +263,11 @@ rprog("seinfo", "SELinux output",
       "-h    - list available options",
       help)
 
+
+help = '''
+Shows UN(D) state processes with details
+'''
+
+rprog("hangcheck", "hang task(s) heck",
+      "-h   - list available options",
+      help)
