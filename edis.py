@@ -589,7 +589,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if idx == crashcolor.MAX_COLOR:
                 idx = 2
 
-        line = interpret_one_line(line) # Retreive stack data if possible
+        if is_disasm_line == True:
+            line = interpret_one_line(line) # Retreive stack data if possible
         words = line.split()
         if len(words) > 2:
             color_str = get_colored_asm(words[2].strip())
