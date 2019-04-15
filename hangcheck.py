@@ -122,6 +122,11 @@ def hangcheck_display(options, args):
         crashcolor.set_color(crashcolor.RESET)
 
 
+    task_count = len(un_task_list)
+    if task_count > 0:
+        print("=" * 60)
+        print("Total %d task%s were in D state" % (task_count, "s" if task_count > 1 else ""))
+
 
 def hangcheck_main():
     op = OptionParser()
