@@ -8,6 +8,7 @@ from __future__ import division
 from pykdump.API import *
 
 from LinuxDump import Tasks
+from LinuxDump import percpu
 
 import sys
 import operator
@@ -491,6 +492,12 @@ def show_slabtop(options):
     print("=" * 68)
 
 
+def show_percpu(options):
+    addr = int(options.percpu, 16)
+    for i in range(sys_info.CPUS):
+        print("CPU %d : 0x%x" % (i, percpu.percpu_ptr(addr, i)))
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("--memusage", dest="memusage", default=0,
@@ -505,15 +512,14 @@ def meminfo():
     op.add_option("--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
-    op.add_option("--meminfo", dest="meminfo", default=1,
+    op.add_option("--meminfo", dest="meminfo", default=0,
                   action="store_true",
+                  help="Show /proc/meminfo-like output")
+    op.add_option("--percpu", dest="percpu", default="",
+                  action="store", type="string",
                   help="Show /proc/meminfo-like output")
 
     (o, args) = op.parse_args()
-
-    if (o.memusage):
-        show_tasks_memusage(o)
-        sys.exit(0)
 
     if (o.slabtop):
         show_slabtop(o)
@@ -522,6 +528,13 @@ def meminfo():
     if (o.meminfo):
         print(get_meminfo())
         sys.exit(0)
+
+
+    if (o.percpu):
+        show_percpu(o)
+        sys.exit(0)
+
+    show_tasks_memusage(o)
 
 
 if ( __name__ == '__main__'):
