@@ -320,7 +320,11 @@ def x86_stack_reg_op(words, result_str):
                 internal_count = 0
                 for stackaddr in register_dict["%rbp"]:
                     actual_addr = stackaddr + offset + stack_unit
-                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    if words[2] != "lea": # lea    -0x30(%rbp),%rdi
+                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    else:
+                        data = ("%x" % actual_addr)
+
                     if internal_count == 0:
                         result_str = "%s    ; 0x%s" % (result_str, data)
                     else:
@@ -340,7 +344,11 @@ def x86_stack_reg_op(words, result_str):
                 internal_count = 0
                 for stackaddr in register_dict["%rsp"]:
                     actual_addr = stackaddr + offset
-                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    if words[2] != "lea": # lea    -0x30(%rsp),%rdi
+                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
+                    else:
+                        data = ("%x" % actual_addr)
+
                     if internal_count == 0:
                         result_str = "%s    ; 0x%s" % (result_str, data)
                     else:
