@@ -534,7 +534,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         return
 
     result_str = ""
-    if (o.noaction):
+    if (o.noaction or not disasm_str.startswith("/")):
         result_str = disasm_str
     else:
         python_list = { "python", "python3", "python2" }
