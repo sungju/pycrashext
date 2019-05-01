@@ -41,30 +41,63 @@ MAX_MODE = INVERT
 COLOR_MASK = 0x00ff
 MODE_MASK = 0xff00
 
+bg_color_list = {
+    BLACK : "\\u001b[40m",
+    RED : "\\u001b[41m",
+    GREEN : "\\u001b[42m",
+    YELLOW : "\\u001b[43m",
+    BLUE : "\\u001b[44m",
+    MAGENTA : "\\u001b[45m",
+    CYAN : "\\u001b[46m",
+    LIGHTGRAY : "\\u001b[47m",
+    DARKGRAY : "\\u001b[40;1m",
+    LIGHTRED : "\\u001b[41;1m",
+    LIGHTGREEN : "\\u001b[42;1m",
+    LIGHTYELLOW : "\\u001b[43;1m",
+    LIGHTBLUE : "\\u001b[44;1m",
+    LIGHTMAGENTA : "\\u001b[45;1m",
+    LIGHTCYAN : "\\u001b[46;1m",
+    WHITE : "\\u001b[47;1m",
+    RESET : "\\u001b[0m",
+}
+
 
 color_list = {
-    BLACK : "\\033[30m",
-    RED : "\\033[31m",
-    GREEN : "\\033[32m",
-    YELLOW : "\\033[33m",
-    BLUE : "\\033[34m",
-    MAGENTA : "\\033[35m",
-    CYAN : "\\033[36m",
-    LIGHTGRAY : "\\033[37m",
-    DARKGRAY : "\\033[38m",
-    LIGHTRED : "\\033[91m",
-    LIGHTGREEN : "\\033[92m",
-    LIGHTYELLOW : "\\033[93m",
-    LIGHTBLUE : "\\033[94m",
-    LIGHTMAGENTA : "\\033[95m",
-    LIGHTCYAN : "\\033[96m",
-    WHITE : "\\033[97m",
-    RESET : "\\033[0m",
-    BOLD : "\\033[1m",
+    BLACK : "\\u001b[30m",
+    RED : "\\u001b[31m",
+    GREEN : "\\u001b[32m",
+    YELLOW : "\\u001b[33m",
+    BLUE : "\\u001b[34m",
+    MAGENTA : "\\u001b[35m",
+    CYAN : "\\u001b[36m",
+    LIGHTGRAY : "\\u001b[37m",
+    DARKGRAY : "\\u001b[30;1m",
+    LIGHTRED : "\\u001b[31;1m",
+    LIGHTGREEN : "\\u001b[32;1m",
+    LIGHTYELLOW : "\\u001b[33;1m",
+    LIGHTBLUE : "\\u001b[34;1m",
+    LIGHTMAGENTA : "\\u001b[35;1m",
+    LIGHTCYAN : "\\u001b[36;1m",
+    WHITE : "\\u001b[37;1m",
+    RESET : "\\u001b[0m",
+    BOLD : "\\u001b[1m",
     BLINK : "\\033[5m",
-    UNDERLINE : "\\033[4m",
-    INVERT : "\\033[7m",
+    UNDERLINE : "\\u001b[4m",
+    INVERT : "\\u001b[7m",
 }
+
+def set_bg_color(color):
+    if not sys.stdout.isatty():
+        return
+
+    color_ansi_code = ""
+    if color in bg_color_list:
+        color_ansi_code = bg_color_list[color]
+
+    if len(color_ansi_code) > 0:
+        result_str = exec_crash_command("gdb echo " + color_ansi_code)
+        print (result_str, end='')
+
 
 def set_color(color_mix):
     if not sys.stdout.isatty():
