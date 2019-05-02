@@ -1,10 +1,25 @@
-"""
- Written by Daniel Sungju Kwon
-"""
-
-from __future__ import print_function
-from __future__ import division
-
+#!/usr/bin/env/python
+# --------------------------------------------------------------------
+# (C) Copyright 2018-2019 Red Hat, Inc.
+#
+# Author: Daniel Sungju Kwon <dkwon@redhat.com>
+#
+# This command 'modinfo' shows module list or individual module details
+# It can be very handy to disassemble all the function in a module.
+#
+#
+# Contributors:
+# --------------------------------------------------------------------
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
@@ -13,8 +28,6 @@ import crashhelper
 
 module_list = []
 def load_module_details():
-    # Most of the part is borrowed from lsModules in API.py
-    # - Daniel Kwon
     global module_list
 
     module_list = []
@@ -239,7 +252,6 @@ def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=F
     crashcolor.set_color(crashcolor.RESET)
 
 
-
 def find_module(module_name):
     global module_list
 
@@ -386,6 +398,7 @@ def modinfo():
         sys.exit(0)
 
     module_info(o)
+
 
 if ( __name__ == '__main__'):
     modinfo()
