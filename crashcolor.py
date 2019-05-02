@@ -1,8 +1,24 @@
-"""
-This provides ANSI features such as color output and cursor manipulation.
-
- Written by Daniel Sungju Kwon <sungju.kwon@gmail.com>
-"""
+#!/usr/bin/env/python
+# --------------------------------------------------------------------
+# (C) Copyright 2018-2019 Red Hat, Inc.
+#
+# Author: Daniel Sungju Kwon <dkwon@redhat.com>
+#
+# This provides ANSI features such as color output and cursor manipulation.
+#
+#
+# Contributors:
+# --------------------------------------------------------------------
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
 from pykdump.API import *
 
 import sys
@@ -12,7 +28,6 @@ import os
 def run_ansi_code(ansi_code_str):
     result_str = exec_crash_command("gdb echo " + ansi_code_str)
     print (result_str, end='')
-
 
 
 #------------------------------------------------------------------------
