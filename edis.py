@@ -491,7 +491,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
         print("Can't find disasm.py in path")
         return
 
-    options = "-l"
+    options = ""
+    if (o.noaction == False):
+        options = "-l"
     if (o.reverse):
         options = options + " -r"
 
