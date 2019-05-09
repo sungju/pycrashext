@@ -44,7 +44,8 @@ def findTaskByPid(task_id):
     init_task = readSymbol("init_task")
     for task in readSUListFromHead(init_task.tasks,
                                    "tasks",
-                                   "struct task_struct"):
+                                   "struct task_struct",
+                                   maxel=1000000):
         if (task.pid == task_id or task.tgid == task_id):
             return task
 
