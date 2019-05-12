@@ -241,9 +241,14 @@ def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=F
     if unloaded:
         crashcolor.set_color(crashcolor.MAGENTA | crashcolor.BOLD)
 
+    if member_offset("struct module", "core_layout") > -1:
+        core_size = module.core_layout.size
+    else:
+        core_size = module.core_size
+
     print("0x%x %-25s %10d %s" % (long(module),
                              module.name,
-                             module.core_size,
+                             core_size,
                              gap_info_str))
     if options.shows_addr:
         print(" " * 3, end="")
