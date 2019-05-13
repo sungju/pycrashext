@@ -167,7 +167,9 @@ def print_task(task, depth, first, options):
     if (task.comm != 0):
         comm_str = task.comm
 
-    crashcolor.set_color(task_state_color(task.state))
+    task_color = task_state_color(task.state)
+    if task_color != crashcolor.RESET:
+        crashcolor.set_color(task_color)
 
     print_str = ("%s%s%s%s " %
            (comm_str,
@@ -177,7 +179,8 @@ def print_task(task, depth, first, options):
                 if options.print_state else "",
             thread_str))
     print ("%s" % (print_str), end='')
-    crashcolor.set_color(crashcolor.RESET)
+    if task_color != crashcolor.RESET:
+        crashcolor.set_color(crashcolor.RESET)
     if (len(branch_locations) <= depth):
         branch_locations.append(len(print_str))
     else:
