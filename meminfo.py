@@ -460,8 +460,8 @@ def show_slabtop(options):
         result_line = result_lines[i].split()
         if (len(result_line) < 7):
             continue
-        result_line[6] = result_line[6].replace("k", "")
-        total_used = int(result_line[5]) * int(result_line[6])
+        result_line[5] = result_line[5].replace("k", "")
+        total_used = int(result_line[4]) * int(result_line[5])
         slab_list[result_line[0]] = total_used
 
     sorted_slabtop = sorted(slab_list.items(),
