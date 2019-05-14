@@ -105,12 +105,15 @@ def hangcheck_display(options, args):
     hung_task_timeout_usecs = readSymbol("sysctl_hung_task_timeout_secs") * 1000000
 
     task_list_sorted = sorted(un_task_list, key=getKey, reverse=False)
+    hung_task_count = 0
     for taskObj in task_list_sorted:
         runtime = get_useconds(taskObj["runtime"])
         if runtime >= hung_task_timeout_usecs * 2:
             crashcolor.set_color(crashcolor.LIGHTRED)
+            hung_task_count = hung_task_count + 1
         elif runtime >= hung_task_timeout_usecs:
             crashcolor.set_color(crashcolor.BLUE)
+            hung_task_count = hung_task_count + 1
 
         print(taskObj["raw"])
         if options.detail == True:
@@ -125,7 +128,10 @@ def hangcheck_display(options, args):
     task_count = len(un_task_list)
     if task_count > 0:
         print("=" * 60)
-        print("Total %d task%s were in D state" % (task_count, "s" if task_count > 1 else ""))
+        task_s = "s" if task_count > 1 else ""
+        task_hung_s = "s" if hung_task_count > 1 else ""
+        print("Total %d task%s were in D state. %d task%s were in D state longer than %d seconds" %
+              (task_count, task_s, hung_task_count, task_hung_s, hung_task_timeout_usecs / 1000000))
 
 
 def hangcheck_main():
