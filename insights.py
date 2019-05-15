@@ -36,7 +36,7 @@ def get_system_info():
     resultlines = exec_crash_command("sys").splitlines()
     for line in resultlines:
         words = line.split(":")
-        sysinfo[words[0].strip()] = words[1].strip()
+        sysinfo[words[0].strip()] = line[len(words[0]) + 2:].strip()
 
 
 def check_sysctl():
@@ -124,7 +124,9 @@ def get_sysdata_dict():
     dict["date"] = timeinfo.get_vmcore_date_time()
     dict["date_iso"] = timeinfo.get_vmcore_date_time()
     dict["date_utc"] = timeinfo.get_vmcore_date_time()
-#    dict["uptime"] = timeinfo.get_uptime()  Need to implement using 'sys' output
+    dict["uptime"] = sysinfo["DATE"].split()[3] + " up " +\
+            sysinfo["UPTIME"] + ", " + " 0 user, " +\
+            "load average: " + sysinfo["LOAD AVERAGE"]
 
     return dict
 
