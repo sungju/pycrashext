@@ -12,6 +12,13 @@ import sys
 import crashcolor
 
 def vmw_mem():
+    op = OptionParser()
+    op.add_option("--details", dest="show_details", default=0,
+                  action="store_true",
+                  help="Show details")
+
+    (o, args) = op.parse_args()
+
     try:
         pa = readSymbol('balloon');
         if (pa == 0):
@@ -20,9 +27,10 @@ def vmw_mem():
         print ("VMware balloon symbol does not exist")
         return
 
-    baddr = sym2addr('balloon')
-    balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
-    print ('%s' % (balloon_result))
+    if o.show_details:
+        baddr = sym2addr('balloon')
+        balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
+        print ('%s' % (balloon_result))
 
     crashcolor.set_color(crashcolor.LIGHTRED)
     print ("allocated size (pages)     = %d" % pa.size)
