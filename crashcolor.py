@@ -26,8 +26,7 @@ import os
 
 
 def run_ansi_code(ansi_code_str):
-    result_str = exec_crash_command("gdb echo " + ansi_code_str)
-    print (result_str, end='')
+    print (ansi_code_str, end='')
 
 
 #------------------------------------------------------------------------
