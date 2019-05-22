@@ -54,22 +54,6 @@ def get_kernel_start_addr():
     return 0
 
 
-def show_syscall_table(options):
-    sys_call_table, max_syscalls = sys_call_table_info()
-
-    idx = 0
-    for sys_call in sys_call_table:
-        call_addr = sym2addr(sys_call)
-        result = exec_crash_command("sym 0x%x" % call_addr)
-        if result != None and result.startswith("sym"):
-            break
-        words = result.split()
-        filepath = get_file_path(words)
-        print("%3d %s %s %-25s %s" % (idx, words[0], words[1], words[2], filepath))
-        crashcolor.set_color(crashcolor.RESET)
-        idx = idx + 1
-
-
 def show_syscall_details(options):
     sys_call_table, max_syscalls = sys_call_table_info()
     if max_syscalls > 0 and options.syscall_no >= max_syscalls:
@@ -77,13 +61,15 @@ def show_syscall_details(options):
               (options.syscall_no, 0, max_syscalls - 1))
         return
 
-    pass
-
-
-invalid_start_list = [ "jmp", "callq" ]
 
 def check_syscall_table(options):
     sys_call_table, max_syscalls = sys_call_table_info()
+
+    invalid_start_list = [ "jmp", "callq" ]
+    arch = sys_info.machine
+    if arch.startswith("arm") or arch.startswith("ppc"):
+        #invalid_start_list = [ "bl" ]
+        pass # As the normal call also has 'bl' in some calls, not use it yet
 
     hook_call_no = 0
     trap_call_no = 0
@@ -109,6 +95,9 @@ def check_syscall_table(options):
                       (idx, words[0], words[1], words[2], filepath))
                 print("\t%s" % (dis_result[dis_result.find(dis_words[2]):]),
                       end='')
+            elif options.syscall_check == False:
+                print("%3d %s %s %-25s %s" % (idx, words[0], words[1], words[2], filepath))
+
 
         crashcolor.set_color(crashcolor.RESET)
 
@@ -121,7 +110,7 @@ def check_syscall_table(options):
 
         if trap_call_no > 0:
             print("%d system calls were modified" % trap_call_no)
-    else:
+    elif options.syscall_check:
         print("No issues detected")
 
 
@@ -137,15 +126,7 @@ def syscallinfo():
 
     (o, args) = op.parse_args()
 
-    if (o.syscall_check):
-        check_syscall_table(o)
-        sys.exit(0)
-
-    if (o.syscall_no > -1):
-        show_syscall_details(o)
-        sys.exit(0)
-
-    show_syscall_table(o)
+    check_syscall_table(o)
 
 if ( __name__ == '__main__'):
     syscallinfo()
