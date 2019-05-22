@@ -7,6 +7,7 @@ from __future__ import division
 
 from pykdump.API import *
 from LinuxDump import Tasks
+from LinuxDump import syscall
 import sys
 
 import crashcolor
@@ -30,16 +31,15 @@ def get_file_path(words):
 
 def sys_call_table_info():
     max_syscalls = 0
-    if sys_info.machine == "ppc":
-        sys_call_table = sym2addr("sys_call_table")
-        sys_call_table = readULong(sys_call_table)
+    if symbol_exists("ia32_sys_call_table") and syscall.sct32 != None:
+        sys_call_table = syscall.sct32
+    elif syscall.sct != None:
+        sys_call_table = syscall.sct
     else:
-        sys_call_table = readSymbol("sys_call_table")
-        try:
-            max_syscalls = len(sys_call_table)
-        except:
-            sys_call_table = sym2addr("sys_call_table")
-            pass
+        sys_call_table = None
+
+    if sys_call_table != None:
+        max_syscalls = len(sys_call_table)
 
     return sys_call_table, max_syscalls
 
@@ -55,27 +55,11 @@ def get_kernel_start_addr():
 
 
 def show_syscall_table(options):
-    set_invalid_start_list()
     sys_call_table, max_syscalls = sys_call_table_info()
 
     idx = 0
-    while True:
-        if max_syscalls > 0:
-            call_addr = sys_call_table[idx]
-        else:
-            call_addr = readULong(sys_call_table + idx * 8)
-
-        # sys_call_table boundary has the value 'warn_bad_vsyscall'
-        check_call_addr = call_addr
-        if call_addr != 0 and syscall_double_read == True:
-            check_call_addr = readULong(call_addr)
-
-        if check_call_addr == syscall_end_mark:
-            break
-
-        if call_addr == 0:
-            continue
-
+    for sys_call in sys_call_table:
+        call_addr = sym2addr(sys_call)
         result = exec_crash_command("sym 0x%x" % call_addr)
         if result != None and result.startswith("sym"):
             break
@@ -83,11 +67,7 @@ def show_syscall_table(options):
         filepath = get_file_path(words)
         print("%3d %s %s %-25s %s" % (idx, words[0], words[1], words[2], filepath))
         crashcolor.set_color(crashcolor.RESET)
-
         idx = idx + 1
-        if max_syscalls > 0 and idx >= max_syscalls:
-            break
-
 
 
 def show_syscall_details(options):
@@ -101,56 +81,17 @@ def show_syscall_details(options):
 
 
 invalid_start_list = [ "jmp", "callq" ]
-syscall_end_mark = 0
-syscall_double_read = False
-
-def set_invalid_start_list():
-    global syscall_end_mark
-    global syscall_double_read
-
-    arch = sys_info.machine
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
-        invalid_start_list = [ "jmp", "callq" ]
-        syscall_end_mark = 0x6461625f6e726177 # '6461625f6e726177 warn_bad'
-        syscall_double_read = False
-    elif (arch.startswith("arm")):
-        invalid_start_list = [ "b", "bl" ]
-    elif (arch.startswith("ppc")):
-        invalid_start_list = [ "b", "bl" ]
-        if arch == "ppc64le":
-            syscall_end_mark = 0x0064656966696e55 # '0064656966696e55 Unified.'
-        elif arch == "ppc64":
-            syscall_end_mark = 0x556e696669656400 # '556e696669656400 Unified.'
-
-        syscall_double_read = True
-
 
 def check_syscall_table(options):
-    set_invalid_start_list()
     sys_call_table, max_syscalls = sys_call_table_info()
 
     hook_call_no = 0
     trap_call_no = 0
     idx = 0
-    while True:
-        if max_syscalls > 0:
-            call_addr = sys_call_table[idx]
-        else:
-            call_addr = readULong(sys_call_table + idx * 8)
-
-        # sys_call_table boundary has the value 'warn_bad_vsyscall'
-        check_call_addr = call_addr
-        if call_addr != 0 and syscall_double_read == True:
-            check_call_addr = readULong(call_addr)
-
-        if check_call_addr == syscall_end_mark:
-            break
-
-        if call_addr == 0:
-            continue
-
+    for sys_call in sys_call_table:
+        call_addr = sym2addr(sys_call)
         result = exec_crash_command("sym 0x%x" % call_addr)
-        if result.startswith("sym"):
+        if result != None and result.startswith("sym"):
             break
         words = result.split()
         filepath = get_file_path(words)
@@ -172,8 +113,6 @@ def check_syscall_table(options):
         crashcolor.set_color(crashcolor.RESET)
 
         idx = idx + 1
-        if max_syscalls > 0 and idx >= max_syscalls:
-            break
 
     if hook_call_no > 0 or trap_call_no > 0:
         print("=" * 75)
