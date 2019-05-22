@@ -105,8 +105,8 @@ def draw_branches(disasm_str, jump_op_list):
                 current_idx = loc
                 start = min(current_idx, target_idx)
                 end = max(current_idx, target_idx)
-                if end >= total_num:
-                    end = total_num - 1
+                if end > total_num:
+                    end = total_num
 
                 for i in range(start, end):
                     jmp_dict[i][jmp_found - 1] = jmp_dict[i][jmp_found - 1] + 1
