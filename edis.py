@@ -371,7 +371,11 @@ def set_stack_data(disasm_str, disaddr_str):
     stackaddr_list = []
     cur_count = 0
 
-    bt_str = exec_crash_command("bt")
+    try:
+        bt_str = exec_crash_command("bt")
+    except:
+        return # In case stack has corrupted
+
     funcname = ""
     for one_line in disasm_str.splitlines():
         if one_line.startswith("/") or one_line.startswith(" "):
