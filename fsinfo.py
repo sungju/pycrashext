@@ -140,11 +140,51 @@ def find_pid_from_inode(d_inode):
 
     return
 
+O_RDONLY = 0x0
+O_WRONLY = 0x1
+O_RDWR = 0x2
+O_ACCMODE = 0x3
+
+def get_file_open_mode_str(f_mode):
+    result_str = ""
+    if ((f_mode & 0x03) == O_RDONLY):
+        result_str = result_str + "Read-Only"
+    if ((f_mode & 0x03) == O_WRONLY):
+        result_str = result_str + "Write-Only"
+    if ((f_mode & 0x03) == O_RDWR):
+        result_str = result_str + "Read/Write"
+
+    return result_str
+
+def show_file_details(options):
+    file = readSU("struct file", int(options.file, 16))
+    dentry_details = exec_crash_command("files -d 0x%x" % (file.f_path.dentry))
+    print("== File Info ==")
+    print(dentry_details)
+    f_op_sym = exec_crash_command("sym %x" % (file.f_op))
+    print("file operations = %s" % (f_op_sym), end='')
+    mount_details = exec_crash_command("mount").splitlines()
+    mount_str = "%x" % (file.f_path.dentry.d_sb)
+    print("file open mode = %s (0x%x)" % (get_file_open_mode_str(file.f_flags), file.f_flags))
+    print("")
+    found = False
+    for mount_line in mount_details:
+        words = mount_line.split()
+        if words[1] == mount_str:
+            if found == False:
+                print("== Mount Info ==")
+            print(mount_line)
+            found = True
+
+
 def fsinfo():
     op = OptionParser()
     op.add_option("--details", dest="filesystem_details", default=0,
                   action="store_true",
                   help="Show detailed filesystem information")
+    op.add_option("--file", dest="file", default="",
+                  action="store",
+                  help="Show detailed file information for 'struct file' address (hex)")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -160,6 +200,9 @@ def fsinfo():
     if (o.dentry_addr_for_pid != ""):
         find_pid_from_dentry(o)
         sys.exit(0);
+    if (o.file != ""):
+        show_file_details(o)
+        sys.exit(0)
 
     all_filesystem_info(o)
 
