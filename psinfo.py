@@ -466,10 +466,10 @@ def processes_with_policy(policy_no):
 
 def search_one_task(bt_str, include_list, exclude_list):
     for exclude_str in exclude_list:
-        if bt_str.find(exclude_str) >= 0:
+        if exclude_str != '' and bt_str.find(exclude_str) >= 0:
             return False
     for include_str in include_list:
-        if bt_str.find(include_str) >= 0:
+        if include_str != '' and bt_str.find(include_str) >= 0:
             return True
 
     return False
@@ -481,15 +481,14 @@ def print_bt_search(bt_str, include_list):
     highlight_color = crashcolor.get_color(crashcolor.LIGHTRED)
     highlight_len = len(highlight_color)
     bt_str_list = bt_str.splitlines()
+    print("")
     for line in bt_str_list:
-        count = 0
         for include_str in include_list:
             pos = line.find(include_str)
             while pos >= 0:
                 line = line[:pos] + highlight_color + line[pos:pos + len(include_str)] +\
                         reset_color + line[pos + len(include_str):]
                 pos = line.find(include_str, pos + len(include_str) + highlight_len + reset_len)
-                count = count + 1
 
         print(line)
 
