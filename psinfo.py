@@ -518,20 +518,20 @@ def psinfo():
     op.add_option("--ef", dest="ef", default=0,
                   action="store_true",
                   help="ps -ef")
-    op.add_option("-y", dest="policy_type", default="",
+    op.add_option("-p", "--policy", dest="policy_type", default="",
                   type="string",
                   action="store",
                   help="Shows specific policy type of processes only. "
                         "0 : NORMAL, 1 : FIFO, 2 : RR, 3 : BATCH, "
                         "5 : IDLE, 6 : DEADLINE")
-    op.add_option("--searchstack", dest="searchstack", default=0,
+    op.add_option("-s", "--searchstack", dest="searchstack", default=0,
                   action="store_true",
                   help="Search each task stack to find value specified in include")
-    op.add_option("--include", dest="include", default="",
+    op.add_option("-i", "--include", dest="include", default="",
                   type="string",
                   action="store",
                   help="comma separated value list to search with --searchstack")
-    op.add_option("--exclude", dest="exclude", default="",
+    op.add_option("-e", "--exclude", dest="exclude", default="",
                   type="string",
                   action="store",
                   help="comma separated value list to ignore in --searchstack")
