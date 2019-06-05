@@ -139,6 +139,13 @@ def set_color(color_mix):
         run_ansi_code(color_ansi_code)
 
 
+def get_color(color):
+    if color in color_list:
+        return color_list[color]
+
+    return ""
+
+
 #------------------------------------------------------------------------
 # Cursor related functions
 #------------------------------------------------------------------------
