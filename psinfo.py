@@ -464,6 +464,47 @@ def processes_with_policy(policy_no):
     return result_str
 
 
+def search_one_task(bt_str, include_list, exclude_list):
+    for exclude_str in exclude_list:
+        if bt_str.find(exclude_str) >= 0:
+            return False
+    for include_str in include_list:
+        if bt_str.find(include_str) >= 0:
+            return True
+
+    return False
+
+
+def print_bt_search(bt_str, include_list):
+    reset_color = crashcolor.get_color(crashcolor.RESET)
+    reset_len = len(reset_color)
+    highlight_color = crashcolor.get_color(crashcolor.LIGHTRED)
+    highlight_len = len(highlight_color)
+    bt_str_list = bt_str.splitlines()
+    for line in bt_str_list:
+        count = 0
+        for include_str in include_list:
+            pos = line.find(include_str)
+            while pos >= 0:
+                line = line[:pos] + highlight_color + line[pos:pos + len(include_str)] +\
+                        reset_color + line[pos + len(include_str):]
+                pos = line.find(include_str, pos + len(include_str) + highlight_len + reset_len)
+                count = count + 1
+
+        print(line)
+
+
+def do_searchstack(options):
+    tt = Tasks.TaskTable()
+    include_list = options.include.split(",")
+    exclude_list = options.exclude.split(",")
+
+    for t in tt.tt:
+        stackdata = exec_crash_command("bt -f %d" % (t.pid))
+        if search_one_task(stackdata, include_list, exclude_list) == True:
+            print_bt_search(stackdata, include_list)
+
+
 def psinfo():
     op = OptionParser()
     op.add_option("--aux", dest="aux", default=0,
@@ -484,8 +525,24 @@ def psinfo():
                   help="Shows specific policy type of processes only. "
                         "0 : NORMAL, 1 : FIFO, 2 : RR, 3 : BATCH, "
                         "5 : IDLE, 6 : DEADLINE")
+    op.add_option("--searchstack", dest="searchstack", default=0,
+                  action="store_true",
+                  help="Search each task stack to find value specified in include")
+    op.add_option("--include", dest="include", default="",
+                  type="string",
+                  action="store",
+                  help="comma separated value list to search with --searchstack")
+    op.add_option("--exclude", dest="exclude", default="",
+                  type="string",
+                  action="store",
+                  help="comma separated value list to ignore in --searchstack")
 
     (o, args) = op.parse_args()
+
+
+    if (o.searchstack):
+        do_searchstack(o)
+        sys.exit(0)
 
     if (o.aux):
         print(get_ps_aux())
