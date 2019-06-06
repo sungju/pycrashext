@@ -498,7 +498,7 @@ def do_searchstack(options):
     include_list = options.include.split(",")
     exclude_list = options.exclude.split(",")
 
-    for t in tt.tt:
+    for t in tt.allThreads():
         stackdata = exec_crash_command("bt -f %d" % (t.pid))
         if search_one_task(stackdata, include_list, exclude_list) == True:
             print_bt_search(stackdata, include_list)
