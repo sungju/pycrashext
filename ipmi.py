@@ -80,10 +80,10 @@ def show_smi_list(show_details):
 
 def ipmi():
     op = OptionParser()
-    op.add_option("--smi_list", dest="smi_list", default=0,
+    op.add_option("-l", "--smi_list", dest="smi_list", default=0,
                   action="store_true",
                   help="Show info list")
-    op.add_option("--details", dest="show_details", default=0,
+    op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show detailed information")
 

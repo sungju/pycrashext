@@ -195,7 +195,7 @@ def exec_insights(o, args, cmd_path_list):
 def insights():
     op = OptionParser()
 
-    op.add_option("--test", dest="test", default=0,
+    op.add_option("-t", "--test", dest="test", default=0,
                   action="store_true",
                   help="Run with test data")
 

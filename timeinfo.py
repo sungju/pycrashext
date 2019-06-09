@@ -73,10 +73,10 @@ def show_timesources(show_details):
 
 def timeinfo():
     op = OptionParser()
-    op.add_option("--source", dest="timesource", default=0,
+    op.add_option("-s", "--source", dest="timesource", default=0,
                   action="store_true",
                   help="Show time sources")
-    op.add_option("--details", dest="show_details", default=0,
+    op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
 

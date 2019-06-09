@@ -179,10 +179,10 @@ def show_file_details(options):
 
 def fsinfo():
     op = OptionParser()
-    op.add_option("--details", dest="filesystem_details", default=0,
+    op.add_option("-d", "--details", dest="filesystem_details", default=0,
                   action="store_true",
                   help="Show detailed filesystem information")
-    op.add_option("--file", dest="file", default="",
+    op.add_option("-f", "--file", dest="file", default="",
                   action="store",
                   help="Show detailed file information for 'struct file' address (hex)")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",

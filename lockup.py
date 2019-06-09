@@ -239,16 +239,16 @@ def lockup_display(reverse_sort, show_tasks, options):
 
 def lockup():
     op = OptionParser()
-    op.add_option("-r", dest="reverse_sort", default=0,
+    op.add_option("-r", "--reverse", dest="reverse_sort", default=0,
                   action="store_true",
                   help="show longest holder at top")
-    op.add_option("--tasks", dest="show_tasks", default=0,
+    op.add_option("-t", "--tasks", dest="show_tasks", default=0,
                   action="store_true",
                   help="show tasks in each runqueue")
-    op.add_option("--rt", dest="rt_stat", default=0,
+    op.add_option("-s", "--rt", dest="rt_stat", default=0,
                   action="store_true",
                   help="show RT statistics")
-    op.add_option("--details", dest="task_details", default=0,
+    op.add_option("-d", "--details", dest="task_details", default=0,
                   action="store_true",
                   help="show task details")
 

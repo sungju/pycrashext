@@ -51,13 +51,13 @@ def show_tasklet_list_details(tasklet_vec_addr, options):
 
 def bh():
     op = OptionParser()
-    op.add_option("--softirq", dest="softirq", default=0,
+    op.add_option("-s", "--softirq", dest="softirq", default=0,
                   action="store_true",
                   help="Show softirq list")
-    op.add_option("--tasklet", dest="tasklet", default=0,
+    op.add_option("-t", "--tasklet", dest="tasklet", default=0,
                   action="store_true",
                   help="Show tasklet list")
-    op.add_option("--hitasklet", dest="hitasklet", default=0,
+    op.add_option("-i", "--hitasklet", dest="hitasklet", default=0,
                   action="store_true",
                   help="Show tasklet_hi list")
 

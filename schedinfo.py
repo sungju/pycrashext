@@ -35,10 +35,10 @@ def show_class_list(show_details):
 
 def schedinfo():
     op = OptionParser()
-    op.add_option("--classes", dest="sched_classes", default=0,
+    op.add_option("-c", "--classes", dest="sched_classes", default=0,
                   action="store_true",
                   help="Show scheduling classes")
-    op.add_option("--details", dest="show_details", default=0,
+    op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
 

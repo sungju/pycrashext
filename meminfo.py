@@ -500,22 +500,22 @@ def show_percpu(options):
 
 def meminfo():
     op = OptionParser()
-    op.add_option("--memusage", dest="memusage", default=0,
+    op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
                   help="Show memory usages by tasks")
-    op.add_option("--nogroup", dest="nogroup", default=0,
+    op.add_option("-n", "--nogroup", dest="nogroup", default=0,
                   action="store_true",
                   help="Show data in individual tasks")
-    op.add_option("--all", dest="all", default=0,
+    op.add_option("-a", "--all", dest="all", default=0,
                   action="store_true",
                   help="Show all the output")
-    op.add_option("--slabtop", dest="slabtop", default=0,
+    op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
-    op.add_option("--meminfo", dest="meminfo", default=0,
+    op.add_option("-i", "--meminfo", dest="meminfo", default=0,
                   action="store_true",
                   help="Show /proc/meminfo-like output")
-    op.add_option("--percpu", dest="percpu", default="",
+    op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Show /proc/meminfo-like output")
 

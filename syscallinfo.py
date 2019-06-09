@@ -116,11 +116,11 @@ def check_syscall_table(options):
 
 def syscallinfo():
     op = OptionParser()
-    op.add_option("--check", dest="syscall_check", default=0,
+    op.add_option("-c", "--check", dest="syscall_check", default=0,
                   action="store_true",
                   help="Check for any modifications in syscall table")
 
-    op.add_option("-n", dest="syscall_no", default=-1,
+    op.add_option("-n", "--no", dest="syscall_no", default=-1,
                   type="int", action="store",
                   help="Shows detailed information for a specific syscall no")
 

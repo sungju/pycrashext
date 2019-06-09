@@ -139,13 +139,13 @@ def show_tlb(options):
 
 def cpuinfo():
     op = OptionParser()
-    op.add_option("--cpufreq", dest="cpufreq", default=0,
+    op.add_option("-f", "--cpufreq", dest="cpufreq", default=0,
                   action="store_true",
                   help="CPU frequency details")
-    op.add_option("--cpuid", dest="cpuid", default=0,
+    op.add_option("-i", "--cpuid", dest="cpuid", default=0,
                   action="store_true",
                   help="Show CPU's physical and core ID")
-    op.add_option("--tlb", dest="tlb", default=0,
+    op.add_option("-t", "--tlb", dest="tlb", default=0,
                   action="store_true",
                   help="Show CPU tlb state")
 

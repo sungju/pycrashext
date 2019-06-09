@@ -93,13 +93,13 @@ def get_sidtab_info(total_only, print_detail, is_print):
 
 def seinfo():
     op = OptionParser()
-    op.add_option("--sidtab", dest="sidtab", default=0,
+    op.add_option("-s", "--sidtab", dest="sidtab", default=0,
                   action="store_true",
                   help="Shows sidtab information")
-    op.add_option("--total", dest="total", default=0,
+    op.add_option("-t", "--total", dest="total", default=0,
                   action="store_true",
                   help="Show total")
-    op.add_option("--detail", dest="detail", default=0,
+    op.add_option("-d", "--detail", dest="detail", default=0,
                   action="store_true",
                   help="Show details")
 

@@ -226,11 +226,11 @@ def cgroupinfo():
     global cgroup_count
 
     op = OptionParser()
-    op.add_option("--tglist", dest="taskgroup_list", default=0,
+    op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
                   help="task_group list")
 
-    op.add_option("--tree", dest="cgroup_tree", default=0,
+    op.add_option("-t", "--tree", dest="cgroup_tree", default=0,
                   action="store_true",
                   help="hierarchial display of cgroups")
 

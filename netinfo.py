@@ -59,11 +59,11 @@ def show_network_interfaces(options):
 
 def netinfo():
     op = OptionParser()
-    op.add_option("--interface", dest="show_interface", default=0,
+    op.add_option("-i", "--interface", dest="show_interface", default=0,
                   action="store_true",
                   help="Show network interfaces")
 
-    op.add_option("--details", dest="network_details", default=0,
+    op.add_option("-d", "--details", dest="network_details", default=0,
                   action="store_true",
                   help="Show network details")
 

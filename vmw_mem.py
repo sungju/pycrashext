@@ -13,7 +13,7 @@ import crashcolor
 
 def vmw_mem():
     op = OptionParser()
-    op.add_option("--details", dest="show_details", default=0,
+    op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
 

@@ -124,15 +124,15 @@ def read_database():
 
 def revs():
     op = OptionParser()
-    op.add_option("--regs", dest="Regs", default=0,
+    op.add_option("-r", "--regs", dest="Regs", default=0,
                   action="store_true",
                   help="Registers used for argument passing")
 
-    op.add_option('--asm', dest='Asm', default="",
+    op.add_option("-a", '--asm', dest='Asm', default="",
                 action="store",
                 help="Simple manual for GNU assembly")
 
-    op.add_option('--list', dest='List', default=0,
+    op.add_option("-l", '--list', dest='List', default=0,
                 action="store_true",
                 help="Shows the list of instructions you can check details")
 
