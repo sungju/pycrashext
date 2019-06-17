@@ -140,6 +140,8 @@ def set_color(color_mix):
 
 
 def get_color(color):
+    if not sys.stdout.isatty():
+        return ""
     if color in color_list:
         return color_list[color]
 
