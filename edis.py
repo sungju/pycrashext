@@ -476,6 +476,23 @@ def set_asm_colors():
             "r10" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
 
+    return
+
+
+def is_address(str):
+    str = str.strip()
+    if (str.startswith("0x") and len(str) == ((sys_info.pointersize + 1) * 2)):
+        return True
+
+    return False
+
+
+def find_symbol(str):
+    sym = exec_crash_command("sym %s" % str)
+    if sym.startswith("sym:") != True:
+        return " <" + "".join(sym.split()[2:]) + ">"
+    return ""
+
 
 def disasm(ins_addr, o, args, cmd_path_list):
     global asm_color_dict
@@ -607,6 +624,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
             line = interpret_one_line(line) # Retreive stack data if possible
         words = line.split()
         if len(words) > 2:
+            if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
+                line = ("%s%s" % (words[-1], find_symbol(words[-1]))).join(line.rsplit(words[-1], 1))
             color_str = get_colored_asm(words[2].strip())
             idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
             print(line[:idx], end='')
@@ -697,6 +716,12 @@ def edis():
                   default=False,
                   help="Dispaly full function code")
 
+
+    op.add_option("-b", "--symbol",
+                  action="store_true",
+                  dest="symbol",
+                  default=False,
+                  help="Translate symbols if possible")
 
     op.add_option("-j", "--jump",
                   action="store",
