@@ -206,6 +206,25 @@ taint_flags = [
     [ 'T', '', True ],     # TAINT_TECH_PREVIEW
 ]
 
+taint_flags_desc = {
+'P' : "Proprietary module has been loaded.",
+'F' : "Module has been forcibly loaded.",
+'S' : "SMP with CPUs not designed for SMP.",
+'R' : "User forced a module unload.",
+'M' : "System experienced a machine check exception.",
+'B' : "System has hit bad_page.",
+'U' : "Userspace-defined naughtiness.",
+'D' : "Kernel has oopsed before",
+'A' : "ACPI table overridden.",
+'W' : "Taint on warning.",
+'C' : "modules from drivers/staging are loaded.",
+'I' : "Working around severe firmware bug.",
+'O' : "Out-of-tree module has been loaded.",
+'E' : "Unsigned module has been loaded.",
+'L' : "A soft lockup has previously occurred.",
+'K' : "Kernel has been live patched.",
+}
+
 def taint_str(tainted_mask):
     result_str = ""
 
@@ -270,9 +289,15 @@ def module_info(options):
 
     if tainted_count > 0:
         tainted_mask = readSymbol("tainted_mask")
+        taint_result = taint_str(tainted_mask)
         print("=" * 75)
         print("There are %d tainted modules, tainted_mask = 0x%x (%s)" %
-              (tainted_count, tainted_mask, taint_str(tainted_mask)))
+              (tainted_count, tainted_mask, taint_result))
+        if options.shows_flags_str:
+            for c in taint_result:
+                if c in taint_flags_desc:
+                    print("\t%s : %s" % (c, taint_flags_desc[c]))
+
 
     last_unloaded_module = readSymbol("last_unloaded_module")
     if len(last_unloaded_module) > 0:
@@ -443,6 +468,9 @@ def modinfo():
     op.add_option("-u", dest="shows_unloaded", default=False,
                   action="store_true",
                   help="Shows unloaded module data if possible")
+    op.add_option("-f", dest="shows_flags_str", default=False,
+                  action="store_true",
+                  help="Shows meanings of tainted flags")
 
     (o, args) = op.parse_args()
 
