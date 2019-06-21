@@ -173,6 +173,57 @@ def do_check_unloaded_module(start_addr, end_addr):
 
 tainted_count = 0
 
+taint_flags = [
+    [ 'P', 'G', True ],     # TAINT_PROPRIETARY_MODULE
+    [ 'F', '', True ],     # TAINT_FORCED_MODULE
+    [ 'S', '', False ],    # TAINT_CPU_OUT_OF_SPEC
+    [ 'R', '', False ],    # TAINT_FORCED_RMMOD
+    [ 'M', '', False ],    # TAINT_MACHINE_CHECK
+    [ 'B', '', False ],    # TAINT_BAD_PAGE
+    [ 'U', '', False ],    # TAINT_USER
+    [ 'D', '', False ],    # TAINT_DIE
+    [ 'A', '', False ],    # TAINT_OVERRIDDEN_ACPI_TABLE
+    [ 'W', '', False ],    # TAINT_WARN
+    [ 'C', '', True ],     # TAINT_CRAP
+    [ 'I', '', False ],    # TAINT_FIRMWARE_WORKAROUND
+    [ 'O', '', True ],     # TAINT_OOT_MODULE
+    [ 'E', '', True ],     # TAINT_UNSIGNED_MODULE
+    [ 'L', '', False ],    # TAINT_SOFTLOCKUP
+    [ 'K', '', True ],     # TAINT_LIVEPATCH
+    [ '?', '-', False ],    # TAINT_16
+    [ '?', '-', False ],    # TAINT_17
+    [ '?', '-', False ],    # TAINT_18
+    [ '?', '-', False ],    # TAINT_19
+    [ '?', '-', False ],    # TAINT_20
+    [ '?', '-', False ],    # TAINT_21
+    [ '?', '-', False ],    # TAINT_22
+    [ '?', '-', False ],    # TAINT_23
+    [ '?', '-', False ],    # TAINT_24
+    [ '?', '-', False ],    # TAINT_25
+    [ '?', '-', False ],    # TAINT_26
+    [ '?', '-', False ],    # TAINT_27
+    [ 'H', '', False ],    # TAINT_HARDWARE_UNSUPPORTED
+    [ 'T', '', True ],     # TAINT_TECH_PREVIEW
+]
+
+def taint_str(tainted_mask):
+    result_str = ""
+
+    if tainted_mask == 0:
+        result_str = "Not tainted"
+    else:
+        result_str = "Tainted: "
+        pos = 0
+        while tainted_mask != 0:
+            if (tainted_mask & 0x1) == 0x1:
+                result_str = result_str + taint_flags[pos][0]
+            else:
+                result_str = result_str + taint_flags[pos][1]
+            pos = pos + 1
+            tainted_mask = tainted_mask >> 1
+
+    return result_str
+
 def module_info(options):
     global module_list
     global tainted_count
@@ -218,9 +269,10 @@ def module_info(options):
             prev_end_addr = end_addr
 
     if tainted_count > 0:
+        tainted_mask = readSymbol("tainted_mask")
         print("=" * 75)
-        print("There are %d tainted modules" % (tainted_count))
-
+        print("There are %d tainted modules, tainted_mask = 0x%x (%s)" %
+              (tainted_count, tainted_mask, taint_str(tainted_mask)))
 
     last_unloaded_module = readSymbol("last_unloaded_module")
     if len(last_unloaded_module) > 0:
