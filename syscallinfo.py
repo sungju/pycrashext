@@ -31,7 +31,7 @@ def get_file_path(words):
 
 def sys_call_table_info():
     max_syscalls = 0
-    if symbol_exists("ia32_sys_call_table") and syscall.sct32 != None:
+    if sys_info.pointersize == 4 and symbol_exists("ia32_sys_call_table") and syscall.sct32 != None:
         sys_call_table = syscall.sct32
     elif syscall.sct != None:
         sys_call_table = syscall.sct
