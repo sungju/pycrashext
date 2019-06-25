@@ -190,23 +190,24 @@ taint_flags = [
     [ 'E', '', True ],     # TAINT_UNSIGNED_MODULE
     [ 'L', '', False ],    # TAINT_SOFTLOCKUP
     [ 'K', '', True ],     # TAINT_LIVEPATCH
-    [ '?', '-', False ],    # TAINT_16
-    [ '?', '-', False ],    # TAINT_17
-    [ '?', '-', False ],    # TAINT_18
-    [ '?', '-', False ],    # TAINT_19
-    [ '?', '-', False ],    # TAINT_20
-    [ '?', '-', False ],    # TAINT_21
-    [ '?', '-', False ],    # TAINT_22
-    [ '?', '-', False ],    # TAINT_23
-    [ '?', '-', False ],    # TAINT_24
-    [ '?', '-', False ],    # TAINT_25
-    [ '?', '-', False ],    # TAINT_26
-    [ '?', '-', False ],    # TAINT_27
+    [ '?', '', False ],    # TAINT_16
+    [ '?', '', False ],    # TAINT_17
+    [ '?', '', False ],    # TAINT_18
+    [ '?', '', False ],    # TAINT_19
+    [ '?', '', False ],    # TAINT_20
+    [ '?', '', False ],    # TAINT_21
+    [ '?', '', False ],    # TAINT_22
+    [ '?', '', False ],    # TAINT_23
+    [ '?', '', False ],    # TAINT_24
+    [ '?', '', False ],    # TAINT_25
+    [ '?', '', False ],    # TAINT_26
+    [ '?', '', False ],    # TAINT_27
     [ 'H', '', False ],    # TAINT_HARDWARE_UNSUPPORTED
     [ 'T', '', True ],     # TAINT_TECH_PREVIEW
 ]
 
 taint_flags_desc = {
+'G' : "Tainted but all module is licensed under GNU or a compatible license",
 'P' : "Proprietary module has been loaded.",
 'F' : "Module has been forcibly loaded.",
 'S' : "SMP with CPUs not designed for SMP.",
@@ -223,6 +224,8 @@ taint_flags_desc = {
 'E' : "Unsigned module has been loaded.",
 'L' : "A soft lockup has previously occurred.",
 'K' : "Kernel has been live patched.",
+'T' : "TAINT_TECH_PREVIEW",
+'H' : "TAINT_HARDWARE_UNSUPPORTED",
 }
 
 def taint_str(tainted_mask):
@@ -293,8 +296,8 @@ def module_info(options):
         print("=" * 75)
         print("There are %d tainted modules, tainted_mask = 0x%x (%s)" %
               (tainted_count, tainted_mask, taint_result))
-        if options.shows_flags_str:
-            for c in taint_result:
+        if options.shows_flags_str and tainted_mask > 0:
+            for c in taint_result.split(':')[1]:
                 if c in taint_flags_desc:
                     print("\t%s : %s" % (c, taint_flags_desc[c]))
 
