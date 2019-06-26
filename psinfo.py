@@ -475,20 +475,37 @@ def search_one_task(bt_str, include_list, exclude_list):
     return False
 
 
+highlight_color_list = [
+    crashcolor.get_color(crashcolor.LIGHTRED),
+    crashcolor.get_color(crashcolor.LIGHTBLUE),
+    crashcolor.get_color(crashcolor.LIGHTYELLOW),
+    crashcolor.get_color(crashcolor.LIGHTMAGENTA),
+    crashcolor.get_color(crashcolor.LIGHTCYAN),
+]
+
 def print_bt_search(bt_str, include_list):
     reset_color = crashcolor.get_color(crashcolor.RESET)
     reset_len = len(reset_color)
-    highlight_color = crashcolor.get_color(crashcolor.LIGHTRED)
-    highlight_len = len(highlight_color)
     bt_str_list = bt_str.splitlines()
+    highlight_len_list = []
+    for hc_str in highlight_color_list:
+        highlight_len_list.append(len(hc_str))
+    highlight_max = len(highlight_color_list)
+
     print("")
     for line in bt_str_list:
+        idx = 0
         for include_str in include_list:
             pos = line.find(include_str)
+            highlight_color = highlight_color_list[idx]
+            highlight_len = highlight_len_list[idx]
             while pos >= 0:
                 line = line[:pos] + highlight_color + line[pos:pos + len(include_str)] +\
                         reset_color + line[pos + len(include_str):]
                 pos = line.find(include_str, pos + len(include_str) + highlight_len + reset_len)
+            idx = idx + 1
+            if (idx >= highlight_max):
+                idx = 0
 
         print(line)
 
