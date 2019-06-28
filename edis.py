@@ -488,9 +488,13 @@ def is_address(str):
 
 
 def find_symbol(str):
-    sym = exec_crash_command("sym %s" % str)
-    if sym.startswith("sym:") != True:
-        return " <" + "".join(sym.split()[2:]) + ">"
+    try:
+        sym = exec_crash_command("sym %s" % str)
+        if sym.startswith("sym:") != True:
+            return " <" + "".join(sym.split()[2:]) + ">"
+    except:
+        pass
+
     return ""
 
 
