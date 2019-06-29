@@ -639,7 +639,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if color_str != None:
                 crashcolor.set_color(operand_color)
             if len(words) >= 4: # Not handling callq or jmp.
-                print(line[idx+len(words[2]):line.find(words[3])],
+                line = line[idx:]
+                print("%s" % line[len(words[2]):line.find(words[3])],
                      end='')
                 idx = line.find(words[3])
                 op_list = words[3].split(",")
@@ -677,7 +678,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                             crashcolor.set_color(crashcolor.LIGHTMAGENTA)
                             print(line[comment_idx:])
                         else:
-                            print(line)
+                            print("%s" % line)
                 else:
                     print(line)
 
