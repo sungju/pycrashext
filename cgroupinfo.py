@@ -14,6 +14,28 @@ import crashcolor
 empty_count = 0
 cgroup_count = 0
 
+
+def cgroup_task_count(cgroup):
+    count = 0
+    for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
+                                             'cgrp_link_list',
+                                             'struct cg_cgroup_link'):
+        count = count + cg_cgroup_link.cg.refcount.counter
+    return count
+
+
+def cgroup_task_list(cgroup, idx):
+    for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
+                                             'cgrp_link_list',
+                                             'struct cg_cgroup_link'):
+        for task in readSUListFromHead(cg_cgroup_link.cg.tasks,
+                                       "cg_list",
+                                       "struct task_struct"):
+            for i in range(0, idx):
+                print("\t", end="")
+            print("\t0x%x %s(%d)" % (task, task.comm, task.pid))
+
+
 def dentry_to_filename (dentry) :
     if (dentry == 0):
         return "<>"
@@ -27,23 +49,23 @@ def dentry_to_filename (dentry) :
     except:
         return "<invalid>"
 
-def show_cgroup_tree():
+def show_cgroup_tree(options):
     try:
         rootnode = readSymbol("rootnode")
-        show_cgroup_tree_from_rootnode(rootnode)
+        show_cgroup_tree_from_rootnode(rootnode, options)
         return
     except:
         pass
 
     try:
         cgroup_roots = readSymbol("cgroup_roots")
-        show_cgroup_tree_from_cgroup_roots(cgroup_roots)
+        show_cgroup_tree_from_cgroup_roots(cgroup_roots, options)
         return
     except:
         pass
 
 
-def show_cgroup_tree_from_rootnode(rootnode):
+def show_cgroup_tree_from_rootnode(rootnode, options):
     global empty_count
     global cgroup_count
 
@@ -54,7 +76,6 @@ def show_cgroup_tree_from_rootnode(rootnode):
                                              'sibling',
                                              'struct cgroup_subsys'):
         print ("%s (0x%x)" % (cgroup_subsys.name, cgroup_subsys))
-
     print ("")
     crashcolor.set_color(crashcolor.BLUE)
     print ("** cgroup tree **")
@@ -62,7 +83,7 @@ def show_cgroup_tree_from_rootnode(rootnode):
     top_cgroup = rootnode.top_cgroup
     curlimit = sys.getrecursionlimit()
     sys.setrecursionlimit(1000)
-    print_cgroup_entry(top_cgroup, top_cgroup, 0)
+    print_cgroup_entry(top_cgroup, top_cgroup, 0, options)
     sys.setrecursionlimit(curlimit)
     print ("-" * 70)
     crashcolor.set_color(crashcolor.BLUE)
@@ -71,7 +92,7 @@ def show_cgroup_tree_from_rootnode(rootnode):
     crashcolor.set_color(crashcolor.RESET)
 
 
-def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
+def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     global empty_count
     global cgroup_count
 
@@ -87,7 +108,7 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
         top_cgroup = cgroup_root.cgrp
         curlimit = sys.getrecursionlimit()
         sys.setrecursionlimit(1000)
-        print_cgroup_entry(top_cgroup, top_cgroup, 0)
+        print_cgroup_entry(top_cgroup, top_cgroup, 0, options)
         sys.setrecursionlimit(curlimit)
 
     print ("-" * 70)
@@ -97,7 +118,7 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots):
     crashcolor.set_color(crashcolor.RESET)
 
 
-def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
+def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
     global empty_count
     global cgroup_count
 
@@ -121,11 +142,10 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         if member_offset("struct cgroup", "dentry") > -1:
             if (cgroup.dentry != 0):
                 cgroup_name = dentry_to_filename(cgroup.dentry)
-            cgroup_counter = cgroup.count.counter
         elif member_offset("struct cgroup", "kn") > -1:
             cgroup_name = cgroup.kn.name
-            cgroup_counter = cgroup.kn.count.counter
 
+        cgroup_counter = cgroup_task_count(cgroup)
         if cgroup_name == "":
             cgroup_name = "<default>"
 
@@ -138,6 +158,8 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
         print ("%s%s%s at 0x%x (%d)" %
                ("  " * idx, "+--" if idx > 0 else "",
                 cgroup_name, cgroup, cgroup_counter))
+        if options.task_list:
+            cgroup_task_list(cgroup, idx)
 #        if (cgroup.parent == 0):
 #            top_cgroup = cgroup
 
@@ -157,7 +179,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
                 subsys_state = readSU(struct_name, childaddr)
                 cgroup = subsys_state.cgroup
 
-            print_cgroup_entry(top_cgroup, cgroup, idx + 1)
+            print_cgroup_entry(top_cgroup, cgroup, idx + 1, options)
 
 #        if (idx == 0):
 #            print ("")
@@ -173,7 +195,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx):
     return
 
 
-def show_task_group():
+def show_task_group(options):
     global empty_count
 
     count = 0
@@ -194,11 +216,10 @@ def show_task_group():
         if member_offset("struct cgroup", "dentry") > -1:
             if (cgroup.dentry != 0):
                 cgroup_name = dentry_to_filename(cgroup.dentry)
-            cgroup_counter = cgroup.count.counter
         elif member_offset("struct cgroup", "kn") > -1:
             cgroup_name = cgroup.kn.name
-            cgroup_counter = cgroup.kn.count
 
+        cgroup_counter = cgroup_task_count(cgroup)
         if cgroup_name == "":
             cgroup_name = "<default>"
 
@@ -210,6 +231,8 @@ def show_task_group():
 
         print ("task_group = 0x%x, cgroup = 0x%x, counter=%d\n\t(%s)" %
                 (task_group, cgroup, cgroup_counter, cgroup_name))
+        if options.task_list:
+            cgroup_task_list(cgroup, 0)
 
         crashcolor.set_color(crashcolor.RESET)
 
@@ -234,17 +257,21 @@ def cgroupinfo():
                   action="store_true",
                   help="hierarchial display of cgroups")
 
+    op.add_option("-l", "--tasklist", dest="task_list", default=0,
+                  action="store_true",
+                  help="Shows task list in cgroup")
+
     (o, args) = op.parse_args()
 
     cgroup_count = 0
     empty_count = 0
 
     if (o.taskgroup_list):
-        show_task_group()
+        show_task_group(o)
 #        sys.exit(0)
 
     if (o.cgroup_tree):
-        show_cgroup_tree()
+        show_cgroup_tree(o)
 #        sys.exit(0)
 
     # show_task_group()
