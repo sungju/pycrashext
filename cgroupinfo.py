@@ -21,11 +21,14 @@ def cpu_cgroup_subsys_detail(task_group, cgroup, subsys, idx):
     cfs_period_us = task_group.cfs_bandwidth.period.tv64 / 1000
     cfs_quota_us = task_group.cfs_bandwidth.quota / 1000
     throttled_cfs_rq = task_group.cfs_bandwidth.throttled_cfs_rq
+    throttled_time = task_group.cfs_bandwidth.throttled_time
+    if throttled_time > 0:
+        throttled_time = throttled_time / 1000000000
     pre_str = "\t"
     for i in range(0, idx):
         pre_str = pre_str + "\t"
-    print("%scpu.cfs_period_us = %d, cpu.cfs_quota_us = %d" %
-          (pre_str, cfs_period_us, cfs_quota_us))
+    print("%scpu.cfs_period_us = %d, cpu.cfs_quota_us = %d, throttled_time = %d secs" %
+          (pre_str, cfs_period_us, cfs_quota_us, throttled_time))
     for cfs_rq in readSUListFromHead(throttled_cfs_rq,
                                      "throttled_list",
                                      "struct cfs_rq"):
