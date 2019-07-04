@@ -14,6 +14,79 @@ import crashcolor
 empty_count = 0
 cgroup_count = 0
 
+cgroup_subsys_func_list = {}
+
+
+def cpu_cgroup_subsys_detail(task_group, cgroup, subsys, idx):
+    cfs_period_us = task_group.cfs_bandwidth.period.tv64 / 1000
+    cfs_quota_us = task_group.cfs_bandwidth.quota / 1000
+    throttled_cfs_rq = task_group.cfs_bandwidth.throttled_cfs_rq
+    pre_str = "\t"
+    for i in range(0, idx):
+        pre_str = pre_str + "\t"
+    print("%scpu.cfs_period_us = %d, cpu.cfs_quota_us = %d" %
+          (pre_str, cfs_period_us, cfs_quota_us))
+    for cfs_rq in readSUListFromHead(throttled_cfs_rq,
+                                     "throttled_list",
+                                     "struct cfs_rq"):
+        print("%scfs_rq 0x%x, nr_running = %d, throttled = %d" %
+              (pre_str, cfs_rq, cfs_rq.nr_running, cfs_rq.throttled))
+        for se in readSUListFromHead(cfs_rq.tasks,
+                                     "group_node",
+                                     "struct sched_entity"):
+            offset = member_offset("struct task_struct", "se")
+            task = readSU("struct task_struct", Addr(se) - offset)
+            print("%s\ttask_struct 0x%x, %s(%d)" % (pre_str, task, task.comm, task.pid))
+
+
+def get_subsys_func_addr(subsys_id):
+    if subsys_id == "cpuset_subsys_id":
+        return  None
+    elif subsys_id == "ns_subsys_id":
+        return  None
+    elif subsys_id == "cpu_cgroup_subsys_id":
+        return  cpu_cgroup_subsys_detail
+    elif subsys_id == "cpuacct_subsys_id":
+        return  None
+    elif subsys_id == "mem_cgroup_subsys_id":
+        return  None
+    elif subsys_id == "devices_subsys_id":
+        return  None
+    elif subsys_id == "freezer_subsys_id":
+        return  None
+    elif subsys_id == "net_cls_subsys_id":
+        return  None
+    elif subsys_id == "blkio_subsys_id":
+        return  None
+    elif subsys_id == "perf_subsys_id":
+        return  None
+    elif subsys_id == "net_prio_subsys_id":
+        return  None
+    else:
+        return None
+
+
+def cgroup_subsys_id_init():
+    global cgroup_subsys_func_list
+
+    cgroup_subsys_func_list = {}
+    cgroup_subsys_id = EnumInfo("enum cgroup_subsys_id")
+    for enum_name in cgroup_subsys_id:
+        id = cgroup_subsys_id[enum_name]
+        cgroup_subsys_func_list[id] = get_subsys_func_addr(enum_name)
+
+
+def cgroup_details(task_group, cgroup, idx):
+    subsys_idx = -1
+    for subsys in cgroup.subsys:
+        subsys_idx = subsys_idx + 1
+        if subsys is None or subsys == 0:
+            continue
+        subsys_func = cgroup_subsys_func_list[subsys_idx]
+        if subsys_func == None:
+            continue
+        subsys_func(task_group, cgroup, subsys, idx)
+
 
 def cgroup_task_count(cgroup):
     count = 0
@@ -231,6 +304,9 @@ def show_task_group(options):
 
         print ("task_group = 0x%x, cgroup = 0x%x, counter=%d\n\t(%s)" %
                 (task_group, cgroup, cgroup_counter, cgroup_name))
+        if options.show_detail:
+            cgroup_details(task_group, cgroup, 0)
+
         if options.task_list:
             cgroup_task_list(cgroup, 0)
 
@@ -261,10 +337,15 @@ def cgroupinfo():
                   action="store_true",
                   help="Shows task list in cgroup")
 
+    op.add_option("-d", "--detail", dest="show_detail", default=0,
+                  action="store_true",
+                  help="Shows cgroup details")
+
     (o, args) = op.parse_args()
 
     cgroup_count = 0
     empty_count = 0
+    cgroup_subsys_id_init()
 
     if (o.taskgroup_list):
         show_task_group(o)
