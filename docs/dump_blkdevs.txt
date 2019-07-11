@@ -1,0 +1,62 @@
+"""
+Written by Kenneth Yin
+"""
+  
+We use "all_bdevs" symbol to traverse all block device, defined here:
+   fs/block_dev.c:
+   872 static LIST_HEAD(all_bdevs);
+   
+All "struct block_device" is linked to this linked list in the function bdget():
+   915                 list_add(&bdev->bd_list, &all_bdevs);
+   
+Global symbol "all_bdevs" is a linked list which links to block_device.bd_list.
+   
+Also, kernel use this linked list to calculate buffer:
+   935 long nr_blockdev_pages(void)
+   936 {
+   937         struct block_device *bdev;
+   938         long ret = 0;
+   939         spin_lock(&bdev_lock);
+   940         list_for_each_entry(bdev, &all_bdevs, bd_list) {
+   941                 ret += bdev->bd_inode->i_mapping->nrpages;
+   942         }
+   943         spin_unlock(&bdev_lock);
+   944         return ret;
+   945 }
+   
+ We can fetch all block devices infomation via this linked list in crash, for example:
+ 1: gendisk:
+ crash> list -H all_bdevs -o block_device.bd_list -s block_device.bd_disk | paste - -
+ 
+ 2: major, minor numbers:
+ crash> list -H all_bdevs -o block_device.bd_list -s block_device.bd_dev | paste - -
+ ffff8ab3e12b9e00	  bd_dev = 265289729
+ 
+ crash> eval (265289729 >> 20)
+    decimal: 253   <== major number
+ 
+ crash> eval (253 <<20)
+    decimal: 265289728  
+  crash> eval (265289729^265289728)
+    decimal: 1     <== minor number
+
+
+ 
+ 
+ 
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
+   
