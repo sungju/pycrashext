@@ -39,24 +39,3 @@ Also, kernel use this linked list to calculate buffer:
     decimal: 265289728  
   crash> eval (265289729^265289728)
     decimal: 1     <== minor number
-
-
- 
- 
- 
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
-   
