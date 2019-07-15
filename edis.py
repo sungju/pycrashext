@@ -312,7 +312,7 @@ def x86_stack_reg_op(words, result_str):
     elif "(%rbp)" in words[3]: # mov    %rax,-0x30(%rbp)
         op_words = words[3].split(",")
         for op in op_words:
-            if "(%rbp)" in op:
+            if "(%rbp)" in op and "%rbp" in register_dict:
                 if len(op) > 6:
                     offset = int(op[:-6], 16)
                 else:
