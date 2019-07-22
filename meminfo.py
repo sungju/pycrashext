@@ -493,9 +493,36 @@ def show_slabtop(options):
 
 
 def show_percpu(options):
+    total_count = 0
     addr = int(options.percpu, 16)
+    func = None
+    if options.details == "u8":
+        func = readU8
+    elif options.details == "u16":
+        func = readU16
+    elif options.details == "u32":
+        func = readU32
+    elif options.details == "s32":
+        func = readS32
+    elif options.details == "u64":
+        func = readU64
+    elif options.details == "s64":
+        func = readS64
+    elif options.details == "int":
+        func = readInt
+
     for i in range(sys_info.CPUS):
-        print("CPU %d : 0x%x" % (i, percpu.percpu_ptr(addr, i)))
+        percpu_addr = percpu.percpu_ptr(addr, i)
+        print("CPU %d : 0x%x" % (i, percpu_addr))
+        if options.details != "":
+            if func:
+                count = func(percpu_addr)
+                print("\t= %d" % (count))
+                total_count = total_count + count
+            else:
+                print("%s" % (readSU(options.details, percpu_addr)))
+    if func:
+        print("\tTotal = %d" % (total_count))
 
 
 def meminfo():
@@ -518,6 +545,9 @@ def meminfo():
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Show /proc/meminfo-like output")
+    op.add_option("-d", "--details", dest="details", default="",
+                  action="store", type="string",
+                  help="Show detailed output with the specified type")
 
     (o, args) = op.parse_args()
 
