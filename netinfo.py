@@ -10,6 +10,7 @@ from LinuxDump.inet import *
 from LinuxDump.inet import proto, netdevice
 
 import sys
+import collections
 
 import crashcolor
 
@@ -57,6 +58,36 @@ def show_network_interfaces(options):
 
 
 
+def get_proto_list():
+    result_list = {}
+    proto_list = readSymbol("proto_list")
+    for proto in readSUListFromHead(proto_list,
+                                    "node",
+                                    "struct proto"):
+        result_list[proto.inuse_idx] = proto
+
+    return collections.OrderedDict(sorted(result_list.items()))
+
+
+def show_network_protocols(options):
+    int_size =getSizeOf("int")
+    for idx, proto in get_proto_list().items():
+        print("0x%x : %s (inuse_idx = %d)" %
+              (proto, proto.name, proto.inuse_idx))
+        for name, addr in {"mem" : proto.sysctl_mem,
+                           "wmem" : proto.sysctl_wmem,
+                           "rmem" : proto.sysctl_rmem}.items():
+            if addr > 0:
+                min_val = readUInt(addr)
+                default_val = readUInt(addr + int_size)
+                max_val = readUInt(addr + int_size * 2)
+            else:
+                min_val = default_val = max_val = 0
+
+            print("\t%s = [%d, %d, %d]" % (name, min_val, default_val, max_val))
+
+
+
 def netinfo():
     op = OptionParser()
     op.add_option("-i", "--interface", dest="show_interface", default=0,
@@ -67,10 +98,19 @@ def netinfo():
                   action="store_true",
                   help="Show network details")
 
+    op.add_option("-p", "--proto", dest="show_protocols", default=0,
+                  action="store_true",
+                  help="Show network protocols")
+
     (o, args) = op.parse_args()
 
     if (o.show_interface):
         show_network_interfaces(o)
+        sys.exit(0)
+
+
+    if (o.show_protocols):
+        show_network_protocols(o)
         sys.exit(0)
 
 
