@@ -53,6 +53,3 @@ The symbol "major_names" is a pointer array, all elements in the array is a poin
     297         int major;
     298         char name[16];
     299 } *major_names[BLKDEV_MAJOR_HASH_SIZE];
-    
-    
-    
