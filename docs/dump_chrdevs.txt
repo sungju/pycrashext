@@ -1,0 +1,43 @@
+"""
+Written by Kenneth Yin
+"""
+
+The symbol "chrdevs" is a pointer array, all elements in the array is a pointer which points to struct char_device_struct:
+  fs/char_dev.c:
+  32 #define CHRDEV_MAJOR_HASH_SIZE 255
+  33 
+  34 static struct char_device_struct {
+  35         struct char_device_struct *next;
+  36         unsigned int major;
+  37         unsigned int baseminor;
+  38         int minorct;
+  39         char name[64];
+  40         struct cdev *cdev;              /* will die */
+  41 } *chrdevs[CHRDEV_MAJOR_HASH_SIZE];
+  
+For example:
+  crash> rd chrdevs 255 | grep -v 0000000000000000
+  ffffffffba243b80:  ffff8e1a47313ea0 ffff8e1a4730acc0   .>1G......0G....
+  ffffffffba244140:  ffff8e1a5c5d09c0 ffff8e1a47259780   ..]\......%G....
+  ffffffffba2441b0:  ffff8e1a470f8ae0 ffff8e1a47313a80   ...G.....:1G....
+  ffffffffba244300:  ffff8e1a5c5d0b40 ffff8e1a5c5d0ae0   @.]\......]\....
+  ffffffffba244310:  ffff8e1a5c791780 ffff8e1a473134e0   ..y\.....41G....
+  ffffffffba244320:  ffff8e1a47259060 ffff8e1a47259240   `.%G....@.%G....
+  ffffffffba244330:  ffff8e1a47259180 ffff8e1a472597e0   ..%G......%G....
+  ffffffffba244340:  ffff8e1a47259d80 ffff8e1a47259f60   ..%G....`.%G....
+  ffffffffba244350:  ffff8e1a67af83c0                    ...g....
+  
+  crash> struct char_device_struct ffff8e1a67af83c0
+  struct char_device_struct {
+  next = 0x0, 
+  major = 254, 
+  baseminor = 0, 
+  minorct = 256, 
+  name = "gpiochip\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000\000", 
+  cdev = 0x0
+}
+
+Corresponding to:
+crash> epython /root/pycrashext/dump_chrdevs.py
+CHRDEV     NAME            OPERATIONS
+ 254     gpiochip          0x0000000000000000  <None>
