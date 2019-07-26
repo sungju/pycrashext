@@ -48,8 +48,10 @@ We can fetch all block devices infomation via this linked list in crash, for exa
       
 
 The symbol "major_names" is a pointer array, all elements in the array is a pointer which points to struct blk_major_name:
-    295 static struct blk_major_name {
-    296         struct blk_major_name *next;
-    297         int major;
-    298         char name[16];
-    299 } *major_names[BLKDEV_MAJOR_HASH_SIZE];
+  block/genhd.c:
+  307 #define BLKDEV_MAJOR_HASH_SIZE 255
+  308 static struct blk_major_name {
+  309         struct blk_major_name *next;
+  310         int major;
+  311         char name[16];
+  312 } *major_names[BLKDEV_MAJOR_HASH_SIZE];
