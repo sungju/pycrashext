@@ -24,7 +24,7 @@ Also, kernel use this linked list to calculate buffer:
    944         return ret;
    945 }
    
- We can fetch all block devices infomation via this linked list in crash, for example:
+We can fetch all block devices infomation via this linked list in crash, for example:
  1: gendisk:
  crash> list -H all_bdevs -o block_device.bd_list -s block_device.bd_disk | paste - -
  
@@ -45,3 +45,14 @@ Also, kernel use this linked list to calculate buffer:
   6
   crash> kmem -i | grep BUFFERS
       BUFFERS        6        24 KB    0% of TOTAL MEM
+      
+
+The symbol "major_names" is a pointer array, all elements in the array is a pointer which points to struct blk_major_name:
+    295 static struct blk_major_name {
+    296         struct blk_major_name *next;
+    297         int major;
+    298         char name[16];
+    299 } *major_names[BLKDEV_MAJOR_HASH_SIZE];
+    
+    
+    
