@@ -436,20 +436,23 @@ def show_module_detail(options):
             continue
 
 
-    print_sym_list_section("\n.text section", text_sym_list, options)
-    print_sym_list_section("\n.bss section", bss_sym_list, options)
-    print_sym_list_section("\n.data section", data_sym_list, options)
-    print_sym_list_section("\n.readonly_data section", readonly_sym_list, options)
+    print_sym_list_section("\n.text section", text_sym_list, False)
+    print_sym_list_section("\n.bss section", bss_sym_list,
+                           options.show_contents)
+    print_sym_list_section("\n.data section", data_sym_list,
+                           options.show_contents)
+    print_sym_list_section("\n.readonly_data section", readonly_sym_list,
+                           options.show_contents)
 
 
-def print_sym_list_section(title, sym_list, options):
+def print_sym_list_section(title, sym_list, show_contents):
     crashcolor.set_color(crashcolor.BLUE)
     print(title)
     crashcolor.set_color(crashcolor.RESET)
     for sym_entry in sym_list:
         print("0x%s %s %s" %
             (sym_entry[0], sym_entry[1], sym_entry[2]))
-        if options.show_contents == False:
+        if show_contents == False:
             continue
 
         data = "0x%016x" % readULong(int(sym_entry[0], 16))
