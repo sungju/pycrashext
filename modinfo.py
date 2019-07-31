@@ -436,19 +436,44 @@ def show_module_detail(options):
             continue
 
 
-    print_sym_list_section("\n.text section", text_sym_list)
-    print_sym_list_section("\n.bss section", bss_sym_list)
-    print_sym_list_section("\n.data section", data_sym_list)
-    print_sym_list_section("\n.readonly_data section", readonly_sym_list)
+    print_sym_list_section("\n.text section", text_sym_list, options)
+    print_sym_list_section("\n.bss section", bss_sym_list, options)
+    print_sym_list_section("\n.data section", data_sym_list, options)
+    print_sym_list_section("\n.readonly_data section", readonly_sym_list, options)
 
 
-def print_sym_list_section(title, sym_list):
+def print_sym_list_section(title, sym_list, options):
     crashcolor.set_color(crashcolor.BLUE)
     print(title)
     crashcolor.set_color(crashcolor.RESET)
     for sym_entry in sym_list:
         print("0x%s %s %s" %
             (sym_entry[0], sym_entry[1], sym_entry[2]))
+        if options.show_contents == False:
+            continue
+
+        data = "0x%016x" % readULong(int(sym_entry[0], 16))
+        first_byte = str(chr(readU8(int(sym_entry[0], 16))))
+        try:
+            if data.startswith("0xf"):
+                data_str = exec_crash_command("sym %s" % (data))
+                if data_str.startswith("sym:"):
+                    data_str = "<no symbol>"
+                else:
+                    data_str = "sym: %s" % data_str.split()[2]
+            elif first_byte.isprintable():
+                data_str = exec_crash_command("rd -a 0x%s" % (sym_entry[0]))
+                data_str = "\"%s\"" % data_str.split()[1]
+            else:
+                data_str = "= %d" % int(data, 16)
+        except:
+            data_str = "= %d" % int(data, 16)
+            pass
+
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\t( %s %s )" % (data, data_str))
+        crashcolor.set_color(crashcolor.RESET)
+
 
 
 def modinfo():
@@ -459,6 +484,9 @@ def modinfo():
     op.add_option("--details", dest="module_detail", default=None,
                   action="store", type="string",
                   help="Show details")
+    op.add_option("-c", "--contents", dest="show_contents", default=False,
+                  action="store_true",
+                  help="Show contents of each symbols")
     op.add_option("-t", dest="shows_tainted", default=False,
                   action="store_true",
                   help="Shows tainted modules only")
