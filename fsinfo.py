@@ -156,6 +156,19 @@ def get_file_open_mode_str(f_mode):
 
     return result_str
 
+
+def show_inode_details(options):
+    inode = readSU("struct inode", int(options.inode, 16))
+    dentry_offset = member_offset('struct dentry',
+                                  'd_alias')
+    dentry = readSU('struct dentry', inode.i_dentry.next - dentry_offset)
+    dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+
+    print(dentry_details)
+    print("file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %
+          (inode.i_size, inode.i_ino, inode.i_nlink, inode.i_uid, inode.i_gid))
+
+
 def show_file_details(options):
     file = readSU("struct file", int(options.file, 16))
     dentry_details = exec_crash_command("files -d 0x%x" % (file.f_path.dentry))
@@ -185,6 +198,9 @@ def fsinfo():
     op.add_option("-f", "--file", dest="file", default="",
                   action="store",
                   help="Show detailed file information for 'struct file' address (hex)")
+    op.add_option("-i", "--inode", dest="inode", default="",
+                  action="store",
+                  help="Show detailed inode information for 'struct inode' address (hex)")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -202,6 +218,9 @@ def fsinfo():
         sys.exit(0);
     if (o.file != ""):
         show_file_details(o)
+        sys.exit(0)
+    if (o.inode != ""):
+        show_inode_details(o)
         sys.exit(0)
 
     all_filesystem_info(o)
