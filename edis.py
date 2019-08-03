@@ -693,6 +693,115 @@ def disasm(ins_addr, o, args, cmd_path_list):
     crashcolor.set_color(crashcolor.RESET)
 
 
+class LineType(object):
+    LINE_SPACE = 0,
+    LINE_FIRST = 1,
+    LINE_BRANCH = 2,
+    LINE_LAST = 3,
+    LINE_VERT = 4
+
+
+line_type = ["    ", "-+- ", " |- ", " `- ", " |  "]
+branch_bar = []
+branch_locations = []
+
+def print_branch(depth, first):
+    global branch_locations
+    global branch_bar
+
+    if (first and depth > 0):
+        print ("%s" % (line_type[1]), end='')
+        return
+
+    for i in range(0, depth):
+        for j in range (0, branch_locations[i]):
+            print (" ", end='')
+
+        k = branch_bar[i]
+        if (type(k) == tuple):
+            k = k[0]
+        print("%s" % (line_type[k]), end='')
+
+
+def show_callgraph_func(func_name, depth, first, options):
+    global branch_locations
+
+    print_branch(depth, first)
+
+    print_str = ("{%s} " % (func_name))
+    print("%s" % (print_str), end='')
+    if (len(branch_locations) <= depth):
+        branch_locations.append(len(print_str))
+    else:
+        branch_locations[depth] = len(print_str)
+
+    return 1
+
+
+call_op_set = []
+call_exclude_set = []
+
+def set_call_op_list():
+    global call_op_set
+    global call_exclude_set
+
+    arch = sys_info.machine
+
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        call_op_set = [ "call", "callq" ]
+    elif (arch.startswith("ppc")):
+        call_op_set = [ "bl", "ctrl" ]
+    elif (arch.startswith("arm")):
+        call_op_set = [ "bl", "bic", "bics", "blx" ]
+    else:
+        call_op_set = ["callq" ]
+
+
+def show_callgraph(func_name, depth, options):
+    global branch_bar
+    global call_op_set
+
+    if depth >= options.max_depth:
+        return
+
+    depth = depth + 1
+    while (len(branch_bar) <= depth):
+        branch_bar.append(LineType.LINE_SPACE)
+
+    first = True
+    disasm_str = exec_crash_command("dis %s" % (func_name))
+    disasm_list = disasm_str.splitlines()
+    call_list = []
+    for line in disasm_list:
+        if line == "":
+            break
+        words = line.split()
+        if len(words) <= 2:
+            continue
+        if words[2] in call_op_set:
+            call_list.append(words[4][1:-1])
+
+    len_call_list = len(call_list)
+    for idx, func_name in enumerate(call_list):
+        if (idx == len_call_list - 1):
+            branch_bar[depth - 1] = LineType.LINE_LAST
+        else:
+            branch_bar[depth - 1] = LineType.LINE_BRANCH
+
+        printed = show_callgraph_func(func_name, depth, first, options)
+        first = False
+
+        if (idx == len_call_list - 1):
+            branch_bar[depth - 1] = LineType.LINE_SPACE
+        else:
+            branch_bar[depth - 1] = LineType.LINE_VERT
+
+        show_callgraph(func_name, depth, options)
+        if (idx != len_call_list - 1):
+            if (printed > 0):
+                print()
+
+
 def edis():
     op = OptionParser()
     op.add_option("-r", "--reverse",
@@ -754,8 +863,29 @@ def edis():
                   default=False,
                   help="Display source lines only, but not based on function")
 
+    op.add_option("-c", "--callgraph",
+                  action="store_true",
+                  dest="callgraph",
+                  default=False,
+                  help="Shows call graph for a function")
+
+    MAX_DEPTH = 2
+    op.add_option("-m", "--max_depth",
+                  action="store",
+                  type="int",
+                  dest="max_depth",
+                  default=MAX_DEPTH,
+                  help="Maximum depth of graph for callgraph. default=%s" %
+                        MAX_DEPTH)
 
     (o, args) = op.parse_args()
+
+    if o.callgraph == True:
+        set_call_op_list()
+        show_callgraph_func(args[0], 0, True, o)
+        show_callgraph(args[0], 0, o)
+        sys.exit(0)
+
     disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
 
 
