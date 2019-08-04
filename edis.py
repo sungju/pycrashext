@@ -762,6 +762,7 @@ def show_callgraph(func_name, depth, options):
     global call_op_set
 
     if depth >= options.max_depth:
+        print("...", end="")
         return
 
     depth = depth + 1
