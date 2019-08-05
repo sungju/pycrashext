@@ -161,12 +161,26 @@ def show_inode_details(options):
     inode = readSU("struct inode", int(options.inode, 16))
     dentry_offset = member_offset('struct dentry',
                                   'd_alias')
-    dentry = readSU('struct dentry', inode.i_dentry.next - dentry_offset)
+    i_dentry_size = member_size("struct inode", "i_dentry")
+    hlist_head_sz = struct_size("struct hlist_head")
+    if i_dentry_size == hlist_head_sz:
+        dentry_addr = inode.i_dentry.first - dentry_offset
+    else:
+        dentry_addr = inode.i_dentry.next - dentry_offset
+
+    dentry = readSU('struct dentry', dentry_addr)
     dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+
+    try:
+        i_uid = inode.i_uid.val
+        i_gid = inode.i_gid.val
+    except:
+        i_uid = inode.i_uid
+        i_gid = inode.i_gid
 
     print(dentry_details)
     print("file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %
-          (inode.i_size, inode.i_ino, inode.i_nlink, inode.i_uid, inode.i_gid))
+          (inode.i_size, inode.i_ino, inode.i_nlink, i_uid, i_gid))
 
 
 def show_file_details(options):
