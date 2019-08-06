@@ -729,7 +729,12 @@ def show_callgraph_func(func_name, depth, first, options):
     print_branch(depth, first)
 
     print_str = ("{%s} " % (func_name))
+    start_char = func_name[0]
+    if start_char == '*' or start_char == '0':
+        crashcolor.set_color(crashcolor.BLUE)
     print("%s" % (print_str), end='')
+    if start_char == '*' or start_char == '0':
+        crashcolor.set_color(crashcolor.RESET)
     if (len(branch_locations) <= depth):
         branch_locations.append(len(print_str))
     else:
@@ -780,7 +785,13 @@ def show_callgraph(func_name, depth, options):
         if len(words) <= 2:
             continue
         if words[2] in call_op_set:
-            call_list.append(words[4][1:-1])
+            if len(words) > 4:
+                if words[4].startswith("<"):
+                    call_list.append(words[4][1:-1])
+                elif words[4].startswith("#") and len(words) > 5:
+                    call_list.append("0x%x" % readULong(int(words[5], 16)))
+            elif len(words) == 4:
+                call_list.append(words[3])
 
     len_call_list = len(call_list)
     for idx, func_name in enumerate(call_list):
