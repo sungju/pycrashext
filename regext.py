@@ -21,27 +21,13 @@ except Exception as e:
     print('Error: ' + str(e))
 
 
-"""
-
 help = '''
-Dump character device list example code
+Show device related information
 '''
 
-rprog("dump_chrdevs", "Char device list",
+rprog("devinfo", "Device information",
       "-h   - list available options",
       help)
-
-
-help = '''
-Dump block device list example code
-'''
-
-rprog("dump_blkdevs", "Block device list",
-      "-h   - list available options",
-      help)
-
-"""
-
 
 
 help = '''
