@@ -502,9 +502,12 @@ def show_slabdetail(options):
     blue_color = crashcolor.get_color(crashcolor.BLUE)
     red_color = crashcolor.get_color(crashcolor.RED)
     reset_color = crashcolor.get_color(crashcolor.RESET)
+    print("CACHE             OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE  NAME")
     for i in range(1, result_len - 1):
+        if result_lines[i].startswith("kmem: "): # error message
+            continue
         result_line = result_lines[i].split()
-        if i == 1:
+        if objsize == 0:
             objsize = int(result_line[1])
         print(result_lines[i], end="")
         if result_line[0].startswith("["):
