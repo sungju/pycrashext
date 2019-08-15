@@ -35,7 +35,7 @@ def show_blkdevs():
         # Thanks John Pittman for share this info.
         dev_len = len(pa)
         bdev_map = readSymbol("bdev_map")
-        print("%5s:%5s(%5s) %-10s   %-18s %-18s" %
+        print("%5s:%5s(%5s)%-17s  %-18s %-18s" %
               ("MAJOR", "MINOR", "COUNT", " NAME", "gendisk", "request_queue"))
         for i in range(0, dev_len):
             addr = pa[i]
@@ -63,18 +63,24 @@ def show_blkdevs():
                     break
 
                 name = gendisk.disk_name
-                print ("%5d:%5d(%5d)   %-10s 0x%16x 0x%16x" %
+                print ("%5d:%5d(%5d) %-17s 0x%16x 0x%16x" %
                        (major, minor, gendisk.minors, name, gendisk, gendisk.queue))
 
     elif (symbol_exists('all_bdevs')):
+        print("%5s:%5s(%5s)%-17s  %-18s %-18s" %
+              ("MAJOR", "MINOR", "COUNT", " NAME", "gendisk", "request_queue"))
         for bd in readSUListFromHead(sym2addr('all_bdevs'),
                                      'bd_list', 'struct block_device'):
             major, minor = decode_devt(bd.bd_dev)
             gendisk_addr = bd.bd_disk
             gendisk = readSU('struct gendisk', gendisk_addr)
             name = ""
-            if (gendisk != 0):
-                name = gendisk.disk_name
+            if (gendisk == 0):
+                continue
+
+            name = gendisk.disk_name
+            print ("%5d:%5d(%5d) %-17s 0x%16x 0x%16x" %
+                   (major, minor, gendisk.minors, name, gendisk, gendisk.queue))
             print ("  %3d:%3d     %-10s" % (major, minor, name))
 
 

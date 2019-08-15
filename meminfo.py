@@ -492,6 +492,57 @@ def show_slabtop(options):
     print("=" * 68)
 
 
+def show_slabdetail(options):
+    result = exec_crash_command("kmem -S %s" % options.slabdetail)
+    result_lines = result.splitlines(True)
+    slab_list = {}
+    result_len = len(result_lines)
+    objsize = 0
+    content_count = {}
+    blue_color = crashcolor.get_color(crashcolor.BLUE)
+    red_color = crashcolor.get_color(crashcolor.RED)
+    reset_color = crashcolor.get_color(crashcolor.RESET)
+    for i in range(1, result_len - 1):
+        result_line = result_lines[i].split()
+        if i == 1:
+            objsize = int(result_line[1])
+        print(result_lines[i], end="")
+        if result_line[0].startswith("["):
+            content = exec_crash_command("rd 0x%s %d" %
+                                         (result_line[0][1:-1],objsize / 8))
+            content_lines = content.splitlines(True)
+            for line in content_lines:
+                words = line.split()
+                output_string = words[0]
+                for cnt_pos in range(1, 3):
+                    word = words[cnt_pos]
+                    if word not in content_count:
+                        content_count[word] = 1
+                    else:
+                        content_count[word] = content_count[word] + 1
+                    if content_count[word] > 10:
+                        output_string = output_string + blue_color +\
+                                        " " + word + reset_color
+                    elif content_count[word] > 20:
+                        output_string = output_string + red_color +\
+                                        " " + word + reset_color
+                    else:
+                        output_string = output_string + " " + word
+
+                output_string = output_string + " " + line[line.index(words[3]):]
+                print("\t%s" % output_string, end="")
+
+
+    sorted_content = sorted(content_count.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    min_number = 10
+    print("\n\t%s%s%s" % (blue_color, "Mostly appeared contents", reset_color))
+    print("\t%s" % ("-" * 40))
+    for i in range(0, min(len(sorted_content) - 1, min_number)):
+        ascii_str = exec_crash_command("ascii %s" % sorted_content[i][0])
+        print("\t%s %5d %s" % (sorted_content[i][0], sorted_content[i][1],
+                               ascii_str[ascii_str.index(":") + 2:]), end="")
+
 def show_percpu(options):
     total_count = 0
     addr = int(options.percpu, 16)
@@ -539,6 +590,9 @@ def meminfo():
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
+    op.add_option("-S", "--slabdetail", dest="slabdetail", default="",
+                  action="store", type="string",
+                  help="Show details of a slab")
     op.add_option("-i", "--meminfo", dest="meminfo", default=0,
                   action="store_true",
                   help="Show /proc/meminfo-like output")
@@ -553,6 +607,10 @@ def meminfo():
 
     if (o.slabtop):
         show_slabtop(o)
+        sys.exit(0)
+
+    if (o.slabdetail != ""):
+        show_slabdetail(o)
         sys.exit(0)
 
     if (o.meminfo):
