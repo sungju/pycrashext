@@ -509,7 +509,8 @@ def show_slabdetail(options):
         print(result_lines[i], end="")
         if result_line[0].startswith("["):
             content = exec_crash_command("rd 0x%s %d" %
-                                         (result_line[0][1:-1],objsize / 8))
+                                         (result_line[0][1:-1],
+                                          objsize / sys_info.pointersize))
             content_lines = content.splitlines(True)
             for line in content_lines:
                 words = line.split()
