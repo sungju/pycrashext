@@ -8,17 +8,10 @@ from __future__ import division
 from pykdump.API import *
 
 import sys
-
 import crashcolor
 
-def vmw_mem():
-    op = OptionParser()
-    op.add_option("-d", "--details", dest="show_details", default=0,
-                  action="store_true",
-                  help="Show details")
 
-    (o, args) = op.parse_args()
-
+def vmw_mem(options):
     try:
         pa = readSymbol('balloon');
         if (pa == 0):
@@ -27,7 +20,7 @@ def vmw_mem():
         print ("VMware balloon symbol does not exist")
         return
 
-    if o.show_details:
+    if options.show_details:
         baddr = sym2addr('balloon')
         balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
         print ('%s' % (balloon_result))
@@ -54,26 +47,21 @@ def vmw_mem():
         print ("rate_free                  = %d" % pa.rate_free)
 
     print ("\n")
-    """
-    print ("** vmballoon_stats **")
-    print ("timer = %d" % pa.stats.timer)
-    if (member_offset(pa.stats, "alloc") > -1):
-        print ("alloc = %d" % pa.stats.alloc)
-    if (member_offset(pa.stats, "free") > -1):
-        print ("free = %d" % pa.stats.free)
-    if (member_offset(pa.stats, "alloc_fail") > -1):
-        print ("alloc_fail = %d" % pa.stats.alloc_fail)
 
-    print ("sleep_alloc = %d" % pa.stats.sleep_alloc)
-    print ("sleepalloc_fail = %d" % pa.stats.sleep_alloc_fail)
 
-    print ("refused_alloc = %d" % pa.stats.refused_alloc)
-    print ("refused_free = %d" % pa.stats.refused_free)
+def vmwareinfo():
+    op = OptionParser()
+    op.add_option("-d", "--details", dest="show_details", default=0,
+                  action="store_true",
+                  help="Show details")
 
-    print ("target = %d" % pa.stats.target)
-    print ("target_fail = %d" % pa.stats.target_fail)
-    """
+    (o, args) = op.parse_args()
+
+
+    vmw_mem(o)
+
+
 
 
 if ( __name__ == '__main__'):
-    vmw_mem()
+    vmwareinfo()

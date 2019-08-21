@@ -31,10 +31,10 @@ rprog("devinfo", "Device information",
 
 
 help = '''
-vmware's ballooning value check
+vmware information
 '''
 
-rprog("vmw_mem", "vmware ballooning information ",
+rprog("vmwareinfo", "vmware information ",
       "-h   - list available options",
       help)
 
