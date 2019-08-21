@@ -150,15 +150,15 @@ Audit_ge = 7
 Audit_bad = 8
 
 audit_ops = {
-    Audit_equal : "Audit_equal",
-    Audit_not_equal : "Audit_not_equal",
-    Audit_bitmask : "Audit_bitmask",
-    Audit_bittest : "Audit_bittest",
-    Audit_lt : "Audit_lt",
-    Audit_gt : "Audit_gt",
-    Audit_le : "Audit_le",
-    Audit_ge : "Audit_ge",
-    Audit_bad : "Audit_bad",
+    Audit_equal : "equal",
+    Audit_not_equal : "not_equal",
+    Audit_bitmask : "bitmask",
+    Audit_bittest : "bittest",
+    Audit_lt : "<",
+    Audit_gt : ">",
+    Audit_le : "<=",
+    Audit_ge : ">=",
+    Audit_bad : "bad",
 }
 
 
@@ -294,7 +294,7 @@ def show_audit_fields_details(audit_entry):
             val_str = "%d" % (field.val if int(field.val) < 4294967283 else -1)
 
         set_color_for_particular_types(field.type)
-        print("\ttype = %s, val = %s, op = %s" %
+        print("\ttype = %s, val = %s, op = '%s'" %
               (get_audit_type_str(field.type),
                val_str,
                get_audit_op_str(field.op)))
