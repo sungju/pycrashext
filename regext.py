@@ -257,3 +257,12 @@ Shows UN(D) state processes with details
 rprog("hangcheck", "hang task(s) heck",
       "-h   - list available options",
       help)
+
+
+help = '''
+Shows audit information
+'''
+
+rprog("auditinfo", "audit information",
+      "-h   - list available options",
+      help)
