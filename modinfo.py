@@ -442,19 +442,23 @@ def show_module_detail(options):
     readonly_sym_list = sorted(readonly_sym_list, reverse=False)
 
     print_sym_list_section("\n.text section", text_sym_list,
-                           False, False)
+                           False, False, 0)
     print_sym_list_section("\n.bss section", bss_sym_list,
                            options.show_contents,
-                           options.show_content_strings)
+                           options.show_content_strings,
+                           options.show_longer_than)
     print_sym_list_section("\n.data section", data_sym_list,
                            options.show_contents,
-                           options.show_content_strings)
+                           options.show_content_strings,
+                           options.show_longer_than)
     print_sym_list_section("\n.readonly_data section", readonly_sym_list,
                            options.show_contents,
-                           options.show_content_strings)
+                           options.show_content_strings,
+                           options.show_longer_than)
 
 
-def print_sym_list_section(title, sym_list, show_contents, show_strings):
+def print_sym_list_section(title, sym_list, show_contents,
+                           show_strings, min_line_length):
     crashcolor.set_color(crashcolor.BLUE)
     print(title)
     crashcolor.set_color(crashcolor.RESET)
@@ -492,11 +496,15 @@ def print_sym_list_section(title, sym_list, show_contents, show_strings):
         crashcolor.set_color(crashcolor.RESET)
 
 
-    if show_strings == True:
+    if show_strings == True and start_addr != "":
         result = exec_crash_command("rd 0x%s -e 0x%s -a" %\
                                     (start_addr, end_addr))
+        lines = result.splitlines()
         crashcolor.set_color(crashcolor.GREEN)
-        print("\n%s\n" % result)
+        for line in lines:
+            words = line.split()
+            if len(words) > 1 and len(words[1]) >= min_line_length:
+                print(line)
         crashcolor.set_color(crashcolor.RESET)
 
 
@@ -530,6 +538,9 @@ def modinfo():
     op.add_option("-s", dest="show_content_strings", default=False,
                   action="store_true",
                   help="Shows strings from each data section")
+    op.add_option("-l", dest="show_longer_than", default=None,
+                  action="store", type="int",
+                  help="Set the minimum size to show for -s")
 
     (o, args) = op.parse_args()
 
