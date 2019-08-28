@@ -436,20 +436,34 @@ def show_module_detail(options):
             continue
 
 
-    print_sym_list_section("\n.text section", text_sym_list, False)
+    text_sym_list = sorted(text_sym_list, reverse=False)
+    bss_sym_list = sorted(bss_sym_list, reverse=False)
+    data_sym_list = sorted(data_sym_list, reverse=False)
+    readonly_sym_list = sorted(readonly_sym_list, reverse=False)
+
+    print_sym_list_section("\n.text section", text_sym_list,
+                           False, False)
     print_sym_list_section("\n.bss section", bss_sym_list,
-                           options.show_contents)
+                           options.show_contents,
+                           options.show_content_strings)
     print_sym_list_section("\n.data section", data_sym_list,
-                           options.show_contents)
+                           options.show_contents,
+                           options.show_content_strings)
     print_sym_list_section("\n.readonly_data section", readonly_sym_list,
-                           options.show_contents)
+                           options.show_contents,
+                           options.show_content_strings)
 
 
-def print_sym_list_section(title, sym_list, show_contents):
+def print_sym_list_section(title, sym_list, show_contents, show_strings):
     crashcolor.set_color(crashcolor.BLUE)
     print(title)
     crashcolor.set_color(crashcolor.RESET)
+    start_addr = end_addr = ""
     for sym_entry in sym_list:
+        if start_addr == "":
+            start_addr = sym_entry[0]
+        end_addr = sym_entry[0]
+
         print("0x%s %s %s" %
             (sym_entry[0], sym_entry[1], sym_entry[2]))
         if show_contents == False:
@@ -475,6 +489,14 @@ def print_sym_list_section(title, sym_list, show_contents):
 
         crashcolor.set_color(crashcolor.YELLOW)
         print("\t( %s %s )" % (data, data_str))
+        crashcolor.set_color(crashcolor.RESET)
+
+
+    if show_strings == True:
+        result = exec_crash_command("rd 0x%s -e 0x%s -a" %\
+                                    (start_addr, end_addr))
+        crashcolor.set_color(crashcolor.GREEN)
+        print("\n%s\n" % result)
         crashcolor.set_color(crashcolor.RESET)
 
 
@@ -505,6 +527,9 @@ def modinfo():
     op.add_option("-f", dest="shows_flags_str", default=False,
                   action="store_true",
                   help="Shows meanings of tainted flags")
+    op.add_option("-s", dest="show_content_strings", default=False,
+                  action="store_true",
+                  help="Shows strings from each data section")
 
     (o, args) = op.parse_args()
 
