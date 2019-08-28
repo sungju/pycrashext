@@ -538,7 +538,7 @@ def modinfo():
     op.add_option("-s", dest="show_content_strings", default=False,
                   action="store_true",
                   help="Shows strings from each data section")
-    op.add_option("-l", dest="show_longer_than", default=None,
+    op.add_option("-l", dest="show_longer_than", default=1,
                   action="store", type="int",
                   help="Set the minimum size to show for -s")
 
