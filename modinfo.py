@@ -503,8 +503,11 @@ def print_sym_list_section(title, sym_list, show_contents,
         crashcolor.set_color(crashcolor.GREEN)
         for line in lines:
             words = line.split()
-            if len(words) > 1 and len(words[1]) >= min_line_length:
-                print(line)
+            if len(words) > 1:
+                dataindex = line.index(words[0]) + len(words[0])
+                content_len = len(line[dataindex:].strip())
+                if content_len >= min_line_length:
+                    print(line)
         crashcolor.set_color(crashcolor.RESET)
 
 
@@ -538,9 +541,9 @@ def modinfo():
     op.add_option("-s", dest="show_content_strings", default=False,
                   action="store_true",
                   help="Shows strings from each data section")
-    op.add_option("-l", dest="show_longer_than", default=1,
+    op.add_option("-l", dest="show_longer_than", default=5,
                   action="store", type="int",
-                  help="Set the minimum size to show for -s")
+                  help="Set the minimum size to show for -s. default=5")
 
     (o, args) = op.parse_args()
 
