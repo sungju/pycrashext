@@ -168,8 +168,10 @@ def show_inode_details(options):
     else:
         dentry_addr = inode.i_dentry.next - dentry_offset
 
-    dentry = readSU('struct dentry', dentry_addr)
-    dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+    if dentry_addr != -dentry_offset: # No dentry for this inode
+        dentry = readSU('struct dentry', dentry_addr)
+        dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+        print(dentry_details)
 
     try:
         i_uid = inode.i_uid.val
@@ -178,7 +180,6 @@ def show_inode_details(options):
         i_uid = inode.i_uid
         i_gid = inode.i_gid
 
-    print(dentry_details)
     print("file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %
           (inode.i_size, inode.i_ino, inode.i_nlink, i_uid, i_gid))
 
