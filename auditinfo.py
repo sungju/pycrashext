@@ -284,6 +284,59 @@ def get_audit_arch_str(arch_type):
     return "%d" % arch_type
 
 
+# Rule flags
+AUDIT_FILTER_USER   = 0x00    # Apply rule to user-generated messages
+AUDIT_FILTER_TASK   = 0x01    # Apply rule at task creation (not syscall)
+AUDIT_FILTER_ENTRY  = 0x02    # Apply rule at syscall entry
+AUDIT_FILTER_WATCH  = 0x03    # Apply rule to file system watches
+AUDIT_FILTER_EXIT   = 0x04    # Apply rule at syscall exit
+AUDIT_FILTER_TYPE   = 0x05    # Apply rule at audit_log_start
+
+
+audit_flag_dict =  {
+    AUDIT_FILTER_USER : "user",
+    AUDIT_FILTER_TASK : "task",
+    AUDIT_FILTER_ENTRY : "syscall",
+    AUDIT_FILTER_WATCH : "watch",
+    AUDIT_FILTER_EXIT :  "exit",
+    AUDIT_FILTER_TYPE : "start",
+}
+
+
+def get_audit_flag_str(flags):
+    result = ""
+    for key in audit_flag_dict:
+        if (key & flags) == key:
+            if result != "":
+                result = result + ","
+            result = result + audit_flag_dict[key]
+
+    if result ==  "":
+        result = "%d" % flags
+
+    return  result
+
+
+# Rule actions
+AUDIT_NEVER    = 0    # Do not build context if rule matches
+AUDIT_POSSIBLE = 1    # Build context if rule matches
+AUDIT_ALWAYS   = 2    # Generate audit record if rule matches
+
+
+audit_action_dict = {
+    AUDIT_NEVER : "never",
+    AUDIT_POSSIBLE : "possible",
+    AUDIT_ALWAYS : "always",
+}
+
+
+def get_audit_action_str(action):
+    if action in audit_action_dict:
+        return audit_action_dict[action]
+
+    return  "%d" % action
+
+
 def show_audit_fields_details(audit_entry):
     rule = audit_entry.rule
     for i in range(0, rule.field_count):
@@ -316,7 +369,10 @@ def show_audit_rules(options):
         next_addr = audit_rules.next
         while next_addr != audit_rules:
             audit_entry = readSU("struct audit_entry", next_addr - offset)
-            print("0x%x %s" % (audit_entry, audit_entry.rule.filterkey))
+            print("0x%x %s (%s,%s)" %\
+                  (audit_entry, audit_entry.rule.filterkey,
+                   get_audit_flag_str(audit_entry.rule.flags),
+                  get_audit_action_str(audit_entry.rule.action)))
             if audit_entry.rule.field_count > 0:
                 show_audit_fields_details(audit_entry)
             if audit_entry.rule.watch:
