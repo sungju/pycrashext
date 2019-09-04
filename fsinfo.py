@@ -205,6 +205,14 @@ def show_file_details(options):
             found = True
 
 
+def show_slab_dentry(options):
+    result_lines = exec_crash_command("kmem -S dentry").splitlines()
+    for line in result_lines:
+        if line.startswith("  ["):
+            dentry_addr = int(line[3:-1], 16)
+            print("0x%x %s" % (dentry_addr, dentry_to_filename(dentry_addr)))
+
+
 def fsinfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="filesystem_details", default=0,
@@ -216,6 +224,9 @@ def fsinfo():
     op.add_option("-i", "--inode", dest="inode", default="",
                   action="store",
                   help="Show detailed inode information for 'struct inode' address (hex)")
+    op.add_option("-s", "--slab", dest="show_slab", default=0,
+                  action="store_true",
+                  help="Show all 'dentry' details in slab")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -237,6 +248,10 @@ def fsinfo():
     if (o.inode != ""):
         show_inode_details(o)
         sys.exit(0)
+    if (o.show_slab):
+        show_slab_dentry(o)
+        sys.exit(0)
+
 
     all_filesystem_info(o)
 
