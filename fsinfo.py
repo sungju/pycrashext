@@ -8,6 +8,7 @@ from __future__ import division
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+import operator
 
 import crashcolor
 
@@ -224,9 +225,15 @@ def show_slab_dentry(options):
     print("-" * 30)
     sorted_sb_dict = sorted(sb_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
+    total_count = 0
     for sb, count in sorted_sb_dict:
         print("0x%x %5d %s" %
               (sb, count, dentry_to_filename(sb.s_root)))
+        total_count = total_count + count
+    print("-" * 40)
+    print("Total allocated object count = %d" % (total_count))
+    print("=" * 40)
+
 
 
 def fsinfo():
