@@ -207,17 +207,33 @@ def show_file_details(options):
 
 def show_slab_dentry(options):
     result_lines = exec_crash_command("kmem -S dentry").splitlines()
+    sb_dict = {}
     for line in result_lines:
         if line.startswith("  ["):
             dentry_addr = int(line[3:-1], 16)
-            print("0x%x %s" % (dentry_addr, dentry_to_filename(dentry_addr)))
+            dentry   = readSU("struct dentry", dentry_addr)
+            if dentry.d_sb not in sb_dict:
+                sb_dict[dentry.d_sb] = 0
+            sb_dict[dentry.d_sb] = sb_dict[dentry.d_sb] + 1
+            if options.show_details:
+                print("0x%x %s" % (dentry_addr, dentry_to_filename(dentry_addr)))
+
+    print("\nsuberblock usage summary")
+    print("=" * 30)
+    print("%16s %8s %s" % ("super_block", "count", "root"))
+    print("-" * 30)
+    sorted_sb_dict = sorted(sb_dict.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    for sb, count in sorted_sb_dict:
+        print("0x%x %5d %s" %
+              (sb, count, dentry_to_filename(sb.s_root)))
 
 
 def fsinfo():
     op = OptionParser()
-    op.add_option("-d", "--details", dest="filesystem_details", default=0,
+    op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
-                  help="Show detailed filesystem information")
+                  help="Show detailed information")
     op.add_option("-f", "--file", dest="file", default="",
                   action="store",
                   help="Show detailed file information for 'struct file' address (hex)")
