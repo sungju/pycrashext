@@ -235,6 +235,47 @@ def show_slab_dentry(options):
     print("=" * 40)
 
 
+def show_caches(options):
+    shrinker_list = readSymbol("shrinker_list")
+    if shrinker_list == None or shrinker_list == 0:
+        return
+
+    sb_offset = member_offset("struct super_block", "s_shrink")
+    if sb_offset < 0:
+        return
+
+    total_dentry_unused = 0
+    total_inodes_unused = 0
+    prune_super = sym2addr("prune_super")
+
+    print("=" * 60)
+    print("%18s %10s %10s %s" %\
+          ("super_block", "dentries", "inodes", "path"))
+    print("-" * 60)
+    for shrinker in readSUListFromHead(shrinker_list,
+                                       "list",
+                                       "struct shrinker"):
+        # Only concerns about normal super_block
+        if shrinker.shrink != prune_super:
+            continue
+
+        sb = readSU("struct super_block", shrinker - sb_offset)
+        dentry_unused = sb.s_nr_dentry_unused
+        inodes_unused = sb.s_nr_inodes_unused
+        if dentry_unused == 0 and inodes_unused == 0:
+            continue
+        total_dentry_unused = total_dentry_unused + dentry_unused
+        total_inodes_unused = total_inodes_unused + inodes_unused
+
+        print("0x%x %10d %10d %s" %\
+              (sb, dentry_unused, inodes_unused,
+               dentry_to_filename(sb.s_root)))
+
+    print("-" * 60)
+    print("%18s %10d %10d" %\
+          ("Total", total_dentry_unused, total_inodes_unused))
+
+
 
 def fsinfo():
     op = OptionParser()
@@ -250,6 +291,9 @@ def fsinfo():
     op.add_option("-s", "--slab", dest="show_slab", default=0,
                   action="store_true",
                   help="Show all 'dentry' details in slab")
+    op.add_option("-c", "--caches", dest="show_caches", default=0,
+                  action="store_true",
+                  help="Show dentry/inodes caches")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -273,6 +317,9 @@ def fsinfo():
         sys.exit(0)
     if (o.show_slab):
         show_slab_dentry(o)
+        sys.exit(0)
+    if (o.show_caches):
+        show_caches(o)
         sys.exit(0)
 
 
