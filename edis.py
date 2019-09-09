@@ -576,6 +576,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
         result_str = draw_branches(result_str, o.jump_op_list)
 
     set_stack_data(disasm_str, ins_addr) # To retreive stack data
+    if o.stackaddr != "":
+        stackaddr_list = [int(o.stackaddr, 16)]
+
     set_asm_colors()
     crashcolor.set_color(crashcolor.RESET)
     for one_line in result_str.splitlines():
@@ -829,6 +832,13 @@ def edis():
                   dest="list",
                   default=False,
                   help="Dummy argument to match with 'dis -l'")
+
+    op.add_option("-S", "--stack",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="stackaddr",
+                  help="Set stack address for disasm operation")
 
     op.add_option("-g", "--graph",
                   action="store_true",
