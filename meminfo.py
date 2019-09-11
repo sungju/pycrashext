@@ -533,7 +533,8 @@ def show_slabdetail(options):
                     else:
                         output_string = output_string + " " + word
 
-                output_string = output_string + " " + line[line.index(words[3]):]
+                if len(words) > 3:
+                    output_string = output_string + " " + line[line.index(words[3]):]
                 print("\t%s" % output_string, end="")
 
 
