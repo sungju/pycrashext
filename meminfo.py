@@ -585,6 +585,33 @@ def show_percpu(options):
         print("\tTotal = %d" % (total_count))
 
 
+def show_vm(options):
+    result_str = exec_crash_command("vm")
+    result_lines = result_str.splitlines()
+    for i in range(0, 4):
+        print(result_lines[i])
+
+    total_lines = len(result_lines)
+    for i in range(4, total_lines):
+        words = result_lines[i].split()
+        size = int(words[2], 16) - int(words[1], 16)
+        if size > (1024 * 1024 * 1024): # GiB
+            size_str = "%d GiB" % (size / (1024*1024*1024))
+            crashcolor.set_color(crashcolor.RED)
+        elif size > (1024 * 1024): # MiB
+            size_str = "%d MiB" % (size / (1024*1024))
+            crashcolor.set_color(crashcolor.MAGENTA)
+        elif size > (1024): # KiB
+            size_str = "%d KiB" % (size / (1024))
+            crashcolor.set_color(crashcolor.GREEN)
+        else:
+            size_str = "%d B" % (size)
+
+        print("%10s %s" % (size_str, result_lines[i]))
+        crashcolor.set_color(crashcolor.RESET)
+
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("-u", "--memusage", dest="memusage", default=0,
@@ -611,6 +638,9 @@ def meminfo():
     op.add_option("-d", "--details", dest="details", default="",
                   action="store", type="string",
                   help="Show detailed output with the specified type")
+    op.add_option("-v", "--vm", dest="vmshow", default=0,
+                  action="store_true",
+                  help="Show 'vm' output with more details")
 
     (o, args) = op.parse_args()
 
@@ -629,6 +659,11 @@ def meminfo():
 
     if (o.percpu):
         show_percpu(o)
+        sys.exit(0)
+
+
+    if (o.vmshow):
+        show_vm(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
