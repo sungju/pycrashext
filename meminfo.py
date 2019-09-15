@@ -524,6 +524,10 @@ def show_slabdetail(options):
                         content_count[word] = 1
                     else:
                         content_count[word] = content_count[word] + 1
+
+                    if options.details == False:
+                        continue
+
                     if content_count[word] > 10:
                         output_string = output_string + blue_color +\
                                         " " + word + reset_color
