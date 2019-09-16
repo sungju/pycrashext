@@ -406,6 +406,26 @@ def get_meminfo():
     return result_str
 
 
+def get_size_str(size, coloring = False):
+    size_str = ""
+    if size > (1024 * 1024 * 1024): # GiB
+        size_str = "%d GiB" % (size / (1024*1024*1024))
+        if coloring == True:
+            crashcolor.set_color(crashcolor.RED)
+    elif size > (1024 * 1024): # MiB
+        size_str = "%d MiB" % (size / (1024*1024))
+        if coloring == True:
+            crashcolor.set_color(crashcolor.MAGENTA)
+    elif size > (1024): # KiB
+        size_str = "%d KiB" % (size / (1024))
+        if coloring == True:
+            crashcolor.set_color(crashcolor.GREEN)
+    else:
+        size_str = "%d B" % (size)
+
+    return size_str
+
+
 def show_tasks_memusage(options):
     mem_usage_dict = {}
     if (options.nogroup):
@@ -435,15 +455,17 @@ def show_tasks_memusage(options):
                           key=operator.itemgetter(1), reverse=True)
 
     print("=" * 70)
-    print("%-14s   %-s" % (" [ RSS usage ]", "[ Process name ]"))
+    print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
     print("=" * 70)
     min_number = 10
     if (options.all):
         min_number = len(sorted_usage) - 1
 
     for i in range(0, min(len(sorted_usage) - 1, min_number)):
-        print("%10s KiB   %-s" %
-                (sorted_usage[i][1], sorted_usage[i][0]))
+        print("%14s (%10s KiB)   %-s" %
+                (get_size_str(int(sorted_usage[i][1]) * 1024),
+                 sorted_usage[i][1],
+                 sorted_usage[i][0]))
 
     print("=" * 70)
     crashcolor.set_color(crashcolor.BLUE)
@@ -588,24 +610,19 @@ def show_percpu(options):
 def show_vm(options):
     result_str = exec_crash_command("vm")
     result_lines = result_str.splitlines()
+    total_lines = len(result_lines)
+    if total_lines < 4: # For kernel tasks
+        print(result_str)
+        return
+
     for i in range(0, 4):
         print(result_lines[i])
 
-    total_lines = len(result_lines)
     for i in range(4, total_lines):
         words = result_lines[i].split()
         size = int(words[2], 16) - int(words[1], 16)
-        if size > (1024 * 1024 * 1024): # GiB
-            size_str = "%d GiB" % (size / (1024*1024*1024))
-            crashcolor.set_color(crashcolor.RED)
-        elif size > (1024 * 1024): # MiB
-            size_str = "%d MiB" % (size / (1024*1024))
-            crashcolor.set_color(crashcolor.MAGENTA)
-        elif size > (1024): # KiB
-            size_str = "%d KiB" % (size / (1024))
-            crashcolor.set_color(crashcolor.GREEN)
-        else:
-            size_str = "%d B" % (size)
+
+        size_str = get_size_str(size)
 
         print("%10s %s" % (size_str, result_lines[i]))
         crashcolor.set_color(crashcolor.RESET)
