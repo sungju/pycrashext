@@ -463,9 +463,10 @@ def show_tasks_memusage(options):
 
     for i in range(0, min(len(sorted_usage) - 1, min_number)):
         print("%14s (%10s KiB)   %-s" %
-                (get_size_str(int(sorted_usage[i][1]) * 1024),
+                (get_size_str(int(sorted_usage[i][1]) * 1024, True),
                  sorted_usage[i][1],
                  sorted_usage[i][0]))
+        crashcolor.set_color(crashcolor.RESET)
 
     print("=" * 70)
     crashcolor.set_color(crashcolor.BLUE)
@@ -622,7 +623,7 @@ def show_vm(options):
         words = result_lines[i].split()
         size = int(words[2], 16) - int(words[1], 16)
 
-        size_str = get_size_str(size)
+        size_str = get_size_str(size, True)
 
         print("%10s %s" % (size_str, result_lines[i]))
         crashcolor.set_color(crashcolor.RESET)
