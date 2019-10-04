@@ -174,6 +174,10 @@ def show_inode_details(options):
         dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
         print(dentry_details)
 
+    print("%s" % (get_inode_details(inode)))
+
+
+def get_inode_details(inode):
     try:
         i_uid = inode.i_uid.val
         i_gid = inode.i_gid.val
@@ -181,8 +185,8 @@ def show_inode_details(options):
         i_uid = inode.i_uid
         i_gid = inode.i_gid
 
-    print("file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %
-          (inode.i_size, inode.i_ino, inode.i_nlink, i_uid, i_gid))
+    return "file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %\
+          (inode.i_size, inode.i_ino, inode.i_nlink, i_uid, i_gid)
 
 
 def show_file_details(options):
@@ -195,6 +199,7 @@ def show_file_details(options):
     mount_details = exec_crash_command("mount").splitlines()
     mount_str = "%x" % (file.f_path.dentry.d_sb)
     print("file open mode = %s (0x%x)" % (get_file_open_mode_str(file.f_flags), file.f_flags))
+    print("%s" % (get_inode_details(file.f_inode)))
     print("")
     found = False
     for mount_line in mount_details:
