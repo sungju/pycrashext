@@ -34,6 +34,11 @@ def get_vmcore_date_time():
             except:
                 xtime_sec = 0
 
+    # only works when the 'crash' started with 'TZ=GMT'
+    sys_tz = readSymbol("sys_tz")
+    if sys_tz.tz_minuteswest != 0:
+        xtime_sec = xtime_sec - sys_tz.tz_minuteswest * 60
+
     return datetime.datetime.fromtimestamp(xtime_sec).strftime('%c')
 
 
