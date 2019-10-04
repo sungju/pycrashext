@@ -616,8 +616,9 @@ def show_vm(options):
         print(result_str)
         return
 
-    for i in range(0, 4):
+    for i in range(0, 3):
         print(result_lines[i])
+    print("%10s %s" % ("", result_lines[3]))
 
     for i in range(4, total_lines):
         words = result_lines[i].split()
