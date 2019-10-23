@@ -631,6 +631,26 @@ def show_vm(options):
 
 
 
+error_str = [
+    ["no page found", "protection fault"],
+    ["read access", "write access"],
+    ["kernel-mode", "user-mode"],
+    ["", "use of reserved bit detected"],
+    ["", "fault was an instruction fetch"],
+    ["", "protection keys block access"],
+]
+
+def show_error_code(options):
+    error_val = int(options.error_code, 16)
+    for i in range(0, len(error_str)):
+        idx = 0
+        if ((1 << i) & error_val) != 0:
+            idx = 1
+        if error_str[i][idx] != "":
+            print("[%d,%d] : %s" % (i, idx, error_str[i][idx]))
+
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("-u", "--memusage", dest="memusage", default=0,
@@ -660,6 +680,10 @@ def meminfo():
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
+    op.add_option("-e", "--error", dest="error_code", default="",
+                  action="store",
+                  type="string",
+                  help="Interpret page_fault error code")
 
     (o, args) = op.parse_args()
 
@@ -683,6 +707,11 @@ def meminfo():
 
     if (o.vmshow):
         show_vm(o)
+        sys.exit(0)
+
+
+    if (o.error_code != ""):
+        show_error_code(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
