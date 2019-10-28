@@ -266,3 +266,11 @@ Shows audit information
 rprog("auditinfo", "audit information",
       "-h   - list available options",
       help)
+
+help = '''
+Shows tracing information
+'''
+
+rprog("traceinfo", "trace information",
+      "-h   - list available options",
+      help)
