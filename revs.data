@@ -60,6 +60,9 @@ r12      got-pointer                                saved
 r13      base-pointer                               saved
 r14      return-address                             saved
 r15      stack-pointer                              saved
+
+Useful debugging information from kerne.org:
+https://www.kernel.org/doc/Documentation/s390/Debugging390.txt
 END_REGISTERS: s390
 END_ARCHITECTURE: s390
 
