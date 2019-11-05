@@ -47,6 +47,8 @@ def show_registers():
         show_register_details("arm")
     if (sys_info.machine.startswith("ppc")):
         show_register_details("ppc")
+    if (sys_info.machine.startswith("s390")):
+        show_register_details("s390")
 
 
 def is_arch_match(arch, arch_list_str):
