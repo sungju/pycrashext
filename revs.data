@@ -1,5 +1,5 @@
 -----------------------------------------------------------------
-reng.py uses this to get instructions.
+revs.py uses this to get instructions.
 -----------------------------------------------------------------
 
 ARCHITECTURE: i386 i686 x86_64 athlon
@@ -39,6 +39,29 @@ Procedure Call Standard for the Arm 64-bit Architecture
 https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
 END_REGISTERS: arm
 END_ARCHITECTURE: arm
+
+ARCHITECTURE: s390
+REGISTERS: s390
+** function parameters for s390 **
+r0       used by syscalls/assembly                  call-clobbered
+r1       used by syscalls/assembly                  call-clobbered
+r2 - r7 : arguments
+	r2       argument 0 / return value 0                call-clobbered
+	r3       argument 1 / return value 1 (if long long) call-clobbered
+	r4       argument 2                                 call-clobbered
+	r5       argument 3                                 call-clobbered
+	r6       argument 4                                 saved
+	r7       pointer-to arguments 5 to ...              saved      
+r8       this & that                                saved
+r9       this & that                                saved
+r10      static-chain ( if nested function )        saved
+r11      frame-pointer ( if function used alloca )  saved
+r12      got-pointer                                saved
+r13      base-pointer                               saved
+r14      return-address                             saved
+r15      stack-pointer                              saved
+END_REGISTERS: s390
+END_ARCHITECTURE: s390
 
 ARCHITECTURE: ppc
 REGISTERS: ppc
