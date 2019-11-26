@@ -97,7 +97,7 @@ Print process list in tree format.
 '''
 
 
-rprog("pstree", "Print process list in tree format",
+rprog("epstree", "Print process list in tree format",
       "-h   - list available options",
       help)
 
@@ -109,7 +109,7 @@ Module related information.
 --details <module name>   - Show details
 '''
 
-rprog("modinfo", "Module related information",
+rprog("emodinfo", "Module related information",
       "-h       - list available options",
       help)
 

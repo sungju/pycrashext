@@ -579,36 +579,82 @@ def show_percpu(options):
     total_count = 0
     addr = int(options.percpu, 16)
     func = None
-    if options.details == "u8":
+    if options.percpu_type == "u8":
         func = readU8
-    elif options.details == "u16":
+    elif options.percpu_type == "u16":
         func = readU16
-    elif options.details == "u32":
+    elif options.percpu_type == "u32":
         func = readU32
-    elif options.details == "s32":
+    elif options.percpu_type == "s32":
         func = readS32
-    elif options.details == "u64":
+    elif options.percpu_type == "u64":
         func = readU64
-    elif options.details == "s64":
+    elif options.percpu_type == "s64":
         func = readS64
-    elif options.details == "int":
+    elif options.percpu_type == "int":
         func = readInt
 
     for i in range(sys_info.CPUS):
         percpu_addr = percpu.percpu_ptr(addr, i)
         print("CPU %d : 0x%x" % (i, percpu_addr))
-        if options.details != "":
+        if options.percpu_type != "":
             if func:
                 count = func(percpu_addr)
                 print("\t= %d" % (count))
                 total_count = total_count + count
             else:
-                print("%s" % (readSU(options.details, percpu_addr)))
+                print("%s" % (readSU(options.percpu_type, percpu_addr)))
     if func:
         print("\tTotal = %d" % (total_count))
 
 
+
+def show_vm_details(options, words):
+    private_mem_pages = 0
+    shared_mem_pages = 0
+
+    result_str = exec_crash_command("vm -P %s" % (words[0]))
+    if result_str == "":
+        return
+    result_lines = result_str.splitlines()
+    total_lines = len(result_lines)
+    if total_lines < 4:
+        return
+    for i in range(4, total_lines):
+        page_words = result_lines[i].split()
+        try:
+            physical_addr = int(page_words[1], 16)
+        except:
+            physical_addr = 0
+
+        if physical_addr != 0:
+            vtop_result = exec_crash_command("vtop %s" % (page_words[0]))
+            if vtop_result == "":
+                continue
+            vtop_list = vtop_result.splitlines()
+            vtop_len = len(vtop_list)
+            page_addr_str = vtop_list[vtop_len - 1].split()[0]
+            try:
+                page_addr = int(page_addr_str, 16)
+            except:
+                page_addr = 0
+
+            if page_addr == 0:
+                continue
+
+            page_data = readSU("struct page", page_addr)
+            if page_data._count.counter == 1:
+                private_mem_pages = private_mem_pages + 1
+            else:
+                shared_mem_pages = shared_mem_pages + 1
+
+    return [private_mem_pages, shared_mem_pages]
+
+
 def show_vm(options):
+    private_mem_pages = 0
+    shared_mem_pages = 0
+
     result_str = exec_crash_command("vm")
     result_lines = result_str.splitlines()
     total_lines = len(result_lines)
@@ -626,8 +672,18 @@ def show_vm(options):
 
         size_str = get_size_str(size, True)
 
-        print("%10s %s" % (size_str, result_lines[i]))
+        print("%10s %s" % (size_str, result_lines[i]), end="")
+        if options.details:
+            pages_list = show_vm_details(options, words)
+            private_mem_pages = private_mem_pages + pages_list[0]
+            shared_mem_pages = shared_mem_pages + pages_list[1]
+            print(", P: %d, S: %d" % (pages_list[0], pages_list[1]), end="")
+        print("")
         crashcolor.set_color(crashcolor.RESET)
+
+    if options.details:
+        print("\n\tPrivate memory pages = %d" % private_mem_pages)
+        print("\n\tShared memory pages = %d" % shared_mem_pages)
 
 
 
@@ -673,10 +729,13 @@ def meminfo():
                   help="Show /proc/meminfo-like output")
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
-                  help="Show /proc/meminfo-like output")
-    op.add_option("-d", "--details", dest="details", default="",
+                  help="Convert percpu address into virtual address")
+    op.add_option("-t", "--type", dest="percpu_type", default="",
                   action="store", type="string",
-                  help="Show detailed output with the specified type")
+                  help="Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int")
+    op.add_option("-d", "--details", dest="details", default=0,
+                  action="store_true",
+                  help="Show detailed output")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
