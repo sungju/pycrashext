@@ -6,7 +6,11 @@ import crashcolor
 from datetime import datetime
 
 def parse_task_info(line):
-    idx = line.index("]")
+    try:
+        idx = line.index("]")
+    except:
+        idx = -1
+
     if idx == -1:
         return None, None
     run_time = line[1:idx].strip()

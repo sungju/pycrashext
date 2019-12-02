@@ -31,12 +31,14 @@ def cpu_cgroup_subsys_detail(task_group, cgroup, subsys, idx):
           (pre_str, cfs_period_us, cfs_quota_us, throttled_time))
     for cfs_rq in readSUListFromHead(throttled_cfs_rq,
                                      "throttled_list",
-                                     "struct cfs_rq"):
+                                     "struct cfs_rq",
+                                     maxel=1000000):
         print("%scfs_rq 0x%x, nr_running = %d, throttled = %d" %
               (pre_str, cfs_rq, cfs_rq.nr_running, cfs_rq.throttled))
         for se in readSUListFromHead(cfs_rq.tasks,
                                      "group_node",
-                                     "struct sched_entity"):
+                                     "struct sched_entity",
+                                     maxel=1000000):
             offset = member_offset("struct task_struct", "se")
             task = readSU("struct task_struct", Addr(se) - offset)
             print("%s\ttask_struct 0x%x, %s(%d)" % (pre_str, task, task.comm, task.pid))
@@ -95,7 +97,8 @@ def cgroup_task_count(cgroup):
     count = 0
     for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
                                              'cgrp_link_list',
-                                             'struct cg_cgroup_link'):
+                                             'struct cg_cgroup_link',
+                                             maxel=1000000):
         count = count + cg_cgroup_link.cg.refcount.counter
     return count
 
@@ -103,10 +106,12 @@ def cgroup_task_count(cgroup):
 def cgroup_task_list(cgroup, idx):
     for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
                                              'cgrp_link_list',
-                                             'struct cg_cgroup_link'):
+                                             'struct cg_cgroup_link',
+                                             maxel=1000000):
         for task in readSUListFromHead(cg_cgroup_link.cg.tasks,
                                        "cg_list",
-                                       "struct task_struct"):
+                                       "struct task_struct",
+                                       maxel=1000000):
             for i in range(0, idx):
                 print("\t", end="")
             print("\t0x%x %s(%d)" % (task, task.comm, task.pid))
@@ -150,7 +155,8 @@ def show_cgroup_tree_from_rootnode(rootnode, options):
     crashcolor.set_color(crashcolor.RESET)
     for cgroup_subsys in readSUListFromHead(rootnode.subsys_list,
                                              'sibling',
-                                             'struct cgroup_subsys'):
+                                             'struct cgroup_subsys',
+                                            maxel=1000000):
         print ("%s (0x%x)" % (cgroup_subsys.name, cgroup_subsys))
     print ("")
     crashcolor.set_color(crashcolor.BLUE)
@@ -180,7 +186,8 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     crashcolor.set_color(crashcolor.RESET)
     for cgroup_root in readSUListFromHead(cgroup_roots,
                                           'root_list',
-                                          'struct cgroup_root'):
+                                          'struct cgroup_root',
+                                          maxel=1000000):
         top_cgroup = cgroup_root.cgrp
         curlimit = sys.getrecursionlimit()
         sys.setrecursionlimit(1000)
@@ -248,7 +255,8 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
             struct_name = "struct cgroup_subsys_state"
 
         for childaddr in readSUListFromHead(head_of_list,
-                                            'sibling', struct_name):
+                                            'sibling', struct_name,
+                                            maxel=1000000):
             if struct_name == "struct cgroup":
                 cgroup = readSU(struct_name, childaddr)
             else:
@@ -277,7 +285,8 @@ def show_task_group(options):
     count = 0
     empty_count = 0
     for task_group in readSUListFromHead(sym2addr('task_groups'),
-                                         'list', 'struct task_group'):
+                                         'list', 'struct task_group',
+                                         maxel=1000000):
         css = readSU('struct cgroup_subsys_state', task_group.css)
         if (css == 0):
             continue
