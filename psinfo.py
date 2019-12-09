@@ -516,6 +516,8 @@ def do_searchstack(options):
     exclude_list = options.exclude.split(",")
 
     for t in tt.allThreads():
+        if options.task_name != "" and options.task_name not in t.comm:
+            continue
         stackdata = exec_crash_command("bt -f %d" % (t.pid))
         if search_one_task(stackdata, include_list, exclude_list) == True:
             print_bt_search(stackdata, include_list)
@@ -552,6 +554,10 @@ def psinfo():
                   type="string",
                   action="store",
                   help="comma separated value list to ignore in --searchstack")
+
+    op.add_option("-t", "--task", dest="task_name", default="",
+                  action="store", type="string",
+                  help="limit search range only to tasks with matching task name")
 
     (o, args) = op.parse_args()
 
