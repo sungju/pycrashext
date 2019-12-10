@@ -520,7 +520,10 @@ def do_searchstack(options):
             continue
         stackdata = exec_crash_command("bt -f %d" % (t.pid))
         if search_one_task(stackdata, include_list, exclude_list) == True:
-            print_bt_search(stackdata, include_list)
+            if options.nodetails == True:
+                print("%s" % exec_crash_command("bt %d" % (t.pid)))
+            else:
+                print_bt_search(stackdata, include_list)
 
 
 def psinfo():
@@ -546,6 +549,9 @@ def psinfo():
     op.add_option("-s", "--searchstack", dest="searchstack", default=0,
                   action="store_true",
                   help="Search each task stack to find value specified in include")
+    op.add_option("-n", "--nodetails", dest="nodetails", default=0,
+                  action="store_true",
+                  help="Shows no stack contents")
     op.add_option("-i", "--include", dest="include", default="",
                   type="string",
                   action="store",
