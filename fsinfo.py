@@ -199,7 +199,11 @@ def show_file_details(options):
     mount_details = exec_crash_command("mount").splitlines()
     mount_str = "%x" % (file.f_path.dentry.d_sb)
     print("file open mode = %s (0x%x)" % (get_file_open_mode_str(file.f_flags), file.f_flags))
-    print("%s" % (get_inode_details(file.f_inode)))
+    if member_offset("struct file", "f_inode") < 0:
+        f_inode = file.f_path.dentry.d_inode
+    else:
+        f_inode = file.f_inode
+    print("%s" % (get_inode_details(f_inode)))
     print("")
     found = False
     for mount_line in mount_details:
