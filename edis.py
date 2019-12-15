@@ -872,7 +872,7 @@ def edis():
     except:
         encode_url = ""
 
-    if encode_url != "":
+    if encode_url != None and encode_url != "":
         op.add_option("-n", "--noaction",
                       action="store_true",
                       dest="noaction",
@@ -908,7 +908,11 @@ def edis():
         show_callgraph(args[0], 0, o)
         sys.exit(0)
 
-    disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
+    if len(args) != 0:
+        disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
+    else:
+        print("ERROR> edis needs an address or a symbol\n",
+              "\ti.e) edis 0xffffffff81c76fca or edis hugetlb_init")
 
 
 if ( __name__ == '__main__'):
