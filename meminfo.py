@@ -23,12 +23,14 @@ def show_numa_info(options):
     try:
         numa_meminfo = readSymbol("numa_meminfo")
         nr_blks = numa_meminfo.nr_blks
-        print("available: %d nodes" % (nr_blks))
+        print("available: %d node%s" % (nr_blks, "s" if nr_blks > 1 else ""))
         for idx in range(0, nr_blks):
             numa_memblk = numa_meminfo.blk[idx]
             print("node %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
             print("\tsize : %d MB" % ((numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
 
+        if nr_blks <= 1:
+            return
         numa_distance = readSymbol("numa_distance")
         numa_distance_cnt = readSymbol("numa_distance_cnt")
         print("node distances:")
