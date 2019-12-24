@@ -22,9 +22,26 @@ page_size = 4096
 def show_numa_info(options):
     try:
         numa_meminfo = readSymbol("numa_meminfo")
-        for idx in range(0, numa_meminfo.nr_blks):
+        nr_blks = numa_meminfo.nr_blks
+        print("available: %d nodes" % (nr_blks))
+        for idx in range(0, nr_blks):
             numa_memblk = numa_meminfo.blk[idx]
-            print("NID %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+            print("node %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+            print("\tsize : %d MB" % ((numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
+
+        numa_distance = readSymbol("numa_distance")
+        numa_distance_cnt = readSymbol("numa_distance_cnt")
+        print("node distances:")
+        print(" %5s" % ("node"), end="")
+        for i in range(0, nr_blks):
+            print("%5d" % i, end="")
+        print("")
+        for i in range(0, numa_meminfo.nr_blks):
+            print("%5d:" % (i), end="")
+            for j in range(0, numa_meminfo.nr_blks):
+                distance = numa_distance[i * numa_distance_cnt + j]
+                print("%5d" % (distance), end="")
+            print("")
     except:
         print("No NUMA information available")
 
