@@ -704,11 +704,11 @@ crash> edis -c nfs4_proc_renew -m 3
 ```
 
 
-### vmw_mem ###
+### vmwareinfo ###
 It displays VMware ballooning usage. It is useful to check out unacounted memory in VMware virtual guest.
 
 ```
-crash> vmw_mem
+crash> vmwareinfo
   size = 0x2e1c39
   target = 0x606770
   stats = {
