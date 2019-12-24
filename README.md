@@ -772,12 +772,24 @@ crash> meminfo -h
 Usage: meminfo.py [options]
 
 Options:
-  -h, --help  show this help message and exit
-  --memusage  Show memory usages by tasks
-  --nogroup   Show data in individual tasks
-  --all       Show all the output
-  --slabtop   Show slabtop-like output
-  --meminfo   Show /proc/meminfo-like output
+  -h, --help            show this help message and exit
+  -u, --memusage        Show memory usages by tasks
+  -n, --nogroup         Show data in individual tasks
+  -a, --all             Show all the output
+  -s, --slabtop         Show slabtop-like output
+  -S SLABDETAIL, --slabdetail=SLABDETAIL
+                        Show details of a slab
+  -i, --meminfo         Show /proc/meminfo-like output
+  -p PERCPU, --percpu=PERCPU
+                        Convert percpu address into virtual address
+  -t PERCPU_TYPE, --type=PERCPU_TYPE
+                        Specify percpu type : u8, u16, u32, u64, s8, s16, s32,
+                        s64, int
+  -d, --details         Show detailed output
+  -v, --vm              Show 'vm' output with more details
+  -e ERROR_CODE, --error=ERROR_CODE
+                        Interpret page_fault error code
+  -m, --numa            Show NUMA info
 
 crash> meminfo --memusage
 ======================================================================
@@ -828,6 +840,11 @@ HugePages_Free:                0
 HugePages_Rsvd:                0
 HugePages_Surp:                0
 Hugepagesize:              16384 kB
+
+
+crash> meminfo -m
+NID   0 : 0x0000000000000000 - 0x0000002080000000
+NID   1 : 0x0000002080000000 - 0x0000004080000000
 ```
 
 ### revs ###
