@@ -120,12 +120,12 @@ crash> syscallinfo --check
 1 system calls were modified
 ```
 
-### pstree ###
+### epstree ###
 It prints out process list in tree format.
 
 ```
-crash> pstree -h
-Usage: pstree.py [options]
+crash> epstree -h
+Usage: epstree.py [options]
 
 Options:
   -h, --help  show this help message and exit
@@ -138,7 +138,7 @@ Options:
 Examples)
 
 ```
-crash> pstree
+crash> epstree
 swapper/0 -+- systemd -+- systemd-journal 
            |           |- lvmetad 
            |           |- systemd-udevd -+- systemd-udevd 
@@ -151,7 +151,7 @@ swapper/0 -+- systemd -+- systemd-journal
            |           |- systemd-logind
 ...
 
-crash> pstree -p
+crash> epstree -p
 swapper/0(0) -+- systemd(1) -+- systemd-journal(811) 
               |              |- lvmetad(835) 
               |              |- systemd-udevd(843) -+- systemd-udevd(284694) 
@@ -164,7 +164,7 @@ swapper/0(0) -+- systemd(1) -+- systemd-journal(811)
               |              |- systemd-logind(1407)
 ...
 
-crash> pstree -p -t 843
+crash> epstree -p -t 843
 systemd-udevd(843) -+- systemd-udevd(284694) 
                     `- systemd-udevd(284791) 
 
@@ -267,11 +267,11 @@ Total number of task_group(s) = 130
 ```
 
 
-### modinfo ###
+### emodinfo ###
 It provides module details as well as a way to disassemble all the functions in the module.
 
 ```
-crash> modinfo
+crash> emodinfo
 struct module *    MODULE_NAME                     SIZE
 0xffffffffc036f780 dm_mod                        123941
 0xffffffffc0389160 dm_log                         18411
@@ -283,7 +283,7 @@ struct module *    MODULE_NAME                     SIZE
 0xffffffffc03e11a0 ptp                            19231
 0xffffffffc0395000 i2c_algo_bit                   13413
 
-crash> modinfo --details oracleacfs
+crash> emodinfo --details oracleacfs
 struct module   : 0xffffffffa085a200
 name            : oracleacfs
 version         : None
@@ -306,7 +306,7 @@ exit            : ofs_cleanup_module (0xffffffffa06a2320)
 0xffffffffa0720ce0 (t) STACK_pop
 
 
-crash> modinfo --disasm=oracleacfs
+crash> emodinfo --disasm=oracleacfs
 ---------- BEGIN disassemble OfsLocateExtent() ----------
 0xffffffffa0500000 <OfsLocateExtent>:   push   %rbp
 0xffffffffa0500001 <OfsLocateExtent+0x1>:       mov    %rsp,%rbp
@@ -323,7 +323,7 @@ crash> modinfo --disasm=oracleacfs
 This command also can be very useful to track down any recently unloaded modules. It can be useful to find rootkit modules which has just disappeared.
 
 ```
-crash> modinfo -u
+crash> emodinfo -u
 struct module *    MODULE_NAME                     SIZE 
 0xffffffffa000ed00 dm_mod                         81692 
 0xffffffffa0016420 iTCO_vendor_support             3088 
@@ -334,7 +334,7 @@ struct module *    MODULE_NAME                     SIZE
 ...
 
 
-crash> modinfo -u -g
+crash> emodinfo -u -g
 struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa000ed00 dm_mod                         81692      86016          0
 ...
@@ -344,7 +344,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa014bee0 ioatdma                        58482      65536      20480
 ...
 
-crash> modinfo -u -g -a
+crash> emodinfo -u -g -a
 struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa000ed00 dm_mod                         81692      86016          0
 ...
