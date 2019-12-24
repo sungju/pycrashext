@@ -20,10 +20,14 @@ page_size = 4096
 
 
 def show_numa_info(options):
-    numa_meminfo = readSymbol("numa_meminfo")
-    for idx in range(0, numa_meminfo.nr_blks):
-        numa_memblk = numa_meminfo.blk[idx]
-        print("NID %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+    try:
+        numa_meminfo = readSymbol("numa_meminfo")
+        for idx in range(0, numa_meminfo.nr_blks):
+            numa_memblk = numa_meminfo.blk[idx]
+            print("NID %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+    except:
+        print("No NUMA information available")
+
 
 
 def get_entry_in_dict(dict_data, entry, extra):
