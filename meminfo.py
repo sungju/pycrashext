@@ -19,6 +19,13 @@ import crashcolor
 page_size = 4096
 
 
+def show_numa_info(options):
+    numa_meminfo = readSymbol("numa_meminfo")
+    for idx in range(0, numa_meminfo.nr_blks):
+        numa_memblk = numa_meminfo.blk[idx]
+        print("NID %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+
+
 def get_entry_in_dict(dict_data, entry, extra):
     result = ""
     if entry in dict_data:
@@ -743,6 +750,9 @@ def meminfo():
                   action="store",
                   type="string",
                   help="Interpret page_fault error code")
+    op.add_option("-m", "--numa", dest="numa", default=0,
+                  action="store_true",
+                  help="Show NUMA info")
 
     (o, args) = op.parse_args()
 
@@ -771,6 +781,10 @@ def meminfo():
 
     if (o.error_code != ""):
         show_error_code(o)
+        sys.exit(0)
+
+    if (o.numa):
+        show_numa_info(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
