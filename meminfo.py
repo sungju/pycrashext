@@ -23,11 +23,35 @@ def show_numa_info(options):
     try:
         numa_meminfo = readSymbol("numa_meminfo")
         nr_blks = numa_meminfo.nr_blks
-        print("available: %d node%s" % (nr_blks, "s" if nr_blks > 1 else ""))
+
+        node_cpus = {}
+        try:
+            addrs = percpu.get_cpu_var("x86_cpu_to_node_map")
+            for cpu, addr in enumerate(addrs):
+                node = readInt(addr)
+                if node in node_cpus:
+                    cpu_list = node_cpus[node]
+                else:
+                    cpu_list = []
+                cpu_list.append(cpu)
+                node_cpus[node] = cpu_list
+        except:
+            pass
+
+        print("available: %d node%s (0" % (nr_blks, "s" if nr_blks > 1 else ""), end="")
+        if nr_blks > 1:
+            print("-%d" % (nr_blks - 1), end="")
+        print(")")
         for idx in range(0, nr_blks):
             numa_memblk = numa_meminfo.blk[idx]
-            print("node %3d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
-            print("\tsize : %d MB" % ((numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
+            if numa_memblk.nid in node_cpus:
+                print("node %d cpus: " % (numa_memblk.nid), end="")
+                cpu_list = node_cpus[numa_memblk.nid]
+                for cpu in range(0, len(cpu_list)):
+                    print(" %d" % cpu_list[cpu], end="")
+                print("")
+            print("node %d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
+            print("node %d size : %d MB" % (numa_memblk.nid, (numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
 
         if nr_blks <= 1:
             return

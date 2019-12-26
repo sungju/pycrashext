@@ -842,12 +842,14 @@ HugePages_Surp:                0
 Hugepagesize:              16384 kB
 
 
-crash> meminfo -m
-available: 2 nodes
-node   0 : 0x0000000000000000 - 0x0000002080000000
-	size : 133120 MB
-node   1 : 0x0000002080000000 - 0x0000004080000000
-	size : 131072 MB
+crash> meminfo --numa
+available: 2 nodes (0-1)
+node 0 cpus:  0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 36 37 38 39 40 41 42 43 44 45 46 47 48 49 50 51 52 53
+node 0 : 0x0000000000000000 - 0x0000004040000000
+node 0 size : 263168 MB
+node 1 cpus:  18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70 71
+node 1 : 0x0000004040000000 - 0x000000803ffff000
+node 1 size : 262143 MB
 node distances:
   node    0    1
     0:   10   21
