@@ -174,6 +174,14 @@ def show_inode_details(options):
         dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
         print(dentry_details)
 
+    print("inode = 0x%x" % inode)
+    i_sb = inode.i_sb
+    print("i_sb = 0x%x : %s" % (i_sb, i_sb.s_id))
+    address_space = inode.i_mapping
+    print("address_space = 0x%x nrpages = %d = %d bytes" % (address_space, address_space.nrpages, (address_space.nrpages * 4096)))
+    i_op_sym = exec_crash_command("sym %x" % (inode.i_op))
+    print("inode operations = 0x%s" % (i_op_sym), end='')
+    print("")
     print("%s" % (get_inode_details(inode)))
 
 
@@ -194,6 +202,14 @@ def show_file_details(options):
     dentry_details = exec_crash_command("files -d 0x%x" % (file.f_path.dentry))
     print("== File Info ==")
     print(dentry_details)
+
+    print("file = 0x%x" % file)
+    i_sb = file.f_inode.i_sb
+    print("i_sb = 0x%x : %s" % (i_sb, i_sb.s_id))
+    address_space = file.f_mapping
+    print("address_space = 0x%x nrpages = %d = %d bytes" % (address_space, address_space.nrpages, (address_space.nrpages * 4096)))
+    print("")
+
     f_op_sym = exec_crash_command("sym %x" % (file.f_op))
     print("file operations = %s" % (f_op_sym), end='')
     mount_details = exec_crash_command("mount").splitlines()
