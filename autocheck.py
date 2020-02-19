@@ -21,7 +21,7 @@ def get_system_info():
 
     resultlines = exec_crash_command("sys").splitlines()
     for line in resultlines:
-        words = line.split(":")
+        words = line.split(":", 1)
         sysinfo[words[0].strip()] = words[1].strip()
 
 
