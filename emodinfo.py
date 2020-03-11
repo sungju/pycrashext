@@ -496,7 +496,7 @@ def print_sym_list_section(title, sym_list, show_contents,
         crashcolor.set_color(crashcolor.RESET)
 
 
-    if show_strings == True and start_addr != "":
+    if show_strings == True and start_addr != "" and start_addr != end_addr:
         result = exec_crash_command("rd 0x%s -e 0x%s -a" %\
                                     (start_addr, end_addr))
         lines = result.splitlines()
@@ -510,6 +510,46 @@ def print_sym_list_section(title, sym_list, show_contents,
                     print(line)
         crashcolor.set_color(crashcolor.RESET)
 
+
+def batch_run_all(o):
+    o.show_contents = True
+    o.show_content_strings = True
+    o.disasm_module = o.batch_run
+
+    #o.shows_tainted = True
+    o.shows_gaps = True
+    o.shows_addr = True
+    o.shows_unloaded = True
+    o.shows_flags_str = True
+    o.module_detail = o.batch_run
+
+    print("\t%s %-40s %s\n" % ("="*10, "Module list for '%s'" % o.batch_run, "="*10))
+    module_info(o)
+    print("\n")
+
+    print("\t%s %-40s %s\n" % ("="*10, "Module Details for '%s'" % o.batch_run, "="*10))
+    show_module_detail(o)
+    print("\n")
+
+    print("\t%s %-40s %s\n" % ("="*10, "Module Disassemble for '%s'" % o.batch_run, "="*10))
+    disasm_module(o)
+    print("\n")
+
+
+
+def get_module_list(tainted_only):
+    global module_list
+
+    if (len(module_list) == 0):
+        load_module_details()
+
+    result_list = []
+    for module in module_list:
+        if tainted_only and is_our_module(module):
+            continue
+        result_list.append(module)
+
+    return result_list
 
 
 def modinfo():
@@ -544,6 +584,13 @@ def modinfo():
     op.add_option("-l", dest="show_longer_than", default=5,
                   action="store", type="int",
                   help="Set the minimum size to show for -s. default=5")
+    op.add_option("--batch_run", dest="batch_run", default=None,
+                  action="store", type="string",
+                  help="Run major options all together to get detailed info")
+    op.add_option("--target_dir", dest="target_dir", default=None,
+                  action="store", type="string",
+                  help="Result will be saved in this directory")
+
 
     (o, args) = op.parse_args()
 
@@ -553,6 +600,30 @@ def modinfo():
 
     if (o.module_detail is not None):
         show_module_detail(o)
+        sys.exit(0)
+
+
+    if (o.batch_run is not None):
+        mod_list = []
+        if o.batch_run == "*":
+            mod_list = get_module_list(o.shows_tainted)
+        else:
+            mod_list = [find_module(o.batch_run)]
+
+        orig_stdout = sys.stdout
+        for module in mod_list:
+            o.batch_run = module.name
+            if o.target_dir is not None:
+                sys.stdout = orig_stdout
+                target_file = "%s/%s.txt" % (o.target_dir, o.batch_run)
+                print("Processing module '%s' on %s" % (o.batch_run, target_file))
+                sys.stdout = open(target_file, 'w')
+
+            batch_run_all(o)
+            if o.target_dir is not None:
+                sys.stdout.close()
+                sys.stdout = orig_stdout
+            print("Done\n")
         sys.exit(0)
 
     module_info(o)
