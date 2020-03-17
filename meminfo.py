@@ -21,8 +21,29 @@ page_size = 4096
 
 def show_numa_info(options):
     try:
-        numa_meminfo = readSymbol("numa_meminfo")
-        nr_blks = numa_meminfo.nr_blks
+        try:
+            numa_meminfo = readSymbol("numa_meminfo")
+            nr_blks = numa_meminfo.nr_blks
+        except:
+            numa_meminfo = None
+            nr_blks = 1
+
+        try:
+            node_numbers = []
+            addrs = percpu.get_cpu_var("node_number")
+            for cpu, addr in enumerate(addrs):
+                node = readInt(addr)
+                if node not in node_numbers:
+                    node_numbers.append(node)
+
+            nr_blks = len(node_numbers)
+            nr_blks = 4
+        except:
+            node_numbers = None
+
+        if numa_meminfo == None and node_numbers == None:
+            print("No NUMA information available")
+            return
 
         node_cpus = {}
         try:
@@ -43,13 +64,20 @@ def show_numa_info(options):
             print("-%d" % (nr_blks - 1), end="")
         print(")")
         for idx in range(0, nr_blks):
-            numa_memblk = numa_meminfo.blk[idx]
-            if numa_memblk.nid in node_cpus:
-                print("node %d cpus: " % (numa_memblk.nid), end="")
-                cpu_list = node_cpus[numa_memblk.nid]
+            if numa_meminfo != None:
+                numa_memblk = numa_meminfo.blk[idx]
+                numa_memblk_nid = numa_memblk.nid
+            else:
+                numa_memblk_nid = idx
+
+            if numa_memblk_nid in node_cpus:
+                print("node %d cpus: " % (numa_memblk_nid), end="")
+                cpu_list = node_cpus[idx]
                 for cpu in range(0, len(cpu_list)):
                     print(" %d" % cpu_list[cpu], end="")
                 print("")
+            if numa_meminfo == None:
+                continue
             print("node %d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
             print("node %d size : %d MB" % (numa_memblk.nid, (numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
 
@@ -69,7 +97,7 @@ def show_numa_info(options):
                 print("%5d" % (distance), end="")
             print("")
     except:
-        print("No NUMA information available")
+        pass
 
 
 
