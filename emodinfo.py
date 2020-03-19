@@ -519,13 +519,15 @@ def batch_run_all(o):
     #o.shows_tainted = True
     o.shows_gaps = True
     o.shows_addr = True
-    o.shows_unloaded = True
+    o.shows_unloaded = False
     o.shows_flags_str = True
     o.module_detail = o.batch_run
 
+    '''
     print("\t%s %-40s %s\n" % ("="*10, "Module list for '%s'" % o.batch_run, "="*10))
     module_info(o)
     print("\n")
+    '''
 
     print("\t%s %-40s %s\n" % ("="*10, "Module Details for '%s'" % o.batch_run, "="*10))
     show_module_detail(o)
