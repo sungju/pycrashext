@@ -446,6 +446,8 @@ def set_asm_colors():
             "j" : crashcolor.BLUE | crashcolor.BOLD,
             "mov" : crashcolor.GREEN,
             "push" : crashcolor.RED | crashcolor.UNDERLINE,
+            "pop" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "ret" : crashcolor.MAGENTA | crashcolor.BOLD,
         }
         arg_color_dict = {
             "di" : crashcolor.UNDERLINE | crashcolor.CYAN,
