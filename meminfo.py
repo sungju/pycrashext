@@ -282,12 +282,12 @@ def vm_commit_limit():
 
     allowed += total_swap_pages
 
-    return round(allowed)
+    return round(allowed) << (get_page_shift() - 10)
 
 
 def vm_committed_as():
     vm_committed_as = readSymbol("vm_committed_as")
-    return vm_committed_as.count
+    return (vm_committed_as.count << (get_page_shift() - 10))
 
 def total_swapcache_pages():
     try:
