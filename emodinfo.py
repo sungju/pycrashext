@@ -351,7 +351,16 @@ def find_module(module_name):
 
 
 def disasm_one_func(func_detail):
-    disasm_str = exec_crash_command("dis -l 0x%s" % (func_detail[0]))
+    if func_detail == None or not isinstance(func_detail, list):
+        return
+
+    if len(func_detail) == 0:
+        return
+
+    try:
+        disasm_str = exec_crash_command("dis -l 0x%s" % (func_detail[0]))
+    except:
+        return
 
     print ("%s BEGIN disassemble %s() %s" % ("-" * 10,
                                              func_detail[2],
