@@ -9,6 +9,7 @@ from pykdump.API import *
 from LinuxDump import Tasks
 import sys
 import operator
+import re
 
 import crashcolor
 
@@ -285,6 +286,210 @@ def show_caches(options):
           ("Total", total_dentry_unused, total_inodes_unused))
 
 
+BLOCK_SIZE_BITS = 10
+BLOCKSIZE = 1 << BLOCK_SIZE_BITS
+
+def get_uuid(s_uuid):
+    result = "%0.2x%0.2x%0.2x%0.2x" % (s_uuid[0], s_uuid[1], s_uuid[2], s_uuid[3])
+    result = ""
+    for i in range(0, 4):
+        result = result + "%0.2x" % (s_uuid[i])
+
+    result = result + "-"
+    for i in range(4, 6):
+        result = result + "%0.2x" % (s_uuid[i])
+
+    result = result + "-"
+    for i in range(6, 8):
+        result = result + "%0.2x" % (s_uuid[i])
+
+    result = result + "-"
+    for i in range(8, 16):
+        result = result + "%0.2x" % (s_uuid[i])
+
+    return result
+
+
+
+def get_volume_name(s_volume_name):
+    if s_volume_name.strip() == '':
+        return "<none>"
+
+    return s_volume_name
+
+
+def get_attr_str(flags, flags_list, bitop=True):
+    result = ""
+    idx = 0
+    if bitop:
+        while flags > 0:
+            key = 1 << idx
+            if ((flags & 1) == 1) and (key in flags_list):
+                result = result + flags_list[key] + " "
+            idx = idx + 1
+            flags = flags >> 1
+    else:
+        for key in flags_list:
+            if (flags & key) == key:
+                result = result + flags_list[key] + " "
+
+    return result
+
+
+def get_creator_os(creator_os):
+    creator_os_list = {4: "lites",
+                       3: "FreeBSD",
+                       2: "Masix",
+                       1: "Hurd",
+                       0: "Linux"}
+    result = get_attr_str(creator_os, creator_os_list, False)
+    return result
+
+
+def get_errors_behavior(s_errors):
+    s_errors_list = {1: "Continue",
+                     2: "Read-only",
+                     3: "Panic"}
+    result = get_attr_str(s_errors, s_errors_list, False)
+    return result
+
+
+def get_fs_state(s_state):
+    fs_states_list = {0x0001: "clean",
+                      0x0002: "error",
+                      0x0004: "orphan"}
+    result = get_attr_str(s_state, fs_states_list)
+    return result
+
+
+def get_default_mount_options(mount_options):
+    mount_options_list = {0x00400: "journal_data",
+                          0x02000: "no_uid32",
+                          0x04000: "user_xattr",
+                          0x08000: "acl"}
+    result = get_attr_str(mount_options, mount_options_list)
+    return result
+
+
+def get_ext_flags(s_flags):
+    s_flags_list = {0x0001: "signed_directory_hash",
+                    0x0002: "unsigned_directory_hash",
+                    0x0004: "test filesystem"}
+
+    result = get_attr_str(s_flags, s_flags_list)
+    return result
+
+
+def get_ext4_features(ext4_super_block):
+    s_feature_compat = ext4_super_block.s_feature_compat
+    s_feature_incompat = ext4_super_block.s_feature_incompat
+    s_feature_ro_compat = ext4_super_block.s_feature_ro_compat
+
+    compat_list = {0x0001: "dir_prealloc",
+                   0x0002: "imagic_inodes",
+                   0x0004: "has_journal",
+                   0x0008: "ext_attr",
+                   0x0010: "resize_inode",
+                   0x0020: "dir_index",
+                   0x0200: "sparse_super2"}
+
+    ro_compat_list = {0x0001: "sparse_super",
+                      0x0002: "large_file",
+                      0x0004: "btree_dir",
+                      0x0008: "huge_file",
+                      0x0010: "uninit_bg", #"gdt_csum",
+                      0x0020: "dir_nlink",
+                      0x0040: "extra_isize",
+                      0x0100: "quota",
+                      0x0200: "bigalloc"}
+
+    incompat_list = {0x0001: "compression",
+                     0x0002: "filetype",
+                     0x0004: "recover",
+                     0x0008: "journal_dev",
+                     0x0010: "meta_bg",
+                     0x0040: "extents",
+                     0x0080: "64bit",
+                     0x0100: "mmp",
+                     0x0200: "flex_bg",
+                     0x0400: "ea_inode",
+                     0x1000: "dirdata",
+                     0x2000: "bg_use_meta_csum",
+                     0x4000: "largedir",
+                     0x8000: "inline_data"}
+
+    result = get_attr_str(s_feature_compat, compat_list)
+    result = result + get_attr_str(s_feature_incompat, incompat_list)
+    result = result + get_attr_str(s_feature_ro_compat, ro_compat_list)
+
+    return result
+
+
+def show_ext4_details(sb):
+    ext4_sb_info = readSU("struct ext4_sb_info", sb.s_fs_info)
+    ext4_super_block = readSU("struct ext4_super_block", ext4_sb_info.s_es)
+
+    s_blocks_count = (ext4_super_block.s_blocks_count_hi << 32) +\
+                    ext4_super_block.s_blocks_count_lo
+    s_r_blocks_count = (ext4_super_block.s_r_blocks_count_hi << 32) +\
+                    ext4_super_block.s_r_blocks_count_lo
+    s_free_blocks_count = (ext4_super_block.s_free_blocks_count_hi << 32) +\
+                    ext4_super_block.s_free_blocks_count_lo
+    s_block_size = BLOCKSIZE << ext4_super_block.s_log_block_size
+    s_frag_size = BLOCKSIZE << ext4_super_block.s_obso_log_frag_size
+
+    print("< struct super_block 0x%x >" % sb)
+    print("%-30s %s" % ("Filesystem volume name:", get_volume_name(ext4_super_block.s_volume_name)))
+    print("%-30s %s" % ("Last mounted on:", ext4_super_block.s_last_mounted))
+    print("%-30s %s" % ("Filesystem UUID:", get_uuid(ext4_super_block.s_uuid)))
+    print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
+    print("%-30s %d (%s)" % ("Filesystem revision #:", ext4_super_block.s_rev_level, "dynamic" if ext4_super_block.s_rev_level > 0 else "original"))
+    print("%-30s %s" % ("Filesystem features:", get_ext4_features(ext4_super_block)))
+    print("%-30s %s" % ("Filesystem flags:", get_ext_flags(ext4_super_block.s_flags)))
+    print("%-30s %s" % ("Default mount options:", get_default_mount_options(ext4_sb_info.s_mount_opt)))
+    print("%-30s %s" % ("Filesystem state:", get_fs_state(ext4_super_block.s_state)))
+    print("%-30s %s" % ("Errors behavior:", get_errors_behavior(ext4_super_block.s_errors)))
+    print("%-30s %s" % ("Filesystem OS type:", get_creator_os(ext4_super_block.s_creator_os)))
+    print("%-30s %d" % ("Inode count:", ext4_super_block.s_inodes_count))
+    print("%-30s %d (%d KBytes)" % ("Block count:", s_blocks_count,
+                                    (s_blocks_count * s_block_size) / 1024))
+    print("%-30s %d (%d KBytes)" % ("Reserved block count:", s_r_blocks_count,
+                                    (s_r_blocks_count * s_block_size) / 1024))
+    print("%-30s %d (%d Kbytes)" % ("Free blocks:", s_free_blocks_count,
+                                    (s_free_blocks_count * s_block_size) / 1024))
+    print("%-30s %d" % ("Free inodes:", ext4_super_block.s_free_inodes_count))
+    print("%-30s %d" % ("First block:", ext4_super_block.s_first_data_block))
+    print("%-30s %d" % ("Block size:", s_block_size))
+    print("%-30s %d" % ("Fragment size:", s_frag_size))
+    print("%-30s %d" % ("Reserved GDT blocks:", ext4_super_block.s_reserved_gdt_blocks))
+    # That's enough for now. The remaining will be implemented later if needed
+
+
+def show_superblock(sb):
+    fs_type = sb.s_type.name
+    if fs_type == "ext4":
+        show_ext4_details(sb)
+        print()
+
+
+
+def show_dumpe2fs(options):
+    if options.dumpe2fs == "*":
+        options.dumpe2fs = '.'
+
+    super_blocks = sym2addr("super_blocks")
+    for sb in readSUListFromHead(super_blocks,
+                                "s_list",
+                                "struct super_block"):
+        mount_name = dentry_to_filename(sb.s_root)
+        try:
+            if re.search(options.dumpe2fs, mount_name):
+                show_superblock(sb)
+        except:
+            print("Error occured. Please check your regular expression.")
+            return
+
+
 
 def fsinfo():
     op = OptionParser()
@@ -309,6 +514,9 @@ def fsinfo():
     op.add_option("--findpidbydentry", dest="dentry_addr_for_pid",
                   default="", action="store",
                   help="Find PID from a /proc dentry address (hex)")
+    op.add_option("-p", "--dumpe2fs", dest="dumpe2fs", default="",
+                  action="store",
+                  help="Shows dumpe2fs like information")
 
     (o, args) = op.parse_args()
 
@@ -329,6 +537,9 @@ def fsinfo():
         sys.exit(0)
     if (o.show_caches):
         show_caches(o)
+        sys.exit(0)
+    if (o.dumpe2fs != ""):
+        show_dumpe2fs(o)
         sys.exit(0)
 
 
