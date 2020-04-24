@@ -223,6 +223,33 @@ SB: 0xffff880431d47800, frozen=SB_FREEZE_COMPLETE, /tmp/ (dm-6) [ext3], ()
 SB: 0xffff880431d49800, frozen=SB_FREEZE_COMPLETE, /var/ (dm-4) [ext3], ()
 ```
 
+Below is showing dumpe2fs style of information. (Only ext4 at this stage)
+
+```
+crash> fsinfo -p var
+< struct super_block 0xffff881199c7f800 >
+Filesystem volume name:        <none>
+Last mounted on:               /var
+Filesystem UUID:               a1e69927-ca89-4367-a8dc02f5d326fe05
+Filesystem magic number:       0xEF53
+Filesystem revision #:         1 (dynamic)
+Filesystem features:           has_journal ext_attr resize_inode dir_index filetype recover extents flex_bg sparse_super large_file huge_file uninit_bg dir_nlink extra_isize
+Filesystem flags:              signed_directory_hash
+Default mount options:         user_xattr acl
+Filesystem state:              clean
+Errors behavior:               Continue
+Filesystem OS type:            Linux
+Inode count:                   655360
+Block count:                   2621440 (10485760 KBytes)
+Reserved block count:          131056 (524224 KBytes)
+Free blocks:                   1891448 (7565792 Kbytes)
+Free inodes:                   645802
+First block:                   0
+Block size:                    4096
+Fragment size:                 4096
+Reserved GDT blocks:           319
+```
+
 
 ### cgroupinfo ###
 It provides cgroup related information. It is mostly useful to find out how many cgroups were created in the system.
