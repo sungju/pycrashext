@@ -471,8 +471,9 @@ def show_superblock(sb):
         if fs_type == "ext4":
             show_ext4_details(sb)
             print()
-    except:
+    except Exception as e:
         print("Error in handling", sb)
+        print(e)
 
 
 def show_dumpe2fs(options):
