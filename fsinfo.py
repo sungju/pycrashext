@@ -467,10 +467,12 @@ def show_ext4_details(sb):
 
 def show_superblock(sb):
     fs_type = sb.s_type.name
-    if fs_type == "ext4":
-        show_ext4_details(sb)
-        print()
-
+    try:
+        if fs_type == "ext4":
+            show_ext4_details(sb)
+            print()
+    except:
+        print("Error in handling", sb)
 
 
 def show_dumpe2fs(options):
@@ -478,6 +480,7 @@ def show_dumpe2fs(options):
         options.dumpe2fs = '.'
 
     super_blocks = sym2addr("super_blocks")
+    printed = False
     for sb in readSUListFromHead(super_blocks,
                                 "s_list",
                                 "struct super_block"):
@@ -486,8 +489,9 @@ def show_dumpe2fs(options):
             if re.search(options.dumpe2fs, mount_name):
                 show_superblock(sb)
         except:
-            print("Error occured. Please check your regular expression.")
-            return
+            if printed == False:
+                print("Error occured. Please check your regular expression.")
+                printed = True
 
 
 
