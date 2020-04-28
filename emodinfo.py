@@ -466,6 +466,22 @@ def show_module_detail(options):
                            options.show_longer_than)
 
 
+def check_slab(slab_addr, default_str):
+     result = exec_crash_command("kmem %s" % slab_addr)
+     resultlines = result.splitlines()
+     found = False
+     for line in resultlines:
+         words = line.split()
+         if found == True:
+             return "SLAB: '%s'" % words[-1]
+
+         if words[0] == 'CACHE':
+             found = True
+             continue
+
+     return default_str
+
+
 def print_sym_list_section(title, sym_list, show_contents,
                            show_strings, min_line_length):
     crashcolor.set_color(crashcolor.BLUE)
@@ -488,7 +504,7 @@ def print_sym_list_section(title, sym_list, show_contents,
             if data.startswith("0xf"):
                 data_str = exec_crash_command("sym %s" % (data))
                 if data_str.startswith("sym:"):
-                    data_str = "<no symbol>"
+                    data_str = check_slab(data, "<no symbol>")
                 else:
                     data_str = "sym: %s" % data_str.split()[2]
             elif first_byte.isprintable():
@@ -563,6 +579,18 @@ def get_module_list(tainted_only):
     return result_list
 
 
+def set_error(error_path):
+    result = exec_crash_command("help -p")
+    lines = result.splitlines()
+    for line in lines:
+        words = line.split()
+        if words[0] == 'error_path:':
+            exec_crash_command("set error %s" % error_path)
+            return words[1]
+
+    return ""
+
+
 def modinfo():
     op = OptionParser()
     op.add_option("--disasm", dest="disasm_module", default=None,
@@ -606,11 +634,15 @@ def modinfo():
     (o, args) = op.parse_args()
 
     if (o.disasm_module is not None):
+        error_origin = set_error("redirect")
         disasm_module(o)
+        set_error(error_origin)
         sys.exit(0)
 
     if (o.module_detail is not None):
+        error_origin = set_error("redirect")
         show_module_detail(o)
+        set_error(error_origin)
         sys.exit(0)
 
 
@@ -630,7 +662,9 @@ def modinfo():
                 print("Processing module '%s' on %s" % (o.batch_run, target_file))
                 sys.stdout = open(target_file, 'w')
 
+            error_origin = set_error("redirect")
             batch_run_all(o)
+            set_error(error_origin)
             if o.target_dir is not None:
                 sys.stdout.close()
                 sys.stdout = orig_stdout
