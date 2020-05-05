@@ -426,43 +426,47 @@ def get_ext4_features(ext4_super_block):
 
 
 def show_ext4_details(sb):
-    ext4_sb_info = readSU("struct ext4_sb_info", sb.s_fs_info)
-    ext4_super_block = readSU("struct ext4_super_block", ext4_sb_info.s_es)
+    try:
+        ext4_sb_info = readSU("struct ext4_sb_info", sb.s_fs_info)
+        ext4_super_block = readSU("struct ext4_super_block", ext4_sb_info.s_es)
 
-    s_blocks_count = (ext4_super_block.s_blocks_count_hi << 32) +\
-                    ext4_super_block.s_blocks_count_lo
-    s_r_blocks_count = (ext4_super_block.s_r_blocks_count_hi << 32) +\
-                    ext4_super_block.s_r_blocks_count_lo
-    s_free_blocks_count = (ext4_super_block.s_free_blocks_count_hi << 32) +\
-                    ext4_super_block.s_free_blocks_count_lo
-    s_block_size = BLOCKSIZE << ext4_super_block.s_log_block_size
-    s_frag_size = BLOCKSIZE << ext4_super_block.s_obso_log_frag_size
+        s_blocks_count = (ext4_super_block.s_blocks_count_hi << 32) +\
+                        ext4_super_block.s_blocks_count_lo
+        s_r_blocks_count = (ext4_super_block.s_r_blocks_count_hi << 32) +\
+                        ext4_super_block.s_r_blocks_count_lo
+        s_free_blocks_count = (ext4_super_block.s_free_blocks_count_hi << 32) +\
+                        ext4_super_block.s_free_blocks_count_lo
+        s_block_size = BLOCKSIZE << ext4_super_block.s_log_block_size
+        s_frag_size = BLOCKSIZE << ext4_super_block.s_obso_log_frag_size
 
-    print("< struct super_block 0x%x >" % sb)
-    print("%-30s %s" % ("Filesystem volume name:", get_volume_name(ext4_super_block.s_volume_name)))
-    print("%-30s %s" % ("Last mounted on:", ext4_super_block.s_last_mounted))
-    print("%-30s %s" % ("Filesystem UUID:", get_uuid(ext4_super_block.s_uuid)))
-    print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
-    print("%-30s %d (%s)" % ("Filesystem revision #:", ext4_super_block.s_rev_level, "dynamic" if ext4_super_block.s_rev_level > 0 else "original"))
-    print("%-30s %s" % ("Filesystem features:", get_ext4_features(ext4_super_block)))
-    print("%-30s %s" % ("Filesystem flags:", get_ext_flags(ext4_super_block.s_flags)))
-    print("%-30s %s" % ("Default mount options:", get_default_mount_options(ext4_sb_info.s_mount_opt)))
-    print("%-30s %s" % ("Filesystem state:", get_fs_state(ext4_super_block.s_state)))
-    print("%-30s %s" % ("Errors behavior:", get_errors_behavior(ext4_super_block.s_errors)))
-    print("%-30s %s" % ("Filesystem OS type:", get_creator_os(ext4_super_block.s_creator_os)))
-    print("%-30s %d" % ("Inode count:", ext4_super_block.s_inodes_count))
-    print("%-30s %d (%d KBytes)" % ("Block count:", s_blocks_count,
-                                    (s_blocks_count * s_block_size) / 1024))
-    print("%-30s %d (%d KBytes)" % ("Reserved block count:", s_r_blocks_count,
-                                    (s_r_blocks_count * s_block_size) / 1024))
-    print("%-30s %d (%d Kbytes)" % ("Free blocks:", s_free_blocks_count,
-                                    (s_free_blocks_count * s_block_size) / 1024))
-    print("%-30s %d" % ("Free inodes:", ext4_super_block.s_free_inodes_count))
-    print("%-30s %d" % ("First block:", ext4_super_block.s_first_data_block))
-    print("%-30s %d" % ("Block size:", s_block_size))
-    print("%-30s %d" % ("Fragment size:", s_frag_size))
-    print("%-30s %d" % ("Reserved GDT blocks:", ext4_super_block.s_reserved_gdt_blocks))
-    # That's enough for now. The remaining will be implemented later if needed
+        print("< struct super_block 0x%x >" % sb)
+        print("%-30s %s" % ("Filesystem volume name:", get_volume_name(ext4_super_block.s_volume_name)))
+        print("%-30s %s" % ("Last mounted on:", ext4_super_block.s_last_mounted))
+        print("%-30s %s" % ("Filesystem UUID:", get_uuid(ext4_super_block.s_uuid)))
+        print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
+        print("%-30s %d (%s)" % ("Filesystem revision #:", ext4_super_block.s_rev_level, "dynamic" if ext4_super_block.s_rev_level > 0 else "original"))
+        print("%-30s %s" % ("Filesystem features:", get_ext4_features(ext4_super_block)))
+        print("%-30s %s" % ("Filesystem flags:", get_ext_flags(ext4_super_block.s_flags)))
+        print("%-30s %s" % ("Default mount options:", get_default_mount_options(ext4_sb_info.s_mount_opt)))
+        print("%-30s %s" % ("Filesystem state:", get_fs_state(ext4_super_block.s_state)))
+        print("%-30s %s" % ("Errors behavior:", get_errors_behavior(ext4_super_block.s_errors)))
+        print("%-30s %s" % ("Filesystem OS type:", get_creator_os(ext4_super_block.s_creator_os)))
+        print("%-30s %d" % ("Inode count:", ext4_super_block.s_inodes_count))
+        print("%-30s %d (%d KBytes)" % ("Block count:", s_blocks_count,
+                                        (s_blocks_count * s_block_size) / 1024))
+        print("%-30s %d (%d KBytes)" % ("Reserved block count:", s_r_blocks_count,
+                                        (s_r_blocks_count * s_block_size) / 1024))
+        print("%-30s %d (%d Kbytes)" % ("Free blocks:", s_free_blocks_count,
+                                        (s_free_blocks_count * s_block_size) / 1024))
+        print("%-30s %d" % ("Free inodes:", ext4_super_block.s_free_inodes_count))
+        print("%-30s %d" % ("First block:", ext4_super_block.s_first_data_block))
+        print("%-30s %d" % ("Block size:", s_block_size))
+        print("%-30s %d" % ("Fragment size:", s_frag_size))
+        print("%-30s %d" % ("Reserved GDT blocks:", ext4_super_block.s_reserved_gdt_blocks))
+        # That's enough for now. The remaining will be implemented later if needed
+    except:
+        print("Can't read details for 0x%x (%s)" % (sb, dentry_to_filename(sb.s_root)), end='')
+        return
 
 
 def show_superblock(sb):
