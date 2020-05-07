@@ -380,10 +380,10 @@ def get_ext_flags(s_flags):
     return result
 
 
-def get_ext4_features(ext4_super_block):
-    s_feature_compat = ext4_super_block.s_feature_compat
-    s_feature_incompat = ext4_super_block.s_feature_incompat
-    s_feature_ro_compat = ext4_super_block.s_feature_ro_compat
+def get_extX_features(extX_super_block):
+    s_feature_compat = extX_super_block.s_feature_compat
+    s_feature_incompat = extX_super_block.s_feature_incompat
+    s_feature_ro_compat = extX_super_block.s_feature_ro_compat
 
     compat_list = {0x0001: "dir_prealloc",
                    0x0002: "imagic_inodes",
@@ -425,44 +425,71 @@ def get_ext4_features(ext4_super_block):
     return result
 
 
-def show_ext4_details(sb):
+def show_extX_details(sb, fs_type):
     try:
-        ext4_sb_info = readSU("struct ext4_sb_info", sb.s_fs_info)
-        ext4_super_block = readSU("struct ext4_super_block", ext4_sb_info.s_es)
+        if fs_type == "ext4":
+            extX_sb_info = readSU("struct ext4_sb_info", sb.s_fs_info)
+            extX_super_block = readSU("struct ext4_super_block", extX_sb_info.s_es)
 
-        s_blocks_count = (ext4_super_block.s_blocks_count_hi << 32) +\
-                        ext4_super_block.s_blocks_count_lo
-        s_r_blocks_count = (ext4_super_block.s_r_blocks_count_hi << 32) +\
-                        ext4_super_block.s_r_blocks_count_lo
-        s_free_blocks_count = (ext4_super_block.s_free_blocks_count_hi << 32) +\
-                        ext4_super_block.s_free_blocks_count_lo
-        s_block_size = BLOCKSIZE << ext4_super_block.s_log_block_size
-        s_frag_size = BLOCKSIZE << ext4_super_block.s_obso_log_frag_size
+            s_blocks_count = (extX_super_block.s_blocks_count_hi << 32) +\
+                            extX_super_block.s_blocks_count_lo
+            s_r_blocks_count = (extX_super_block.s_r_blocks_count_hi << 32) +\
+                            extX_super_block.s_r_blocks_count_lo
+            s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
+                            extX_super_block.s_free_blocks_count_lo
+        elif fs_type == "ext3":
+            extX_sb_info = readSU("struct ext3_sb_info", sb.s_fs_info)
+            extX_super_block = readSU("struct ext3_super_block", extX_sb_info.s_es)
+
+            s_blocks_count = (extX_super_block.s_blocks_count_hi << 32) +\
+                            extX_super_block.s_blocks_count
+            s_r_blocks_count = (extX_super_block.s_r_blocks_count_hi << 32) +\
+                            extX_super_block.s_r_blocks_count
+            s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
+                            extX_super_block.s_free_blocks_count
+        elif fs_type == "ext2":
+            extX_sb_info = readSU("struct ext2_sb_info", sb.s_fs_info)
+            extX_super_block = readSU("struct ext2_super_block", extX_sb_info.s_es)
+
+            s_blocks_count = (extX_super_block.s_blocks_count_hi << 32) +\
+                            extX_super_block.s_blocks_count
+            s_r_blocks_count = (extX_super_block.s_r_blocks_count_hi << 32) +\
+                            extX_super_block.s_r_blocks_count
+            s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
+                            extX_super_block.s_free_blocks_count
+        else:
+            return
+
+        s_block_size = BLOCKSIZE << extX_super_block.s_log_block_size
+        s_frag_size = BLOCKSIZE << extX_super_block.s_obso_log_frag_size
 
         print("< struct super_block 0x%x >" % sb)
-        print("%-30s %s" % ("Filesystem volume name:", get_volume_name(ext4_super_block.s_volume_name)))
-        print("%-30s %s" % ("Last mounted on:", ext4_super_block.s_last_mounted))
-        print("%-30s %s" % ("Filesystem UUID:", get_uuid(ext4_super_block.s_uuid)))
+        print("%-30s %s" % ("Filesystem volume name:", get_volume_name(extX_super_block.s_volume_name)))
+        print("%-30s %s" % ("Last mounted on:", extX_super_block.s_last_mounted))
+        print("%-30s %s" % ("Filesystem UUID:", get_uuid(extX_super_block.s_uuid)))
         print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
-        print("%-30s %d (%s)" % ("Filesystem revision #:", ext4_super_block.s_rev_level, "dynamic" if ext4_super_block.s_rev_level > 0 else "original"))
-        print("%-30s %s" % ("Filesystem features:", get_ext4_features(ext4_super_block)))
-        print("%-30s %s" % ("Filesystem flags:", get_ext_flags(ext4_super_block.s_flags)))
-        print("%-30s %s" % ("Default mount options:", get_default_mount_options(ext4_sb_info.s_mount_opt)))
-        print("%-30s %s" % ("Filesystem state:", get_fs_state(ext4_super_block.s_state)))
-        print("%-30s %s" % ("Errors behavior:", get_errors_behavior(ext4_super_block.s_errors)))
-        print("%-30s %s" % ("Filesystem OS type:", get_creator_os(ext4_super_block.s_creator_os)))
-        print("%-30s %d" % ("Inode count:", ext4_super_block.s_inodes_count))
+        print("%-30s %d (%s)" % ("Filesystem revision #:", extX_super_block.s_rev_level, "dynamic" if extX_super_block.s_rev_level > 0 else "original"))
+        print("%-30s %s" % ("Filesystem features:", get_extX_features(extX_super_block)))
+        if fs_type != "ext2":
+            print("%-30s %s" % ("Filesystem flags:", get_ext_flags(extX_super_block.s_flags)))
+
+        print("%-30s %s" % ("Default mount options:", get_default_mount_options(extX_sb_info.s_mount_opt)))
+        print("%-30s %s" % ("Filesystem state:", get_fs_state(extX_super_block.s_state)))
+        print("%-30s %s" % ("Errors behavior:", get_errors_behavior(extX_super_block.s_errors)))
+        print("%-30s %s" % ("Filesystem OS type:", get_creator_os(extX_super_block.s_creator_os)))
+        print("%-30s %d" % ("Inode count:", extX_super_block.s_inodes_count))
         print("%-30s %d (%d KBytes)" % ("Block count:", s_blocks_count,
                                         (s_blocks_count * s_block_size) / 1024))
         print("%-30s %d (%d KBytes)" % ("Reserved block count:", s_r_blocks_count,
                                         (s_r_blocks_count * s_block_size) / 1024))
         print("%-30s %d (%d Kbytes)" % ("Free blocks:", s_free_blocks_count,
                                         (s_free_blocks_count * s_block_size) / 1024))
-        print("%-30s %d" % ("Free inodes:", ext4_super_block.s_free_inodes_count))
-        print("%-30s %d" % ("First block:", ext4_super_block.s_first_data_block))
+        print("%-30s %d" % ("Free inodes:", extX_super_block.s_free_inodes_count))
+        print("%-30s %d" % ("First block:", extX_super_block.s_first_data_block))
         print("%-30s %d" % ("Block size:", s_block_size))
         print("%-30s %d" % ("Fragment size:", s_frag_size))
-        print("%-30s %d" % ("Reserved GDT blocks:", ext4_super_block.s_reserved_gdt_blocks))
+        if fs_type != "ext2":
+            print("%-30s %d" % ("Reserved GDT blocks:", extX_super_block.s_reserved_gdt_blocks))
         # That's enough for now. The remaining will be implemented later if needed
     except:
         print("Can't read details for 0x%x (%s)" % (sb, dentry_to_filename(sb.s_root)), end='')
@@ -473,7 +500,7 @@ def show_superblock(sb):
     fs_type = sb.s_type.name
     try:
         if fs_type == "ext4":
-            show_ext4_details(sb)
+            show_extX_details(sb, fs_type)
             print()
     except Exception as e:
         print("Error in handling", sb)
