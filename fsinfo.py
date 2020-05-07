@@ -496,11 +496,37 @@ def show_extX_details(sb, fs_type):
         return
 
 
+def show_xfs_details(sb, fs_type):
+    xfs_mount = readSU("struct xfs_mount", sb.s_fs_info)
+    xfs_sb = xfs_mount.m_sb
+
+    print("< struct super_block 0x%x >" % sb)
+    print("%-30s %s" % ("Filesystem volume name:", get_volume_name(xfs_mount.m_fsname)))
+    print("%-30s %x" % ("Magic number", xfs_sb.sb_magicnum))
+    print("%-30s %d" % ("Block size", xfs_sb.sb_blocksize))
+    print("%-30s %d" % ("Number of data blocks", xfs_sb.sb_dblocks))
+    print("%-30s %d" % ("Number of realtime blocks", xfs_sb.sb_rblocks))
+
+    print("%-30s %s" % ("UUID", get_uuid(xfs_sb.sb_uuid.b)))
+    print("%-30s %d" % ("Size of an allocation group", xfs_sb.sb_agblocks))
+    print("%-30s %d" % ("Number of allocation groups", xfs_sb.sb_agcount))
+    print("%-30s %d" % ("Sector size(bytes)", xfs_sb.sb_sectsize))
+    print("%-30s %d" % ("inode size(bytes)", xfs_sb.sb_inodesize))
+
+    print("%-30s %d" % ("allocated inode count", xfs_sb.sb_icount))
+    print("%-30s %d" % ("free inodes", xfs_sb.sb_ifree))
+    print("%-30s %d" % ("free data blocks", xfs_sb.sb_fdblocks))
+    print("%-30s %d" % ("free realtime extents", xfs_sb.sb_frextents))
+    pass
+
 def show_superblock(sb):
     fs_type = sb.s_type.name
     try:
         if fs_type == "ext4":
             show_extX_details(sb, fs_type)
+            print()
+        elif fs_type =="xfs":
+            show_xfs_details(sb, fs_type)
             print()
     except Exception as e:
         print("Error in handling", sb)
