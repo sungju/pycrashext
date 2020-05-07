@@ -501,7 +501,8 @@ def show_xfs_details(sb, fs_type):
     xfs_sb = xfs_mount.m_sb
 
     print("< struct super_block 0x%x >" % sb)
-    print("%-30s %s" % ("Filesystem volume name:", get_volume_name(xfs_mount.m_fsname)))
+    print("%-30s %s" % ("Filesystem volume name", get_volume_name(xfs_mount.m_fsname)))
+    print("%-30s %s" % ("Mount point", dentry_to_filename(sb.s_root)))
     print("%-30s %x" % ("Magic number", xfs_sb.sb_magicnum))
     print("%-30s %d" % ("Block size", xfs_sb.sb_blocksize))
     print("%-30s %d" % ("Number of data blocks", xfs_sb.sb_dblocks))
