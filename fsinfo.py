@@ -195,6 +195,10 @@ def show_file_details(options):
     dentry_details = exec_crash_command("files -d 0x%x" % (file.f_path.dentry))
     print("== File Info ==")
     print(dentry_details)
+
+    if " SOCK " in dentry_details:
+        print("struct socket 0x%x" % file.private_data)
+
     f_op_sym = exec_crash_command("sym %x" % (file.f_op))
     print("file operations = %s" % (f_op_sym), end='')
     mount_details = exec_crash_command("mount").splitlines()
