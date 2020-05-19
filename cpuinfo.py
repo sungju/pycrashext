@@ -128,7 +128,7 @@ def show_tlb(options):
             task = active_mm.owner
 
         if tlb_state.state == TLBSTATE_LAZY:
-            crashcolor.set_color(crashcolor.BLACK)
+            crashcolor.set_color(crashcolor.BLUE)
         elif tlb_state.state == TLBSTATE_OK:
             crashcolor.set_color(crashcolor.LIGHTGREEN)
         if task != 0:
