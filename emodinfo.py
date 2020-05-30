@@ -580,6 +580,7 @@ def get_module_list(tainted_only):
 
 
 def set_error(error_path):
+    return "" # 'set error' seems buggy, avoid to use it for now.
     result = exec_crash_command("help -p")
     lines = result.splitlines()
     for line in lines:
