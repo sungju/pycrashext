@@ -23,6 +23,7 @@
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+from datetime import datetime
 import crashcolor
 import crashhelper
 
@@ -630,6 +631,9 @@ def modinfo():
     op.add_option("--target_dir", dest="target_dir", default=None,
                   action="store", type="string",
                   help="Result will be saved in this directory")
+    op.add_option("--nodate", dest="nodate", default=False,
+                  action="store_true",
+                  help="Do not use date in target filename")
 
 
     (o, args) = op.parse_args()
@@ -659,7 +663,11 @@ def modinfo():
             o.batch_run = module.name
             if o.target_dir is not None:
                 sys.stdout = orig_stdout
-                target_file = "%s/%s.txt" % (o.target_dir, o.batch_run)
+                if o.nodate == False:
+                    date_str = datetime.now().strftime("-%m%d%Y")
+                else:
+                    date_str = ""
+                target_file = "%s/%s%s.txt" % (o.target_dir, o.batch_run, date_str)
                 print("Processing module '%s' on %s" % (o.batch_run, target_file))
                 sys.stdout = open(target_file, 'w')
 
