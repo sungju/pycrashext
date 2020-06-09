@@ -119,7 +119,10 @@ def do_check_unloaded_module(start_addr, end_addr):
         except:
             break
 
-    result = exec_crash_command("rd 0x%x -e 0x%x -a" % (real_start_addr, real_end_addr))
+    try:
+        result = exec_crash_command("rd 0x%x -e 0x%x -a" % (real_start_addr, real_end_addr))
+    except:
+        result = ""
     result_lines = result.splitlines()
     prev_addr = 0
     prev_str_len = 0
@@ -141,7 +144,10 @@ def do_check_unloaded_module(start_addr, end_addr):
         return None
 
     strtab_addr_str = "%x" % strtab_addr
-    result = exec_crash_command("rd 0x%x -e 0x%x" % (real_start_addr, real_end_addr))
+    try:
+        result = exec_crash_command("rd 0x%x -e 0x%x" % (real_start_addr, real_end_addr))
+    except:
+        result = ""
     result_lines = result.splitlines()
     strtab_line = ""
     for line in result_lines:
@@ -509,8 +515,12 @@ def print_sym_list_section(title, sym_list, show_contents,
                 else:
                     data_str = "sym: %s" % data_str.split()[2]
             elif first_byte.isprintable():
-                data_str = exec_crash_command("rd -a 0x%s" % (sym_entry[0]))
-                data_str = "\"%s\"" % data_str.split()[1]
+                try:
+                    data_str = exec_crash_command("rd -a 0x%s" % (sym_entry[0]))
+                    data_str = "\"%s\"" % data_str.split()[1]
+                except:
+                    data_str = "= %d" % int(data, 16)
+                    pass
             else:
                 data_str = "= %d" % int(data, 16)
         except:
@@ -523,8 +533,12 @@ def print_sym_list_section(title, sym_list, show_contents,
 
 
     if show_strings == True and start_addr != "" and start_addr != end_addr:
-        result = exec_crash_command("rd 0x%s -e 0x%s -a" %\
-                                    (start_addr, end_addr))
+        try:
+            result = exec_crash_command("rd 0x%s -e 0x%s -a" %\
+                                        (start_addr, end_addr))
+        except:
+            result = ""
+
         lines = result.splitlines()
         crashcolor.set_color(crashcolor.GREEN)
         for line in lines:
