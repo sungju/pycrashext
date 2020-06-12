@@ -6,6 +6,7 @@ from pykdump.API import *
 from LinuxDump import Tasks
 
 import sys
+import crashcolor
 
 
 def get_module_name(symbol):
@@ -64,8 +65,25 @@ def print_handler_handler(handler_type, kprobe):
             print("WHAT????")
 
 
+def kprobe_flags_str(flags):
+    result_str = ""
+
+    if (flags & 1) == 1:
+        result_str = result_str + "TP_FLAG_TRACE "
+
+    if (flags & 2) == 2:
+        result_str = result_str + "TP_FLAG_PROFILE "
+
+    if (flags & 4) == 4:
+        result_str = result_str + "TP_FLAG_REGISTERED "
+
+    return result_str 
+
+
 def show_ftrace_list(options):
     kprobe_table_list = readSymbol("kprobe_table")
+    tp_offset = member_offset("struct trace_probe", "rp")
+    tp_offset = tp_offset + member_offset("struct kretprobe", "kp")
     for hh in kprobe_table_list:
         for kprobe in hlist_for_each_entry("struct kprobe", hh, "hlist"):
             print("struct kprobe 0x%x" % (kprobe))
@@ -79,8 +97,32 @@ def show_ftrace_list(options):
             print_handler_handler("fault", kprobe)
             print_handler("", "break", kprobe.break_handler, kprobe)
             print_handler_handler("break", kprobe)
+            if options.show_details:
+                trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
+                print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
+                print("\t\tcall.name = '%s'" % (trace_probe.call.name))
 
 
+    if options.show_details:
+        ftrace_events_list = readSymbol("ftrace_events")
+        print("\nftrace_events")
+        count = 0
+        for ftrace_event_call in readSUListFromHead(ftrace_events_list,
+                                                    "list",
+                                                    "struct ftrace_event_call"):
+            print("\t0x%x: name = %s" % (ftrace_event_call, ftrace_event_call.name))
+            count = count + 1
+
+        print("\n\ttotal event : %d" % (count))
+
+
+    global_trace = readSymbol("global_trace")
+    print("\n")
+    if (global_trace.buffer_disabled == 0 and
+        global_trace.trace_buffer.buffer.record_disabled.counter == 0):
+        print("** ftrace Enabled")
+    else:
+        print("** ftrace Disabled")
 
 def traceinfo():
     op = OptionParser()
