@@ -628,6 +628,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
             if idx == crashcolor.MAX_COLOR:
                 idx = 2
+            if idx == 7: # For black background situation
+                idx = idx + 1
 
         if is_disasm_line == True:
             line = interpret_one_line(line) # Retreive stack data if possible
