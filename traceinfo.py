@@ -120,7 +120,9 @@ def show_ftrace_list(options):
     print("\n")
     if (global_trace.buffer_disabled == 0 and
         global_trace.trace_buffer.buffer.record_disabled.counter == 0):
-        print("** ftrace Enabled")
+        print("** ftrace Enabled (struct trace_array 0x%x)" % global_trace)
+        current_trace = global_trace.current_trace
+        print("current_tracer = '%s' (struct tracer 0x%x)" % (current_trace.name, current_trace))
     else:
         print("** ftrace Disabled")
 
