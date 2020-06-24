@@ -475,6 +475,7 @@ def get_meminfo():
                 get_entry_in_dict(meminfo, "VmallocUsed", " kB\n") +\
                 get_entry_in_dict(meminfo, "VmallocChunk", " kB\n") +\
                 get_entry_in_dict(meminfo, "HardwareCorrupted", " kB\n") +\
+                get_entry_in_dict(meminfo, "AnonHugePages", " kB\n") +\
                 get_entry_in_dict(meminfo, "HugePages_Total", "\n") +\
                 get_entry_in_dict(meminfo, "HugePages_Free", "\n") +\
                 get_entry_in_dict(meminfo, "HugePages_Rsvd", "\n") +\
