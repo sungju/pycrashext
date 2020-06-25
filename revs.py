@@ -17,6 +17,7 @@ arch_register_list = {}
 instruction_list = {}
 
 def show_register_details(arch):
+    arch = arch.lower()
     for arch_list_str in arch_register_list:
         arch_list = arch_list_str.split()
         if (arch in arch_list):
@@ -25,6 +26,7 @@ def show_register_details(arch):
 
 
 def show_asm_details( asm_inst ):
+    asm_inst = asm_inst.lower()
     for inst_list_str in instruction_list:
         inst_list = inst_list_str.split()
         if (asm_inst in inst_list):
@@ -97,11 +99,11 @@ def read_database():
             if words[0] in inst_set:
                 cur_data_line = line
                 if words[0] == "REGISTERS":
-                    arch_list = words[1] # don't split yet
+                    arch_list = words[1].lower() # don't split yet
                     total_line = ""
                     cur_mode = 1
                 elif words[0] == "INSTRUCTION":
-                    inst_list = words[1] # don't split yet
+                    inst_list = words[1].lower() # don't split yet
                     total_line = ""
                     cur_mode = 2
             elif line == "END_" + cur_data_line:
