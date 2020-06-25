@@ -1,0 +1,351 @@
+-----------------------------------------------------------------
+revs.py uses this to get instructions.
+-----------------------------------------------------------------
+
+ARCHITECTURE: i386 i686 x86_64 athlon
+REGISTERS: i386 i686 x86_64 athlon
+** function parameters for x86_64 **
+%rdi - 1st argument (%rdi:64, %edi:32, %di:16, %dl:8)
+%rsi - 2nd argument (%rsi:64, %esi:32, %si:16, %sl:8)
+%rdx - 3rd argument (%rdx:64, %edx:32, %dx:16, %dl:8)
+%rcx - 4th argument (%rcx:64, %ecx:32, %cx:16, %cl:8)
+%r8  - 5th argument (%r8:64, %r8d:32, %r8w:16, %r8b:8)
+%r9  - 6th argument (%r9:64, %r9d:32, %r9w:16, %r9b:8)
+%rsp - Stack pointer
+%rax - Return value
+%rip - Instruction pointer
+END_REGISTERS: i386 i686 x86_64 athlon
+END_ARCHITECTURE: i386 i686 x86_64 athlon
+
+-----------------------------------------------------------------
+** Everything in between main keywords will be ignored 
+   unless the word is matching with the predefined keywords. 
+-----------------------------------------------------------------
+
+ARCHITECTURE: arm
+REGISTERS: arm
+** function parameters for ARM **
+r0 - r29: General Purpose Registers
+    r0 - r7     : Arguments & Result
+    r8          : Indirect result (struct) location
+    r9 - r15    : Spare temp registers
+    r16 - r17   : Intra-call registers (PLT, linker)
+    r18         : Platform specific (TLS)
+    r19 - r28   : Callee-saved registers
+    r29         : Frame pointer
+r30: This is the Link Register (LR)
+
+Procedure Call Standard for the Arm 64-bit Architecture
+https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
+END_REGISTERS: arm
+END_ARCHITECTURE: arm
+
+ARCHITECTURE: s390
+REGISTERS: s390
+** function parameters for s390 **
+r0       used by syscalls/assembly                  call-clobbered
+r1       used by syscalls/assembly                  call-clobbered
+r2 - r7 : arguments
+	r2       argument 0 / return value 0                call-clobbered
+	r3       argument 1 / return value 1 (if long long) call-clobbered
+	r4       argument 2                                 call-clobbered
+	r5       argument 3                                 call-clobbered
+	r6       argument 4                                 saved
+	r7       pointer-to arguments 5 to ...              saved      
+r8       this & that                                saved
+r9       this & that                                saved
+r10      static-chain ( if nested function )        saved
+r11      frame-pointer ( if function used alloca )  saved
+r12      got-pointer                                saved
+r13      base-pointer                               saved
+r14      return-address                             saved
+r15      stack-pointer                              saved
+
+Useful debugging information from kerne.org:
+https://www.kernel.org/doc/Documentation/s390/Debugging390.txt
+END_REGISTERS: s390
+END_ARCHITECTURE: s390
+
+ARCHITECTURE: ppc
+REGISTERS: ppc
+** function parameters for PPC **
+R0 : Instruction pointer 
+R1 : Stack pointer
+R2 : Table of Contents (TOC) pointer
+R3 - R10 : Arguments
+    R3 : 1st argument
+    R4 : 2nd argument
+    R5 : 3rd argument
+    R6 : 4th argument
+    R7 : 5th argument
+    R8 : 6th argument
+    R9 : 7th argument
+    R10 : 8th argument
+
+How to find a stack value:
+Example)
+
+0xc0000000002e74d0 <.migrate_pages>:    mflr    r0
+0xc0000000002e74d4 <.migrate_pages+0x4>:        std     r17,-120(r1)
+
+    #6 [c000002542703a70] .migrate_pages at c0000000002e7674
+    #7 [c000002542703be0] .do_mbind at c0000000002ce16c
+            ^
+            +-- address in the above function stack
+
+crash> px 0xc000002542703be0-120
+$1 = 0xc000002542703b68
+crash> rd 0xc000002542703b68
+c000002542703b68:  c000003b387cf6e8                    ...;8|..
+
+END_REGISTERS: ppc
+END_ARCHITECTURE: ppc
+
+ARCHITECTURE: i386 i686 x86_64 athlon
+INSTRUCTION: lea
+lea - Load effective address
+     The lea instruction places the address specified by its
+     first operandinto the register specified by its second
+     operand.Note, the contents of the memory location are
+     notloaded, only the effective address is computed and
+     placed into the register.This is useful for obtaining
+     a pointer into a memory region or to perform simple
+     arithmetic operations.
+
+     Syntax
+     lea <mem>, <reg32>
+
+     Examples
+     lea (%ebx,%esi,8), %edi - the quantity EBX+8*ESI is placed in EDI.
+     lea val(,1), %eax - the value val is placed in EAX.
+END_INSTRUCTION: lea
+
+INSTRUCTION: je jne jz jg jge jl jle
+j<condition> - Conditional jump
+
+        These instructions are conditional jumps that are based on
+        the status ofa set of condition codes that are stored in a
+        special register calledthe machine status word. The contents
+        of the machine statusword include information about the last
+        arithmetic operationperformed. For example, one bit of this
+        word indicates if the lastresult was zero. Another indicates
+        if the last result wasnegative. Based on these condition codes,
+        a number of conditional jumpscan be performed. For example,
+        the jzinstruction performs a jump to the specified operand label
+        if the resultof the last arithmetic operation was zero.
+        Otherwise, control proceedsto the next instruction in sequence.
+
+        A number of the conditional branches are given names that
+        areintuitively based on the last operation performed being
+        a specialcompare instruction, cmp (see below). For example,
+        conditional branchessuch as jle and jne are based on first
+        performing a cmp operationon the desired operands.
+
+
+        Syntax
+            je <label> (jump when equal)
+            jne <label> (jump when not equal)
+            jz <label> (jump when last result was zero)
+            jg <label> (jump when greater than)
+            jge <label> (jump when greater than or equal to)
+            jl <label> (jump when less than)
+            jle <label> (jump when less than or equal to)
+
+        Example
+            cmp %ebx, %eax
+            jle done
+
+            If the contents of EAX are less than or equal to the contents
+            of EBX,jump to the label done.  Otherwise, continue to the
+            nextinstruction.
+END_INSTRUCTION: je jne jz jg jge jl jle
+
+INSTRUCTION: mov movb
+mov - Move
+	The mov instruction copies the data item referred to by its first 
+	operand (i.e. register contents, memory contents, or a constant 
+	value) into the location referred to by its second operand
+	(i.e. a register or memory). While register-to-register moves are 
+	possible, direct memory-to-memory moves are not.
+
+	In cases where memory transfers are desired, the source memory
+	contents must first be loaded into a register, then can be stored
+	to the destination memory address.
+
+	Syntax
+	mov <reg>, <reg>
+	mov <reg>, <mem>
+	mov <mem>, <reg>
+	mov <con>, <reg>
+	mov <con>, <mem>
+
+	Examples
+	mov %ebx, %eax - copy the value in EBX into EAX
+	movb $5, var(,1) - store the value 5 into the byte at location var
+END_INSTRUCTION: mov movb
+
+INSTRUCTION: push
+push - Push on stack
+	The push instruction places its operand onto the top of the hardware
+	supported stack in memory. Specifically, push first decrements ESP by 4,
+	then places its operand into the contents of the 32-bit location 
+	at address (%esp). ESP (the stack pointer) is decremented by push 
+	since the x86 stack grows down - i.e. the stack grows from high 
+	addresses to lower addresses.
+
+	Syntax
+	push <reg32>
+	push <mem>
+	push <con32>
+
+	Examples
+	push %eax - push eax on the stack
+	push var(,1) - push the 4 bytes at address var onto the stack
+END_INSTRUCTION: push
+
+INSTRUCTION: pop
+pop - Pop from stack
+	The pop instruction removes the 4-byte data element from the top of
+	the hardware-supported stack into the specified operand (i.e. register
+	or memory location). It first moves the 4 bytes located at memory
+	location (%esp) into the specified register or memory location,
+	and then increments ESP by 4.
+
+	Syntax
+	pop <reg32>
+	pop <mem>
+
+	Examples
+	pop %edi - pop the top element of the stack into EDI.
+	pop (%ebx) - pop the top element of the stack into memory at the 
+				 four bytes starting at location EBX.
+END_INSTRUCTION: pop
+
+INSTRUCTION: shl shr
+shl, shr - Shift left and right
+	These instructions shift the bits in their first operand's contents
+	left and right, padding the resulting empty bit positions with zeros.
+	The shifted operand can be shifted up to 31 places. The number of
+	bits to shift is specified by the second operand, which can be
+	either an 8-bit constant or the register CL. In either case, shifts
+	counts of greater then 31 are performed modulo 32.
+
+	Syntax
+	shl <con8>, <reg>
+	shl <con8>, <mem>
+	shl %cl, <reg>
+	shl %cl, <mem>
+	shr <con8>, <reg>
+	shr <con8>, <mem>
+	shr %cl, <reg>
+	shr %cl, <mem>
+
+	Examples
+	shl $1, eax - Multiply the value of EAX by 2 (if the most
+		      significant bit is 0)
+	shr %cl, %ebx - Store in EBX the floor of result of dividing the value 
+			of EBX by 2^n where n is the value in CL. 
+			Caution: for negative integers, it is different from
+			the C semantics of division!
+END_INSTRUCTION: shl shr
+
+END_ARCHITECTURE: i386 i686 x86_64 athlon
+
+
+
+ARCHITECTURE: arm
+
+# ARM instructions can be found at the below link
+# http://infocenter.arm.com/help/index.jsp?topic=/com.arm.doc.dui0068b/BABJAJIB.html
+
+INSTRUCTION: mov mvn neg
+Move, Move NOT, and Negate.
+
+  Syntax
+    MOV Rd, #expr
+    MOV Rd, Rm
+    MVN Rd, Rm
+    NEG Rd, Rm
+
+where:
+Rd
+  is the destination register.
+expr
+  is an expression that evaluates (at assembly time)to an integer in the range 0-255.
+Rm
+  is the source register.
+
+Usage
+  The MOV instruction places #expr, or the value from Rm, in Rd.
+  The MVN instruction takes the value in Rm, performs a bitwise logical NOT operation on the value, and places the result in Rd.
+  The NEG instruction takes the value in Rm, multiplies it by -1, and places the result in Rd.
+
+Restrictions
+
+  In MOV Rd,#expr, MVN, and NEG instructions, Rd and Rm must be in the range r0 to r7.
+  In MOV Rd, Rm instructions, Rd and Rm can be any register r0 to r15, but see Condition flags.
+
+Condition flags
+  MOV Rd,#expr and MVN instructions update the N and Z flags. They have no effect on the C or V flags.
+  NEG instructions update the N, Z, C, and V flags.
+  MOV Rd, Rm behaves as follows:
+    - if either Rd or Rm is a high register (r8-r15), the flags are unaffected
+    - if both Rd and Rm are low registers (r0-r7), the N and Z flags are updated, and C and V flags are cleared.
+
+    Note
+    You can use LSL, with a shift of zero, to move between low registers without clearing the C and V flags (see ASR, LSL, LSR, and ROR).
+
+Architectures
+  These instructions are available in all T variants of the ARM architecture.
+
+Examples
+    MOV r3,#0
+    MOV r0,r12  ; does not update flags
+    MVN r7,r1
+    NEG r2,r2
+
+Incorrect examples
+    MOV r2,#256 ; immediate value out of range
+    MOV r8,#3   ; cannot move immediate to high register
+    MVN r8,r2   ; high registers not allowed with MVN or NEG
+    NEG r0,#3   ; immediate value not allowed with MVN or NEG
+
+END_INSTRUCTION: mov mvn neg
+
+INSTRUCTION: push
+Push registers onto a full descending stack.
+
+Syntax
+  PUSH{cond} reglist
+
+where:
+cond: is an optional condition code.
+reglist: is a non-empty list of registers, enclosed in braces. It can contain register ranges. It must be comma separated if it contains more than one register or register range.
+
+Usage
+  PUSH is a synonym for STMDB sp!, reglist. PUSH is the preferred mnemonic.
+
+  Note
+  STMFD is a synonym of STMDB.
+
+Registers are stored on the stack in numerical order, with the lowest numbered register at the lowest address.
+
+Thumb instructions
+  The following restriction applies to the 16-bit PUSH instruction:
+    - reglist can only include the Lo registers and the LR
+
+  The following restrictions apply to the 32-bit PUSH instruction:
+    - reglist must not include the SP
+     - reglist must not include the PC
+
+  Restrictions on reglist in ARM instructions
+  ARM PUSH instructions can have SP and PC in the reglist but these instructions that include SP or PC in the reglist are deprecated in ARMv6T2 and above.
+
+Examples
+      PUSH    {r0,r4-r7}
+      PUSH    {r2,lr}
+
+END_INSTRUCTION: push
+
+END_ARCHITECTURE: arm
+
