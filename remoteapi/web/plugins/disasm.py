@@ -43,6 +43,8 @@ def set_kernel_version(asm_str):
         kernel_version = "kernel-" + release_version[:release_version.rfind(".")]
     elif kernel_version.find("-alt-") >= 0:
         gitdir = 'alt'
+    elif kernel_version.find(".el8") >= 0:
+        gitdir = 'rhel8'
     else:
         gitdir = 'rh' + kernel_version.split('.')[-1]
 
