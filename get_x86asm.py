@@ -18,20 +18,72 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 # GNU General Public License for more details.
 
-import html2text
 import urllib.request
 from bs4 import BeautifulSoup
 import re
+import sys
+
+
+def get_table_str(table):
+    data = []
+    max_len = {}
+    for row in table.find_all("tr"):
+        columns = []
+        idx = 0
+        column_list = row.find_all("th")
+        column_list = column_list + row.find_all("td")
+        for column in column_list:
+            text = column.text
+            columns.append(text)
+            mylen = len(text)
+            if idx in max_len:
+                if mylen > max_len[idx]:
+                    max_len[idx] = mylen
+            else:
+                max_len[idx] = mylen
+            idx = idx + 1
+
+        data.append(columns)
+
+
+    result = ""
+    for row in data:
+        idx = 0
+        for column in row:
+            result = result + ' {0:{align}{width}} '.format(column, align='<', width=max_len[idx])
+            idx = idx + 1
+        result = result + "\n"
+
+    return result
+
+
+def get_text(entry):
+    result = entry.text.strip()
+    result = re.sub('\t', ' ', result)
+    result = re.sub('\n', ' ', result)
+    result = re.sub(' +', ' ', result)
+    return result
+
 
 def get_inst(url):
-	with urllib.request.urlopen(url) as response:
-		html = response.read()
+    html = urllib.request.urlopen(url).read().decode("utf-8").replace("¶", "")
+    soup = BeautifulSoup(html, features="lxml")
+    body = soup.find("body")
+    child_list = body.contents
+    result = ""
+    for child in child_list:
+        if child.name == "h1":
+            result = result + ("# %s #\n" % (get_text(child)))
+        elif child.name == "h2":
+            result = result + ("## %s ##\n" % (get_text(child)))
+        elif child.name == "p":
+            result = result + ("%s\n\n" % (get_text(child)))
+        elif child.name == "pre":
+            result = result + ("%s\n\n" % (child.text.strip()))
+        elif child.name == "table":
+            result = result + ("%s\n" % (get_table_str(child)))
 
-	h = html2text.HTML2Text()
-	h.ignore_links = True
-	data = h.handle(html.decode("utf-8")).replace("¶", "")
-
-	return data
+    return result 
 
 
 def fetch_instructions(target_file):
