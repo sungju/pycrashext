@@ -117,7 +117,7 @@ def fetch_instructions(target_file):
                 inst = link.text
                 print(inst)
                 f.write("INSTRUCTION: %s\n" % inst)
-                f.write("%s\n" % data[data.find("# %s" % inst):-1])
+                f.write("%s\n" % data)
                 f.write("END_INSTRUCTION: %s\n\n\n" % inst)
 
         f.write("END_ARCHITECTURE: i386 i686 x86_64 athlon\n")
