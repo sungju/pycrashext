@@ -61,15 +61,15 @@ def is_arch_match(arch, arch_list_str):
     return False
 
 
-def read_database():
+def read_database(filename):
     file_lines = []
     try:
         cmd_path_list = os.environ["PYKDUMPPATH"]
         path_list = cmd_path_list.split(':')
         source_file = ""
         for path in path_list:
-            if os.path.exists(path + "/revs.data"):
-                source_file = path + "/revs.data"
+            if os.path.exists(path + ("/%s" % filename)):
+                source_file = path + ("/%s" % filename)
                 break
 
         arch = sys_info.machine
@@ -143,7 +143,8 @@ def revs():
     (o, args) = op.parse_args()
 
 
-    read_database()
+    read_database("revs.data")
+    read_database("x86asm.data")
 
     if (o.Asm != ""):
         show_asm_details(o.Asm)

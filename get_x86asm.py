@@ -27,13 +27,20 @@ import sys
 def get_table_str(table):
     data = []
     max_len = {}
+    rowspan = 0
+    rowspan_idx = -1
     for row in table.find_all("tr"):
         columns = []
         idx = 0
         column_list = row.find_all("th")
         column_list = column_list + row.find_all("td")
         for column in column_list:
-            text = column.text
+            if rowspan > 0 and idx == rowspan_idx:
+                columns.append("")
+                idx = idx + 1
+                rowspan = rowspan - 1
+
+            text = get_text(column)
             columns.append(text)
             mylen = len(text)
             if idx in max_len:
@@ -41,6 +48,12 @@ def get_table_str(table):
                     max_len[idx] = mylen
             else:
                 max_len[idx] = mylen
+
+            tmp_rowspan = column.get("rowspan")
+            if tmp_rowspan is not None:
+                rowspan = int(tmp_rowspan) - 1
+                rowspan_idx = idx
+
             idx = idx + 1
 
         data.append(columns)
@@ -52,7 +65,7 @@ def get_table_str(table):
         for column in row:
             result = result + ' {0:{align}{width}} '.format(column, align='<', width=max_len[idx])
             idx = idx + 1
-        result = result + "\n"
+        result = result.strip() + "\n"
 
     return result
 
@@ -81,9 +94,9 @@ def get_inst(url):
         elif child.name == "pre":
             result = result + ("%s\n\n" % (child.text.strip()))
         elif child.name == "table":
-            result = result + ("%s\n" % (get_table_str(child)))
+            result = result + ("\n %s\n" % (get_table_str(child)))
 
-    return result 
+    return result
 
 
 def fetch_instructions(target_file):
@@ -110,4 +123,4 @@ def fetch_instructions(target_file):
         f.write("END_ARCHITECTURE: i386 i686 x86_64 athlon\n")
 
 
-fetch_instructions("x86asm.txt")
+fetch_instructions("x86asm.data")
