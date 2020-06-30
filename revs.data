@@ -120,7 +120,7 @@ lea - Load effective address
      lea val(,1), %eax - the value val is placed in EAX.
 END_INSTRUCTION: lea
 
-INSTRUCTION: je jne jz jg jge jl jle
+INSTRUCTION: je jne jz jg jge jl jle test js jns
 j<condition> - Conditional jump
 
         These instructions are conditional jumps that are based on
@@ -150,6 +150,8 @@ j<condition> - Conditional jump
             jge <label> (jump when greater than or equal to)
             jl <label> (jump when less than)
             jle <label> (jump when less than or equal to)
+	    js <label> (jump near if sign SF=1
+	    jns <label> (jump near if not sign SF=0
 
         Example
             cmp %ebx, %eax
@@ -158,7 +160,21 @@ j<condition> - Conditional jump
             If the contents of EAX are less than or equal to the contents
             of EBX,jump to the label done.  Otherwise, continue to the
             nextinstruction.
-END_INSTRUCTION: je jne jz jg jge jl jle
+
+
+		; Conditional Jump
+		test cl,cl   ; set ZF to 1 if cl == 0
+		je 0x804f430  ; jump if ZF == 1
+
+		; Conditional Jump with NOT
+		test cl, cl   ; set ZF to 1 if cl == 0
+		jne 0x804f430  ; jump if ZF != 1
+
+		; or
+		test eax, eax  ; set SF to 1 if eax < 0 (negative)
+		js error ; jump if SF == 1
+
+END_INSTRUCTION: je jne jz jg jge jl jle test js jns
 
 INSTRUCTION: mov movb
 mov - Move
