@@ -384,6 +384,66 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 ...
 ```
 
+If you are suspecting an unloaded module in invalid op such as below, you can try 'emodinfo -m <address>' to see if it was belong to a module.
+
+```
+crash> bt
+PID: 24390  TASK: ffff9c271b16d140  CPU: 1   COMMAND: "badprocess"
+ #0 [ffff9c1fb9c9fbb0] machine_kexec at ffffffff9d863674
+ #1 [ffff9c1fb9c9fc10] __crash_kexec at ffffffff9d91cef2
+ #2 [ffff9c1fb9c9fce0] crash_kexec at ffffffff9d91cfe0
+ #3 [ffff9c1fb9c9fcf8] oops_end at ffffffff9df6c758
+ #4 [ffff9c1fb9c9fd20] no_context at ffffffff9df5aafe
+ #5 [ffff9c1fb9c9fd70] __bad_area_nosemaphore at ffffffff9df5ab95
+ #6 [ffff9c1fb9c9fdc0] bad_area_nosemaphore at ffffffff9df5ad06
+ #7 [ffff9c1fb9c9fdd0] __do_page_fault at ffffffff9df6f6b0
+ #8 [ffff9c1fb9c9fe40] do_page_fault at ffffffff9df6f915
+ #9 [ffff9c1fb9c9fe70] page_fault at ffffffff9df6b758
+    [exception RIP: no symbolic reference]
+    RIP: ffffffffc07fdfb0  RSP: ffff9c1fb9c9ff28  RFLAGS: 00010246
+    RAX: ffffffffc07fdf20  RBX: 00000000f6c9f194  RCX: 0000000000000001
+    RDX: 00000000f745bce8  RSI: 00000000f6c9f1d2  RDI: 00000000f6c9f194
+    RBP: ffff9c1fb9c9ff48   R8: 00000000f6c9f194   R9: 00000000f6c9ee08
+    R10: 0000000000000000  R11: 0000000000000000  R12: 0000000000000000
+    R13: 00000000f6c9f194  R14: 0000000000000000  R15: 0000000000000000
+    ORIG_RAX: ffffffffffffffff  CS: 0010  SS: 0000
+#10 [ffff9c1fb9c9ff20] syscall_trace_enter at ffffffff9d83aadb
+    RIP: 00000000f76838ed  RSP: 00000000f6c9edfc  RFLAGS: 00000286
+    RAX: ffffffffffffffda  RBX: 00000000f6c9f194  RCX: 00000000f6c9f1d2
+    RDX: 00000000f745bce8  RSI: 0000000000000001  RDI: 00000000f6c9f194
+    RBP: 00000000f6c9ee08   R8: 0000000000000000   R9: 0000000000000000
+    R10: 0000000000000000  R11: 0000000000000000  R12: 0000000000000000
+    R13: 0000000000000000  R14: 0000000000000000  R15: 0000000000000000
+    ORIG_RAX: 000000000000000a  CS: 0023  SS: 002b
+```
+
+From the above, 'RIP' is invalid. Let's check what was in there.
+
+```
+crash> emodinfo -m ffffffffc07fdfb0
+Found the below module
+	struct module 0xffffffffc0889de0
+	name : ensilo_3_10_0_957_x86_64
+	status : unloaded
+
+crash> emodinfo --details=0xffffffffc0889de0
+struct module   : 0xffffffffc0889de0
+name            : ensilo_3_10_0_957_x86_64
+version         : None
+source ver      : 1EC4D0D7D388B04E4A87252
+init            : None (0xffffffffc08b0000)
+exit            : None (0xffffffffc07f3160)
+
+.text section
+
+.bss section
+
+.data section
+
+.readonly_data section
+
+```
+
 
 ### cpuinfo ###
 It provides CPU related information include how cores are constructed.
