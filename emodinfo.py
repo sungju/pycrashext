@@ -610,7 +610,15 @@ def set_error(error_path):
 def try_get_module_struct(options):
     try:
         result = exec_crash_command("kmem %s" % options.module_addr)
-        address_line = result.splitlines()[1]
+        found = False
+        address_line = ""
+        for line in result.splitlines():
+            if found == True:
+                address_line = line
+                break
+            if line.strip().startswith("VMAP_AREA"):
+                found = True
+
         words = address_line.split()
         start_addr = words[2]
         end_addr = words[4]
