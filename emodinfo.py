@@ -354,6 +354,12 @@ def find_module(module_name):
         if (module.name == module_name):
             return module
 
+    try:
+        module = readSU("struct module", int(module_name, 16))
+        return module
+    except:
+        pass
+
     return None
 
 
@@ -381,19 +387,22 @@ def disasm_one_func(func_detail):
 def get_mod_sym_list(module_name,
                      exclude_types=None, include_types=None):
     mod_func_list = []
-    for sym_str_list in exec_crash_command("sym -m %s" % (module_name)).splitlines():
-        spl = sym_str_list.split(' ', 2)
-        if (spl[1] == 'MODULE'):
-            continue
-        if (exclude_types is not None):
-            if (spl[1] in exclude_types):
+    try:
+        for sym_str_list in exec_crash_command("sym -m %s" % (module_name)).splitlines():
+            spl = sym_str_list.split(' ', 2)
+            if (spl[1] == 'MODULE'):
                 continue
+            if (exclude_types is not None):
+                if (spl[1] in exclude_types):
+                    continue
 
-        if (include_types is not None):
-            if (spl[1] not in include_types):
-                continue
+            if (include_types is not None):
+                if (spl[1] not in include_types):
+                    continue
 
-        mod_func_list.append(spl)
+            mod_func_list.append(spl)
+    except:
+        pass
 
     return mod_func_list
 
@@ -685,7 +694,7 @@ def modinfo():
     op.add_option("--nodate", dest="nodate", default=False,
                   action="store_true",
                   help="Do not use date in target filename")
-    op.add_option('-m', '--module', dest="module_addr", default="",
+    op.add_option('-m', '--module', dest="module_addr", default=None,
                   action="store", type="string",
                   help="Trying to retrieve module structure")
 
