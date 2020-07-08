@@ -612,6 +612,10 @@ def try_get_module_struct(options):
         result = exec_crash_command("kmem %s" % options.module_addr)
         found = False
         address_line = ""
+        loaded_module = "unloaded"
+        if result.find("__this_module") > 0:
+            loaded_module = "loaded"
+
         for line in result.splitlines():
             if found == True:
                 address_line = line
@@ -634,6 +638,7 @@ def try_get_module_struct(options):
             print("Found the below module")
             print("\tstruct module 0x%x" % module)
             print("\tname : %s" % module.name)
+            print("\tStatus : %s" % loaded_module)
     except:
         print("Cannot find module structure for %s" % options.module_addr)
         pass
