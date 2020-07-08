@@ -384,7 +384,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 ...
 ```
 
-If you are suspecting an unloaded module in invalid op such as below, you can try 'emodinfo -m <address>' to see if it was belong to a module.
+If you are suspecting an unloaded module in invalid op such as below, you can try 'emodinfo -m {address}' to see if it was belong to a module.
 
 ```
 crash> bt
@@ -417,7 +417,7 @@ PID: 24390  TASK: ffff9c271b16d140  CPU: 1   COMMAND: "badprocess"
     ORIG_RAX: 000000000000000a  CS: 0023  SS: 002b
 ```
 
-From the above, 'RIP' is invalid. Let's check what was in there.
+From the above, 'RIP' is invalid. Let's check what was in there. If shows that the address was belong to the module ensilo.
 
 ```
 crash> emodinfo -m ffffffffc07fdfb0
