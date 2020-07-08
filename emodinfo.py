@@ -638,7 +638,7 @@ def try_get_module_struct(options):
             print("Found the below module")
             print("\tstruct module 0x%x" % module)
             print("\tname : %s" % module.name)
-            print("\tStatus : %s" % loaded_module)
+            print("\tstatus : %s" % loaded_module)
     except:
         print("Cannot find module structure for %s" % options.module_addr)
         pass
