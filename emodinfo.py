@@ -119,6 +119,13 @@ def do_check_unloaded_module(start_addr, end_addr):
         except:
             break
 
+    module, loaded_module = find_module_struct("0x%x" % real_start_addr)
+    return module
+
+'''
+    Old method: Not going to use
+    ----------------------------
+
     try:
         result = exec_crash_command("rd 0x%x -e 0x%x -a" % (real_start_addr, real_end_addr))
     except:
@@ -176,6 +183,7 @@ def do_check_unloaded_module(start_addr, end_addr):
 
     module = readSU("struct module", module_addr)
     return module
+    '''
 
 
 tainted_count = 0
@@ -617,8 +625,19 @@ def set_error(error_path):
 
 
 def try_get_module_struct(options):
+    module, loaded_module = find_module_struct(options.module_addr)
+    if module is not None:
+        print("Found the below module")
+        print("\tstruct module 0x%x" % module)
+        print("\tname : %s" % module.name)
+        print("\tstatus : %s" % loaded_module)
+    else:
+        print("Cannot find module structure for %s" % options.module_addr)
+
+
+def find_module_struct(module_addr):
     try:
-        result = exec_crash_command("kmem %s" % options.module_addr)
+        result = exec_crash_command("kmem %s" % module_addr)
         found = False
         address_line = ""
         loaded_module = "unloaded"
@@ -644,13 +663,11 @@ def try_get_module_struct(options):
             offset = offset + member_offset("struct module_kobject", "kobj")
             offset = offset + member_offset("struct kobject", "ktype")
             module = readSU("struct module", ktype_location - offset)
-            print("Found the below module")
-            print("\tstruct module 0x%x" % module)
-            print("\tname : %s" % module.name)
-            print("\tstatus : %s" % loaded_module)
+            return module, loaded_module
     except:
-        print("Cannot find module structure for %s" % options.module_addr)
         pass
+
+    return None, ""
 
 
 def modinfo():
