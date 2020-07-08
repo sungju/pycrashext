@@ -607,6 +607,30 @@ def set_error(error_path):
     return ""
 
 
+def try_get_module_struct(options):
+    try:
+        result = exec_crash_command("kmem %s" % options.module_addr)
+        address_line = result.splitlines()[1]
+        words = address_line.split()
+        start_addr = words[2]
+        end_addr = words[4]
+        module_ktype = sym2addr("module_ktype")
+        result = exec_crash_command("search -s %s -e %s 0x%x" %
+                                    (start_addr, end_addr, module_ktype))
+        if len(result) > 0:
+            ktype_location = int(result.split(":")[0], 16)
+            offset = member_offset("struct module", "mkobj")
+            offset = offset + member_offset("struct module_kobject", "kobj")
+            offset = offset + member_offset("struct kobject", "ktype")
+            module = readSU("struct module", ktype_location - offset)
+            print("Found the below module")
+            print("\tstruct module 0x%x" % module)
+            print("\tname : %s" % module.name)
+    except:
+        print("Cannot find module structure for %s" % options.module_addr)
+        pass
+
+
 def modinfo():
     op = OptionParser()
     op.add_option("--disasm", dest="disasm_module", default=None,
@@ -648,9 +672,16 @@ def modinfo():
     op.add_option("--nodate", dest="nodate", default=False,
                   action="store_true",
                   help="Do not use date in target filename")
+    op.add_option('-m', '--module', dest="module_addr", default="",
+                  action="store", type="string",
+                  help="Trying to retrieve module structure")
 
 
     (o, args) = op.parse_args()
+
+    if (o.module_addr is not None):
+        try_get_module_struct(o)
+        sys.exit(0)
 
     if (o.disasm_module is not None):
         error_origin = set_error("redirect")
