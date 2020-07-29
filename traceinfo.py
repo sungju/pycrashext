@@ -25,7 +25,7 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
         mod_name = get_module_name(handler_name)
         print("\t%s%s_handler = 0x%x (%s)%s" % (tab_str, handler_type, handler_addr, handler_name,
                                                 mod_name))
-        if handler_name.endswith("_kretprobe"):
+        if handler_name is not None and handler_name.endswith("_kretprobe"):
             kretprobe = readSU("struct kretprobe", kp)
             ret_handler_name = addr2sym(kretprobe.handler)
             mod_name = get_module_name(ret_handler_name)
