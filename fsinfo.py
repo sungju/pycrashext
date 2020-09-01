@@ -441,6 +441,7 @@ def show_extX_details(sb, fs_type):
                             extX_super_block.s_r_blocks_count_lo
             s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
                             extX_super_block.s_free_blocks_count_lo
+            s_frag_size = 0
         elif fs_type == "ext3":
             extX_sb_info = readSU("struct ext3_sb_info", sb.s_fs_info)
             extX_super_block = readSU("struct ext3_super_block", extX_sb_info.s_es)
@@ -451,6 +452,7 @@ def show_extX_details(sb, fs_type):
                             extX_super_block.s_r_blocks_count
             s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
                             extX_super_block.s_free_blocks_count
+            s_frag_size = BLOCKSIZE << extX_super_block.s_log_frag_size
         elif fs_type == "ext2":
             extX_sb_info = readSU("struct ext2_sb_info", sb.s_fs_info)
             extX_super_block = readSU("struct ext2_super_block", extX_sb_info.s_es)
@@ -461,15 +463,15 @@ def show_extX_details(sb, fs_type):
                             extX_super_block.s_r_blocks_count
             s_free_blocks_count = (extX_super_block.s_free_blocks_count_hi << 32) +\
                             extX_super_block.s_free_blocks_count
+            s_frag_size = BLOCKSIZE << extX_super_block.s_log_frag_size
         else:
             return
 
         s_block_size = BLOCKSIZE << extX_super_block.s_log_block_size
-        s_frag_size = BLOCKSIZE << extX_super_block.s_obso_log_frag_size
 
         print("< struct super_block 0x%x >" % sb)
         print("%-30s %s" % ("Filesystem volume name:", get_volume_name(extX_super_block.s_volume_name)))
-        mnt_point = get_volume_name(extX_super_blocks.s_volume_name)
+        mnt_point = dentry_to_filename(sb.s_root)
         print("%-30s %s" % ("Last mounted on:", extX_super_block.s_last_mounted))
         print("%-30s %s" % ("Filesystem UUID:", get_uuid(extX_super_block.s_uuid)))
         print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
