@@ -469,6 +469,7 @@ def show_extX_details(sb, fs_type):
 
         print("< struct super_block 0x%x >" % sb)
         print("%-30s %s" % ("Filesystem volume name:", get_volume_name(extX_super_block.s_volume_name)))
+        mnt_point = get_volume_name(extX_super_blocks.s_volume_name)
         print("%-30s %s" % ("Last mounted on:", extX_super_block.s_last_mounted))
         print("%-30s %s" % ("Filesystem UUID:", get_uuid(extX_super_block.s_uuid)))
         print("%-30s 0x%X" % ("Filesystem magic number:", sb.s_magic))
@@ -495,6 +496,8 @@ def show_extX_details(sb, fs_type):
         if fs_type != "ext2":
             print("%-30s %d" % ("Reserved GDT blocks:", extX_super_block.s_reserved_gdt_blocks))
         # That's enough for now. The remaining will be implemented later if needed
+        print("")
+        print("# Avilable %d MBytes on %s" % ((s_free_blocks_count * s_block_size) / (1024 * 1024), mnt_point))
     except:
         print("Can't read details for 0x%x (%s)" % (sb, dentry_to_filename(sb.s_root)), end='')
         return
@@ -506,7 +509,8 @@ def show_xfs_details(sb, fs_type):
 
     print("< struct super_block 0x%x >" % sb)
     print("%-30s %s" % ("Filesystem volume name", get_volume_name(xfs_mount.m_fsname)))
-    print("%-30s %s" % ("Mount point", dentry_to_filename(sb.s_root)))
+    mnt_point = dentry_to_filename(sb.s_root)
+    print("%-30s %s" % ("Mount point", mnt_point))
     print("%-30s %x" % ("Magic number", xfs_sb.sb_magicnum))
     print("%-30s %d" % ("Block size", xfs_sb.sb_blocksize))
     print("%-30s %d" % ("Number of data blocks", xfs_sb.sb_dblocks))
@@ -524,7 +528,7 @@ def show_xfs_details(sb, fs_type):
     print("%-30s %d" % ("free realtime extents", xfs_sb.sb_frextents))
 
     print("")
-    print("#\tAvilable %d MBytes" % ((xfs_sb.sb_blocksize * xfs_sb.sb_fdblocks) / (1024 * 1024)))
+    print("# Avilable %d MBytes on %s" % ((xfs_sb.sb_blocksize * xfs_sb.sb_fdblocks) / (1024 * 1024), mnt_point))
     pass
 
 def show_superblock(sb):
