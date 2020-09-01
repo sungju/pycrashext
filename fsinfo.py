@@ -522,6 +522,9 @@ def show_xfs_details(sb, fs_type):
     print("%-30s %d" % ("free inodes", xfs_sb.sb_ifree))
     print("%-30s %d" % ("free data blocks", xfs_sb.sb_fdblocks))
     print("%-30s %d" % ("free realtime extents", xfs_sb.sb_frextents))
+
+    print("")
+    print("#\tAvilable %d MBytes" % ((xfs_sb.sb_blocksize * xfs_sb.sb_fdblocks) / (1024 * 1024)))
     pass
 
 def show_superblock(sb):
