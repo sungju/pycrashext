@@ -18,6 +18,23 @@ import crashcolor
 
 page_size = 4096
 
+def show_buddyinfo(options):
+    node_data = readSymbol("node_data")
+    nr_online_nodes = readSymbol("nr_online_nodes")
+
+    node_index = 0
+    for node in node_data:
+        if node:
+            for zone in node.node_zones:
+                print("Node%2d, zone %8s" % (node.node_id, zone.name), end="")
+                for order in zone.free_area:
+                    print("%7d" % (order.nr_free), end="")
+                print("")
+        elif node_index >= nr_online_nodes:
+            break
+
+        node_index = node_index + 1
+
 
 def show_numa_info(options):
     try:
@@ -801,6 +818,9 @@ def meminfo():
     op.add_option("-a", "--all", dest="all", default=0,
                   action="store_true",
                   help="Show all the output")
+    op.add_option("-b", "--budyinfo", dest="buddyinfo", default=0,
+                  action="store_true",
+                  help="Show /proc/buddyinfo like output")
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
@@ -831,6 +851,10 @@ def meminfo():
                   help="Show NUMA info")
 
     (o, args) = op.parse_args()
+
+    if (o.buddyinfo):
+        show_buddyinfo(o)
+        sys.exit(0)
 
     if (o.slabtop):
         show_slabtop(o)
