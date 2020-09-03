@@ -301,11 +301,11 @@ def read_a_function(asm_str):
     Read a function, but it only works when the symbol is availabe in
     vmcore.
     '''
-    first_line = asm_str.splitlines()[0]
+    first_line = asm_str.splitlines()[1]
     result = ""
     source_file, line_number, end_line_number = parse_source_line(first_line)
     if source_file == "":
-        return "Source code is not available"
+        return first_line + "\n" + "Source code is not available"
 
 
     file_lines = []
