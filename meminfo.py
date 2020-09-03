@@ -18,6 +18,56 @@ import crashcolor
 
 page_size = 4096
 
+def show_gfp_mask(options):
+    gfp_mask = int(options.gfp_mask, 16)
+    gfp_dict = {0x01: "__GFP_DMA",
+                0x02: "___GFP_HIGHMEM",
+                0x04: "___GFP_DMA32",
+                0x08: "___GFP_MOVABLE",
+                0x10: "___GFP_WAIT",
+                0x20: "___GFP_HIGH",
+                0x40: "___GFP_IO",
+                0x80: "___GFP_FS",
+                0x100: "___GFP_COLD",
+                0x200: "___GFP_NOWARN",
+                0x400: "___GFP_REPEAT",
+                0x800: "___GFP_NOFAIL",
+                0x1000: "___GFP_NORETRY",
+                0x2000: "___GFP_MEMALLOC",
+                0x4000: "___GFP_COMP",
+                0x8000: "___GFP_ZERO",
+                0x10000: "___GFP_NOMEMALLOC",
+                0x20000: "___GFP_HARDWALL",
+                0x40000: "___GFP_THISNODE",
+                0x80000: "___GFP_RECLAIMABLE",
+                0x100000: "___GFP_KMEMCG",
+                0x200000: "___GFP_NOTRACK",
+                0x400000: "___GFP_NO_KSWAPD",
+                0x800000: "___GFP_OTHER_NODE",
+                0x1000000: "___GFP_WRITE",
+               }
+
+    dict_full_match = {
+                       0x200d2: "GFP_HIGHUSER",
+                       0x200d0: "GFP_USER",
+                       0xd0: "GFP_KERNEL",
+                       0x50: "GFP_NOFS",
+                       0x10: "GFP_NOIO",
+                       0x20: "GFP_ATOMIC",
+                      }
+
+
+    for val in gfp_dict:
+        if val & gfp_mask == val:
+            print(gfp_dict[val])
+
+    print("")
+    for val in dict_full_match:
+        if val & gfp_mask == val:
+            print(dict_full_match[val])
+            break
+
+
 def show_buddyinfo(options):
     node_data = readSymbol("node_data")
     nr_online_nodes = readSymbol("nr_online_nodes")
@@ -862,6 +912,10 @@ def meminfo():
                   action="store",
                   type="string",
                   help="Interpret page_fault error code")
+    op.add_option("-g", "--gfp_mask", dest="gfp_mask", default="",
+                  action="store",
+                  type="string",
+                  help="Interpret gfp_mask value")
     op.add_option("-m", "--numa", dest="numa", default=0,
                   action="store_true",
                   help="Show NUMA info")
@@ -897,6 +951,10 @@ def meminfo():
 
     if (o.error_code != ""):
         show_error_code(o)
+        sys.exit(0)
+
+    if (o.gfp_mask != ""):
+        show_gfp_mask(o)
         sys.exit(0)
 
     if (o.numa):
