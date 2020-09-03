@@ -569,6 +569,15 @@ def disasm(ins_addr, o, args, cmd_path_list):
         python_list = { "python", "python3", "python2" }
         for python_cmd in python_list:
             if (is_command_exist(python_cmd)):
+                kerver, relver = get_kernel_version()
+                ver_line = ""
+                if kerver.find(".rt") >= 0: # rt kernel
+                    relver = relver[:relver.find("-")]
+                    ver_line = "/usr/src/debug/kernel-%s/linux-%s/" % (relver, kerver)
+                else:
+                    ver_line = disasm_str.splitlines()[0]
+
+                disasm_str = ver_line + "\n" + disasm_str
                 result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
                                                     (disasm_str, python_cmd, \
                                                      disasm_path, cmd_options))
