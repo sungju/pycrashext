@@ -45,6 +45,9 @@ def set_kernel_version(asm_str):
         gitdir = 'alt'
     elif kernel_version.find(".el8") >= 0:
         gitdir = 'rhel8'
+    elif first_line.find(".rt") >= 0:
+        gitdir = "kernel-rt"
+        kernel_version = "kernel-rt-" + release_version
     else:
         gitdir = 'rh' + kernel_version.split('.')[-1]
 
@@ -68,7 +71,9 @@ def set_kernel_version(asm_str):
         err = b"".join(process.stderr.readlines())
         if err != None and \
            (err.startswith(b"error:") or err.startswith(b"fatal:")):
-            return 'FAILED to git checkout\n' + err.decode("utf-8")
+            return 'FAILED to git checkout\n' + err.decode("utf-8") +\
+                    "\n" + kernel_version + ", " + cur_rhel_path
+
         cur_kernel_version = kernel_version
         cur_release_version = release_version.split("/")[0]
     except Exception as e:
@@ -397,7 +402,7 @@ def disasm():
 
     result = ""
 
-    asm_lines = asm_str.splitlines()
+    asm_lines = asm_str.splitlines()[1:]
     has_header = False
     for line in asm_lines:
         if not line.startswith("/") and source_only != "":
