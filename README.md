@@ -944,7 +944,7 @@ node distances:
     1:   21   10
 
 
-crash> meminfo -b
+crash> meminfo -b -d
 Node 0, zone      DMA      0      0      0      0      0      0      0      0      1      1      3
 Node 0, zone    DMA32      8      7      6      5      5      5      7      7      6      6    619
 Node 0, zone   Normal    221    746    717    496    309    245    145     80     84     48   4974

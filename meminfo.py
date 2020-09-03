@@ -39,15 +39,16 @@ def show_buddyinfo(options):
 
         node_index = node_index + 1
 
-    print("\n#%-20s" % " Order", end="")
-    for i in range(0, max_order_index):
-        print("%7s" % ("2^%d" % (i)), end="")
-    print("")
-    page_size = 1 << get_page_shift()
-    print("#%-20s" % " Size (KB)", end="")
-    for i in range(0, max_order_index):
-        print("%7d" % (((2**i) * page_size)/1024), end="")
-    print("")
+    if options.details:
+        print("\n#%-20s" % " Order", end="")
+        for i in range(0, max_order_index):
+            print("%7s" % ("2^%d" % (i)), end="")
+        print("")
+        page_size = 1 << get_page_shift()
+        print("#%-20s" % " Size (KB)", end="")
+        for i in range(0, max_order_index):
+            print("%7d" % (((2**i) * page_size)/1024), end="")
+        print("")
 
 
 
