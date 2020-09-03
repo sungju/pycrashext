@@ -23,10 +23,14 @@ def show_buddyinfo(options):
     nr_online_nodes = readSymbol("nr_online_nodes")
 
     node_index = 0
+    max_order_index = 0
     for node in node_data:
         if node:
             for zone in node.node_zones:
                 print("Node%2d, zone %8s" % (node.node_id, zone.name), end="")
+                if len(zone.free_area) > max_order_index:
+                    max_order_index = len(zone.free_area)
+
                 for order in zone.free_area:
                     print("%7d" % (order.nr_free), end="")
                 print("")
@@ -34,6 +38,17 @@ def show_buddyinfo(options):
             break
 
         node_index = node_index + 1
+
+    print("\n#%-20s" % " Order", end="")
+    for i in range(0, max_order_index):
+        print("%7s" % ("2^%d" % (i)), end="")
+    print("")
+    page_size = 1 << get_page_shift()
+    print("#%-20s" % " Size (KB)", end="")
+    for i in range(0, max_order_index):
+        print("%7d" % (((2**i) * page_size)/1024), end="")
+    print("")
+
 
 
 def show_numa_info(options):
