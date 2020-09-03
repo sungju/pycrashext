@@ -573,7 +573,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 ver_line = ""
                 if kerver.find(".rt") >= 0: # rt kernel
                     relver = relver[:relver.find("-")]
-                    ver_line = "/usr/src/debug/kernel-%s/linux-%s/" % (relver, kerver)
+                    ver_line = "/usr/src/debug/kernel-%s/linux-%s/" % \
+                            (relver, kerver)
                 else:
                     ver_line = disasm_str.splitlines()[0]
 
