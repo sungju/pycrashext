@@ -863,6 +863,7 @@ Options:
   -u, --memusage        Show memory usages by tasks
   -n, --nogroup         Show data in individual tasks
   -a, --all             Show all the output
+  -b, --budyinfo        Show /proc/buddyinfo like output
   -s, --slabtop         Show slabtop-like output
   -S SLABDETAIL, --slabdetail=SLABDETAIL
                         Show details of a slab
@@ -870,13 +871,13 @@ Options:
   -p PERCPU, --percpu=PERCPU
                         Convert percpu address into virtual address
   -t PERCPU_TYPE, --type=PERCPU_TYPE
-                        Specify percpu type : u8, u16, u32, u64, s8, s16, s32,
-                        s64, int
+                        Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int
   -d, --details         Show detailed output
   -v, --vm              Show 'vm' output with more details
   -e ERROR_CODE, --error=ERROR_CODE
                         Interpret page_fault error code
   -m, --numa            Show NUMA info
+
 
 crash> meminfo --memusage
 ======================================================================
@@ -941,6 +942,19 @@ node distances:
   node    0    1
     0:   10   21
     1:   21   10
+
+
+crash> meminfo -b
+Node 0, zone      DMA      0      0      0      0      0      0      0      0      1      1      3
+Node 0, zone    DMA32      8      7      6      5      5      5      7      7      6      6    619
+Node 0, zone   Normal    221    746    717    496    309    245    145     80     84     48   4974
+Node 0, zone  Movable      0      0      0      0      0      0      0      0      0      0      0
+Node 0, zone   Device      0      0      0      0      0      0      0      0      0      0      0
+Node 1, zone      DMA      0      0      0      0      0      0      0      0      0      0      0
+Node 1, zone    DMA32      0      0      0      0      0      0      0      0      0      0      0
+Node 1, zone   Normal    922    657    389    198    375    276    328    285    174     92   5718
+Node 1, zone  Movable      0      0      0      0      0      0      0      0      0      0      0
+Node 1, zone   Device      0      0      0      0      0      0      0      0      0      0      0
 ```
 
 ### revs ###
