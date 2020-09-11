@@ -274,3 +274,13 @@ Shows tracing information
 rprog("traceinfo", "trace information",
       "-h   - list available options",
       help)
+
+# added by amdas
+help='''
+SELinux status
+'''
+
+rprog("selinuxinfo",
+        "show selinux status",
+        "-h     list available options",
+        help)
