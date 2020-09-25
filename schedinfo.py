@@ -46,6 +46,15 @@ def show_sched_features(options):
         crashcolor.set_color(crashcolor.RESET)
 
 
+def show_rt_details(options):
+    sysctl_sched_rt_runtime = readSymbol("sysctl_sched_rt_runtime")
+    sysctl_sched_rt_period = readSymbol("sysctl_sched_rt_period")
+    print("sysctl_sched_rt_runtime = %d (%.2f s)" % (sysctl_sched_rt_runtime,
+                                                  sysctl_sched_rt_runtime/1000000))
+    print("sysctl_sched_rt_period = %d (%.2f s)" % (sysctl_sched_rt_period,
+                                                 sysctl_sched_rt_period/1000000))
+
+
 def schedinfo():
     op = OptionParser()
     op.add_option("-c", "--classes", dest="sched_classes", default=0,
@@ -57,6 +66,9 @@ def schedinfo():
     op.add_option("-f", "--sched_features", dest="sched_features", default=0,
                   action="store_true",
                   help="Show /sys/kernel/debug/sched_features")
+    op.add_option("-r", "--rt", dest="rt_details", default=0,
+                  action="store_true",
+                  help="Show some RT related values")
 
     (o, args) = op.parse_args()
 
@@ -65,6 +77,9 @@ def schedinfo():
 
     if (o.sched_features):
         show_sched_features(o)
+
+    if (o.rt_details):
+        show_rt_details(o)
 
 
 if ( __name__ == '__main__'):
