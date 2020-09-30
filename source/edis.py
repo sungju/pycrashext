@@ -313,6 +313,8 @@ def x86_stack_reg_op(words, result_str):
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rbp)" in op and "%rbp" in register_dict:
+                if op.startswith("*"):
+                    op = op[1:]
                 if len(op) > 6:
                     offset = int(op[:-6], 16)
                 else:
@@ -337,6 +339,8 @@ def x86_stack_reg_op(words, result_str):
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rsp)" in op:
+                if op.startswith("*"):
+                    op = op[1:]
                 if len(op) > 6: # check the case with no offset
                     offset = int(op[:-6], 16)
                 else: # (%rsp)

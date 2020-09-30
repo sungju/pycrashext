@@ -171,7 +171,7 @@ def convert_to_ps_state(state, task_struct):
     st = convert_state(state)
     if task_struct.sessionid == task_struct.tgid:
         st = st + "s"  # is a session leader
-    if pstree.get_thread_count(task_struct) > 0 and \
+    if epstree.get_thread_count(task_struct) > 0 and \
        task_struct == task_struct.group_leader: # Compare the address
         st = st + "l"
 

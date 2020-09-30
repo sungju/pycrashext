@@ -31,14 +31,15 @@ echo " example) http://<server address>:5000"
 echo -n "Please provide address> "
 read server_addr
 
+echo '' >> ~/.bash_profile
 if [ ! -z $server_addr ] && [ $server_addr != "" ]; then
+	sed -i '/export CRASHEXT_SERVER=.*$/d' ~/.bash_profile
 	echo "export CRASHEXT_SERVER=$server_addr" >> ~/.bash_profile
 fi
 
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
-echo '' >> ~/.bash_profile
-INSTALL_PATH=`echo "$(cd "$(dirname "$0")"; pwd)"`
+INSTALL_PATH=`echo "$(cd "$(dirname "$0")"; pwd)/source"`
 echo "export PYKDUMPPATH=$INSTALL_PATH:\$PYKDUMPPATH" >> ~/.bash_profile
 echo " [DONE]"
 
