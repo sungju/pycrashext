@@ -7,6 +7,7 @@
 from pykdump.API import *
 from optparse import OptionParser
 
+import re
 import sys
 import crashcolor
 
@@ -83,27 +84,58 @@ def show_seboot():
     return se_boot
 
 
+# searching super_block value in mount list
+def show_selinuxfs(sb):
+    mnt_list = exec_crash_command("mount")
+    mnt_list = mnt_list.splitlines()
+    print ('\n', mnt_list[0])
+
+    for mline in mnt_list:
+        word = mline.split()
+        if word[1] == sb:   
+            print (mline)
+            retval = 1
+             
+    if (retval == 1): 
+        del mnt_list[:] #deleting list content
+    
+    return retval
+    
+
 # Show mountfs information
 def show_fsmount():
-    pass #RFE
+    if (se_enb == 1):
+        if (symbol_exists('selinuxfs_mount')):
+            se_mnt = readSymbol('selinuxfs_mount')
+            print ('\n', se_mnt, '\n', se_mnt.mnt_sb)
+            # retreving super_block address
+            x = str(se_mnt.mnt_sb)
+            alist = x.split()   #print (alist[2])
+            sb = alist[2]
+            # removing 0x from starting
+            # removing > from end
+            sb = sb[2:-1]
+            retval = show_selinuxfs(sb)
+    else:
+        pass
 
 # defining options
 def selinuxinfo():
     op = OptionParser()
     
-    op.add_option("-s", "--status", dest="status", 
+    op.add_option("-d", "--detail", dest="detail", 
             default=0, action="store_true",
             help="show selinux status")
     op.add_option("-i", "--info", dest="info",
             default=0, action="store_true",
-            help="show selinux policy information")
+            help="show selinux basic policy")
     op.add_option("-f", "--fsmount", dest="fsmount",
             default=0, action="store_true",
             help="show selinux fs mount informationn")
 
     (opt, args) = op.parse_args()
 
-    if (opt.status):
+    if (opt.detail):
         show_status()
         show_ksymbol()
         sys.exit(0)
