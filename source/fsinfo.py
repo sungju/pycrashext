@@ -104,8 +104,11 @@ def all_filesystem_info(options):
             mnt_flags = vfsmnt.mnt_flags
 
 
-        if frozen_str != "SB_UNFROZEN":
+        if frozen_str == "SB_FREEZE_COMPLETE":
             crashcolor.set_color(crashcolor.LIGHTRED)
+        elif frozen_str == "SB_FREEZE_WRITE":
+            crashcolor.set_color(crashcolor.LIGHTCYAN)
+
         print ("SB: 0x%14x, frozen=%s, %s (%s) [%s], (%s)" %
                (sb, frozen_str,
                dentry_to_filename(sb.s_root), sb.s_id,
