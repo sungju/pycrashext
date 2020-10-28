@@ -570,6 +570,22 @@ def show_dumpe2fs(options):
 
 
 
+def show_fsnotify_group(options):
+    fsnotify_group = readSU("struct fsnotify_group",
+                            int(options.fsnotify_group, 16))
+    notification_tasklist = fsnotify_group.notification_waitq.task_list
+    for wq in readSUListFromHead(notification_tasklist,
+                                 "task_list",
+                                 "struct __wait_queue"):
+        func = addr2sym(wq.func)
+        print(wq)
+        if func == "pollwake":
+            pwq = readSU("struct poll_wqueues", wq.private)
+            print("\tfunc: %s, task: %s <%s>" %
+                  (func, pwq.polling_task, pwq.polling_task.comm))
+
+
+
 def fsinfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
@@ -596,6 +612,9 @@ def fsinfo():
     op.add_option("-p", "--dumpe2fs", dest="dumpe2fs", default="",
                   action="store",
                   help="Shows dumpe2fs like information")
+    op.add_option("-n", "--fsnotify", dest="fsnotify_group", default="",
+                  action="store",
+                  help="Show fsnotify details for fsnotify_group")
 
     (o, args) = op.parse_args()
 
@@ -619,6 +638,10 @@ def fsinfo():
         sys.exit(0)
     if (o.dumpe2fs != ""):
         show_dumpe2fs(o)
+        sys.exit(0)
+
+    if (o.fsnotify_group != ""):
+        show_fsnotify_group(o)
         sys.exit(0)
 
 
