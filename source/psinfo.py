@@ -510,7 +510,7 @@ def print_bt_search(bt_str, include_list):
         print(line)
 
 
-def do_searchstack(options):
+def do_searchstack(options, bt_flag):
     tt = Tasks.TaskTable()
     include_list = options.include.split(",")
     exclude_list = options.exclude.split(",")
@@ -518,7 +518,7 @@ def do_searchstack(options):
     for t in tt.allThreads():
         if options.task_name != "" and options.task_name not in t.comm:
             continue
-        stackdata = exec_crash_command("bt -f %d" % (t.pid))
+        stackdata = exec_crash_command("bt -%s %d" % (bt_flag, t.pid))
         if search_one_task(stackdata, include_list, exclude_list) == True:
             if options.nodetails == True:
                 print("%s" % exec_crash_command("bt %d" % (t.pid)))
@@ -548,7 +548,10 @@ def psinfo():
                         "5 : IDLE, 6 : DEADLINE")
     op.add_option("-s", "--searchstack", dest="searchstack", default=0,
                   action="store_true",
-                  help="Search each task stack to find value specified in include")
+                  help="Search each task stack to find value specified in include with 'bt -f'")
+    op.add_option("-S", "--Searchstack", dest="Searchstack", default=0,
+                  action="store_true",
+                  help="Search each task stack to find value specified in include with 'bt -F'")
     op.add_option("-n", "--nodetails", dest="nodetails", default=0,
                   action="store_true",
                   help="Shows no stack contents")
@@ -569,7 +572,11 @@ def psinfo():
 
 
     if (o.searchstack):
-        do_searchstack(o)
+        do_searchstack(o, "f")
+        sys.exit(0)
+
+    if (o.Searchstack):
+        do_searchstack(o, "F")
         sys.exit(0)
 
     if (o.aux):
