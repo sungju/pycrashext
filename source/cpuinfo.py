@@ -141,6 +141,27 @@ def show_tlb(options):
         crashcolor.set_color(crashcolor.RESET)
 
 
+def show_cpuidle_driver(options):
+    cpuidle_driver = readSymbol("cpuidle_curr_driver")
+    print("driver: %s (struct cpuidle_driver 0x%x)" %
+          (cpuidle_driver.name, cpuidle_driver))
+    print("\n%-8s : %-37s %s" % ("state", "enter", "enter_dead"))
+    print("=" * 76)
+    for state in cpuidle_driver.states:
+        if state.name == "":
+            continue
+        enter = enter_dead = "<nop>"
+        if state.enter != 0:
+            enter = addr2sym(state.enter)
+        if state.enter_dead != 0:
+            enter_dead = addr2sym(state.enter_dead)
+
+        print("%-8s : 0x%x = %-15s  0x%x = %-15s" %
+              (state.name, state.enter, enter, state.enter_dead, enter_dead))
+        print("\tdesc: %s, exit_latency: %d, power_usage: %d" %
+              (state.desc, state.exit_latency, state.power_usage))
+
+
 def cpuinfo():
     op = OptionParser()
     op.add_option("-f", "--cpufreq", dest="cpufreq", default=0,
@@ -152,6 +173,9 @@ def cpuinfo():
     op.add_option("-t", "--tlb", dest="tlb", default=0,
                   action="store_true",
                   help="Show CPU tlb state")
+    op.add_option("-d", "--driver", dest="driver", default=0,
+                  action="store_true",
+                  help="Show CPU idle driver")
 
     (o, args) = op.parse_args()
 
@@ -166,6 +190,10 @@ def cpuinfo():
 
     if (o.tlb):
         show_tlb(o)
+        sys.exit(0)
+
+    if (o.driver):
+        show_cpuidle_driver(o)
         sys.exit(0)
 
     # default action
