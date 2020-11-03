@@ -87,6 +87,32 @@ def show_network_protocols(options):
             print("\t%s = [%d, %d, %d]" % (name, min_val, default_val, max_val))
 
 
+def show_unix_sock(options, socket):
+    unix_sock = readSU("struct unix_sock", socket.sk)
+    print("\tunix_sock.peer <struct unix_sock 0x%x>" % unix_sock.peer)
+    print("\tunix_sock.addr", unix_sock.addr)
+
+
+def show_inet_sock(options, socket):
+    inet_sock = readSU("struct inet_sock", socket.sk)
+    print("sk_sndbuf = %d, sk_rcvbuf = %d" %
+          (inet_sock.sk.sk_sndbuf, inet_sock.sk.sk_rcvbuf))
+
+
+def show_socket_details(options):
+    socket = readSU("struct socket", int(options.socket_addr, 16))
+    if socket == 0 or socket == None:
+        print("Not a valid socket address")
+        return
+
+    print(socket)
+    print("state =", socket.state)
+    ops_name = addr2sym(socket.ops)
+    if ops_name == "unix_stream_ops":
+        show_unix_sock(options, socket)
+    elif ops_name == "inet_stream_ops":
+        show_inet_sock(options, socket)
+
 
 def netinfo():
     op = OptionParser()
@@ -102,6 +128,10 @@ def netinfo():
                   action="store_true",
                   help="Show network protocols")
 
+    op.add_option("-s", "--socket", dest="socket_addr", default="",
+                  action="store",
+                  help="Show socket details")
+
     (o, args) = op.parse_args()
 
     if (o.show_interface):
@@ -111,6 +141,11 @@ def netinfo():
 
     if (o.show_protocols):
         show_network_protocols(o)
+        sys.exit(0)
+
+
+    if (o.socket_addr != ""):
+        show_socket_details(o)
         sys.exit(0)
 
 
