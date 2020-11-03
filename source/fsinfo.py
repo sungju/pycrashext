@@ -533,7 +533,7 @@ def show_xfs_details(sb, fs_type):
     print("%-30s %d" % ("free realtime extents", xfs_sb.sb_frextents))
 
     print("")
-    print("# Avilable %d MBytes on %s" % ((xfs_sb.sb_blocksize * xfs_sb.sb_fdblocks) / (1024 * 1024), mnt_point))
+    print("# Available %d MBytes on %s" % ((xfs_sb.sb_blocksize * xfs_sb.sb_fdblocks) / (1024 * 1024), mnt_point))
     pass
 
 def show_superblock(sb):
