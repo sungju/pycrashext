@@ -502,7 +502,7 @@ def show_extX_details(sb, fs_type):
             print("%-30s %d" % ("Reserved GDT blocks:", extX_super_block.s_reserved_gdt_blocks))
         # That's enough for now. The remaining will be implemented later if needed
         print("")
-        print("# Avilable %d MBytes on %s" % ((s_free_blocks_count * s_block_size) / (1024 * 1024), mnt_point))
+        print("# Available %d MBytes on %s" % ((s_free_blocks_count * s_block_size) / (1024 * 1024), mnt_point))
     except:
         print("Can't read details for 0x%x (%s)" % (sb, dentry_to_filename(sb.s_root)), end='')
         return
