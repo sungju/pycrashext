@@ -142,7 +142,12 @@ def show_tlb(options):
 
 
 def show_cpuidle_driver(options):
+    if not symbol_exists("cpuidle_curr_driver"):
+        return
     cpuidle_driver = readSymbol("cpuidle_curr_driver")
+    if cpuidle_driver == 0 or cpuidle_driver == None:
+        print("No cpuidle_driver registered")
+        return
     print("driver: %s (struct cpuidle_driver 0x%x)" %
           (cpuidle_driver.name, cpuidle_driver))
     print("\n%-8s : %-37s %s" % ("state", "enter", "enter_dead"))
