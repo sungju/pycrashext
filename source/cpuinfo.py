@@ -167,6 +167,27 @@ def show_cpuidle_driver(options):
               (state.desc, state.exit_latency, state.power_usage))
 
 
+cpu_capability_list = {
+    0*32+ 9 : "X86_FEATURE_APIC",
+    0*32+22 : "X86_FEATURE_ACPI",
+    0*32+23 : "X86_FEATURE_MMX",
+    7*32+22 : "X86_FEATURE_USE_IBPB",
+    7*32+25 : "X86_FEATURE_IBRS",
+    7*32+26 : "X86_FEATURE_IBPB",
+    7*32+27 : "X86_FEATURE_STIBP",
+    7*32+30 : "X86_FEATURE_IBRS_ENHANCED",
+    18*32+31 : "X86_FEATURE_SPEC_CTRL_SSBD",
+}
+
+def show_cpu_capability(options):
+    boot_cpu_data = readSymbol("boot_cpu_data")
+    for cap_idx, cap_str in cpu_capability_list.items():
+        idx = int(cap_idx / 32)
+        bit = (1 << (cap_idx % 32))
+        addr = boot_cpu_data.x86_capability[idx]
+        print("%s %s" % (("Has" if (addr & bit) != 0 else "Does not have"), cap_str))
+
+
 def cpuinfo():
     op = OptionParser()
     op.add_option("-f", "--cpufreq", dest="cpufreq", default=0,
@@ -181,6 +202,9 @@ def cpuinfo():
     op.add_option("-d", "--driver", dest="driver", default=0,
                   action="store_true",
                   help="Show CPU idle driver")
+    op.add_option("-c", "--capability", dest="capability", default=0,
+                  action="store_true",
+                  help="Show CPU capability")
 
     (o, args) = op.parse_args()
 
@@ -199,6 +223,10 @@ def cpuinfo():
 
     if (o.driver):
         show_cpuidle_driver(o)
+        sys.exit(0)
+
+    if (o.capability):
+        show_cpu_capability(o)
         sys.exit(0)
 
     # default action
