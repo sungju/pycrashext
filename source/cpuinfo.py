@@ -168,15 +168,20 @@ def show_cpuidle_driver(options):
 
 
 cpu_capability_list = {
-    0*32+ 9 : "X86_FEATURE_APIC",
-    0*32+22 : "X86_FEATURE_ACPI",
-    0*32+23 : "X86_FEATURE_MMX",
-    7*32+22 : "X86_FEATURE_USE_IBPB",
-    7*32+25 : "X86_FEATURE_IBRS",
-    7*32+26 : "X86_FEATURE_IBPB",
-    7*32+27 : "X86_FEATURE_STIBP",
-    7*32+30 : "X86_FEATURE_IBRS_ENHANCED",
-    18*32+31 : "X86_FEATURE_SPEC_CTRL_SSBD",
+    (0*32+ 9) : "X86_FEATURE_APIC",
+    (0*32+22) : "X86_FEATURE_ACPI",
+    (0*32+23) : "X86_FEATURE_MMX",
+    (4*32+ 3) : "X86_FEATURE_MWAIT",
+    (7*32+ 0) : "X86_FEATURE_RING3MWAIT",
+    (7*32+ 2) : "X86_FEATURE_CPB",
+    (7*32+ 3) : "X86_FEATURE_EPB",
+    (7*32+ 8) : "X86_FEATURE_HW_PSTATE",
+    (7*32+22) : "X86_FEATURE_USE_IBPB",
+    (7*32+25) : "X86_FEATURE_IBRS",
+    (7*32+26) : "X86_FEATURE_IBPB",
+    (7*32+27) : "X86_FEATURE_STIBP",
+    (7*32+30) : "X86_FEATURE_IBRS_ENHANCED",
+    (18*32+31) : "X86_FEATURE_SPEC_CTRL_SSBD",
 }
 
 def show_cpu_capability(options):
@@ -185,7 +190,14 @@ def show_cpu_capability(options):
         idx = int(cap_idx / 32)
         bit = (1 << (cap_idx % 32))
         addr = boot_cpu_data.x86_capability[idx]
-        print("%s %s" % (("Has" if (addr & bit) != 0 else "Does not have"), cap_str))
+        if (addr & bit) != 0:
+            enabled = "enabled"
+            crashcolor.set_color(crashcolor.LIGHTCYAN)
+        else:
+            enabled = "not enabled"
+            crashcolor.set_color(crashcolor.RED)
+        print("%s %s" % (cap_str, enabled))
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def cpuinfo():
