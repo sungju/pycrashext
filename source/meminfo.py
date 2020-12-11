@@ -159,7 +159,7 @@ def show_numa_info(options):
                 for cpu in range(0, len(cpu_list)):
                     print(" %d" % cpu_list[cpu], end="")
                 print("")
-            if numa_meminfo == None:
+            if numa_meminfo == None or numa_memblk.nid < 0:
                 continue
             print("node %d : 0x%016x - 0x%016x" % (numa_memblk.nid, numa_memblk.start, numa_memblk.end))
             print("node %d size : %d MB" % (numa_memblk.nid, (numa_memblk.end - numa_memblk.start) / (1024 * 1024)))
@@ -168,6 +168,7 @@ def show_numa_info(options):
             return
         numa_distance = readSymbol("numa_distance")
         numa_distance_cnt = readSymbol("numa_distance_cnt")
+        print("")
         print("node distances:")
         print(" %5s" % ("node"), end="")
         for i in range(0, nr_blks):
