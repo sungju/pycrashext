@@ -85,6 +85,7 @@ def get_frozen_str(frozen_type):
 
 
 def all_filesystem_info(options):
+    fs_state_list = {} 
     super_blocks = sym2addr("super_blocks")
     for sb in readSUListFromHead(super_blocks,
                                          "s_list",
@@ -96,6 +97,7 @@ def all_filesystem_info(options):
             frozen = sb.s_frozen
 
         frozen_str = get_frozen_str(frozen)
+        fs_state_list[frozen_str] = fs_state_list[frozen_str] + 1 if frozen_str in fs_state_list else 1
 
         vfsmnt_addr = get_vfsmount_from_sb(sb)
         mnt_flags = 0
@@ -115,6 +117,10 @@ def all_filesystem_info(options):
                 sb.s_type.name,
                 get_mount_options(mnt_flags)))
         crashcolor.set_color(crashcolor.RESET)
+
+    print("")
+    for frozen_str in fs_state_list:
+        print("%25s = %d" % (frozen_str, fs_state_list[frozen_str]))
 
 
 def find_pid_from_file(options):
