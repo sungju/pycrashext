@@ -496,7 +496,7 @@ def check_slab(slab_addr, default_str):
      found = False
      for line in resultlines:
          words = line.split()
-         if found == True:
+         if found == True and words[0] != 'kmem:':
              return "SLAB: '%s'" % words[-1]
 
          if words[0] == 'CACHE':
