@@ -252,10 +252,6 @@ def interpret_one_line(one_line):
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
         result_str = stack_reg_op(words, result_str)
 
-    words = result_str.split()
-    if words[-2] == '#':
-        result_str = result_str + " " + find_symbol(words[-1])
-
     return result_str
 
 
@@ -500,7 +496,8 @@ def is_address(str):
 def find_symbol(str):
     try:
         sym = exec_crash_command("kmem %s" % str).splitlines()[0].strip()
-        if sym.startswith("PAGE") != True:
+        words = sym.split()
+        if len(words) > 2 and words[1].startswith("("):
             return " <" + "".join(sym.split()[2:]) + ">"
     except:
         pass
@@ -651,6 +648,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
         if is_disasm_line == True:
             line = interpret_one_line(line) # Retreive stack data if possible
+            if o.symbol:
+                words = line.split()
+                if words[-2] == '#':
+                    line = line + " " + find_symbol(words[-1])
+
         words = line.split()
         if len(words) > 2:
             if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
