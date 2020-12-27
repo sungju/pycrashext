@@ -252,6 +252,10 @@ def interpret_one_line(one_line):
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
         result_str = stack_reg_op(words, result_str)
 
+    words = result_str.split()
+    if words[-2] == '#':
+        result_str = result_str + " " + find_symbol(words[-1])
+
     return result_str
 
 
@@ -495,8 +499,8 @@ def is_address(str):
 
 def find_symbol(str):
     try:
-        sym = exec_crash_command("sym %s" % str)
-        if sym.startswith("sym:") != True:
+        sym = exec_crash_command("kmem %s" % str).splitlines()[0].strip()
+        if sym.startswith("PAGE") != True:
             return " <" + "".join(sym.split()[2:]) + ">"
     except:
         pass
