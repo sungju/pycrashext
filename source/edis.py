@@ -498,7 +498,7 @@ def find_symbol(str):
         sym = exec_crash_command("kmem %s" % str).splitlines()[0].strip()
         words = sym.split()
         if len(words) > 2 and words[1].startswith("("):
-            return " <" + "".join(sym.split()[2:]) + ">"
+            return " <" + " ".join(sym.split()[2:]) + ">"
     except:
         pass
 
