@@ -331,6 +331,51 @@ def show_task_group(options):
     crashcolor.set_color(crashcolor.RESET)
 
 
+total_count = 0
+
+def show_idr_layer(idr_layer, max_layer, depth = 0):
+    global total_count
+
+    space_str = "\t" * depth
+    print("%scount = %d" % (space_str, idr_layer.count))
+    print("%slayer = %d" % (space_str, idr_layer.layer))
+    int_size = getSizeOf("int")
+    long_size = getSizeOf("long")
+    IDR_BITS=8
+    IDR_SIZE=(1 << IDR_BITS)
+
+    total_count = total_count + idr_layer.count
+    if idr_layer.layer == 0:
+        return
+    idx = 0
+    for bitmap in idr_layer.bitmap:
+        print("%sbitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
+        while bitmap > 0:
+            if bitmap & 0x1 == 0x1:
+                print("%s  0x%x " % (space_str, idr_layer.ary[idx]))
+                show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1)
+            bitmap = bitmap >> 1
+            idx = idx + 1
+        print("")
+
+
+
+def show_mem_cgroup_idr(options):
+    global total_count
+
+    mem_cgroup_idr = readSymbol("mem_cgroup_idr")
+    print(mem_cgroup_idr)
+    print("hint = 0x%x" % (mem_cgroup_idr.hint))
+    print("top = 0x%x" % (mem_cgroup_idr.top))
+    print("layers = %d" % (mem_cgroup_idr.layers))
+    print("id_free_cnt = %d" % (mem_cgroup_idr.id_free_cnt))
+    print("cur = %d" % (mem_cgroup_idr.cur))
+
+    show_idr_layer(mem_cgroup_idr.top, mem_cgroup_idr.layers, 0)
+
+
+    print("Total allocated count = %d" % (total_count))
+
 
 def cgroupinfo():
     global empty_count
@@ -353,11 +398,19 @@ def cgroupinfo():
                   action="store_true",
                   help="Shows cgroup details")
 
+    op.add_option("-i", "--idr", dest="mem_cgroup_idr", default=0,
+                  action="store_true",
+                  help="mem_cgroup_idr detail")
+
     (o, args) = op.parse_args()
 
     cgroup_count = 0
     empty_count = 0
     cgroup_subsys_id_init()
+
+    if (o.mem_cgroup_idr):
+        show_mem_cgroup_idr(o)
+        sys.exit(0)
 
     if (o.taskgroup_list):
         show_task_group(o)
