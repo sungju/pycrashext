@@ -337,8 +337,9 @@ def show_idr_layer(idr_layer, max_layer, depth = 0):
     global total_count
 
     space_str = "\t" * depth
-    print("%scount = %d" % (space_str, idr_layer.count))
-    print("%slayer = %d" % (space_str, idr_layer.layer))
+    print("%sidr_layer 0x%x" % (space_str, idr_layer))
+    print("%s  count = %d" % (space_str, idr_layer.count))
+    print("%s  layer = %d" % (space_str, idr_layer.layer))
     int_size = getSizeOf("int")
     long_size = getSizeOf("long")
     IDR_BITS=8
@@ -349,10 +350,9 @@ def show_idr_layer(idr_layer, max_layer, depth = 0):
         return
     idx = 0
     for bitmap in idr_layer.bitmap:
-        print("%sbitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
+        print("%s  bitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
         while bitmap > 0:
             if bitmap & 0x1 == 0x1:
-                print("%s  0x%x " % (space_str, idr_layer.ary[idx]))
                 show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1)
             bitmap = bitmap >> 1
             idx = idx + 1
@@ -371,10 +371,11 @@ def show_mem_cgroup_idr(options):
     print("id_free_cnt = %d" % (mem_cgroup_idr.id_free_cnt))
     print("cur = %d" % (mem_cgroup_idr.cur))
 
+    print("")
     show_idr_layer(mem_cgroup_idr.top, mem_cgroup_idr.layers, 0)
 
 
-    print("Total allocated count = %d" % (total_count))
+    print("\nTotal allocated count = %d" % (total_count))
 
 
 def cgroupinfo():
