@@ -603,7 +603,7 @@ def show_tasks_memusage(options):
     result = exec_crash_command(crash_command)
     result_lines = result.splitlines(True)
     total_rss = 0
-    for i in range(1, len(result_lines) - 1):
+    for i in range(1, len(result_lines)):
         if (result_lines[i].find('>') == 0):
             result_lines[i] = result_lines[i].replace('>', ' ', 1)
         result_line = result_lines[i].split()
@@ -616,7 +616,6 @@ def show_tasks_memusage(options):
             rss = mem_usage_dict[pname] + int(rss)
 
         mem_usage_dict[pname] = int(rss)
-
 
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
