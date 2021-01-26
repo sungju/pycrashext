@@ -333,11 +333,15 @@ def show_task_group(options):
 
 total_count = 0
 
-def show_idr_layer(idr_layer, max_layer, depth = 0):
+def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1):
     global total_count
 
     space_str = "\t" * depth
-    print("%sidr_layer 0x%x" % (space_str, idr_layer))
+    idx_str = ""
+    if index >= 0:
+        idx_str = "ary[%d]" % index
+
+    print("%s%sidr_layer 0x%x" % (space_str, idx_str, idr_layer))
     print("%s  count = %d" % (space_str, idr_layer.count))
     print("%s  layer = %d" % (space_str, idr_layer.layer))
     int_size = getSizeOf("int")
@@ -351,11 +355,13 @@ def show_idr_layer(idr_layer, max_layer, depth = 0):
     idx = 0
     for bitmap in idr_layer.bitmap:
         print("%s  bitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
+        mask = 1
         while bitmap > 0:
-            if bitmap & 0x1 == 0x1:
-                show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1)
-            bitmap = bitmap >> 1
+            if bitmap & mask == mask:
+                show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1, idx)
+            bitmap = bitmap & ~mask
             idx = idx + 1
+            mask = mask << 1
         print("")
 
 
