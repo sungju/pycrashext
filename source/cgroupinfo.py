@@ -349,8 +349,8 @@ def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1):
     IDR_BITS=8
     IDR_SIZE=(1 << IDR_BITS)
 
-    total_count = total_count + idr_layer.count
     if idr_layer.layer == 0:
+        total_count = total_count + idr_layer.count
         return
     idx = 0
     for bitmap in idr_layer.bitmap:
