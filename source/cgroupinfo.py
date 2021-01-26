@@ -333,13 +333,31 @@ def show_task_group(options):
 
 total_count = 0
 
-def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1):
+def show_mem_cgroup(mem_cgroup_addr, depth, idx):
+    space_str = "\t" * depth
+    if mem_cgroup_addr == 0:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("%s%d: mem_cgroup 0x0" % (space_str, idx))
+        crashcolor.set_color(crashcolor.RESET)
+        return
+    try:
+        mem_cgroup = readSU("struct mem_cgroup", mem_cgroup_addr)
+    except:
+        return
+
+    print("%s%d: mem_cgroup 0x%x : id = %d, refcnt = %d" %
+          (space_str, idx, mem_cgroup, mem_cgroup.id,
+           mem_cgroup.refcnt.counter))
+
+
+def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1,
+                   show_all=False, show_details=False):
     global total_count
 
     space_str = "\t" * depth
     idx_str = ""
     if index >= 0:
-        idx_str = "ary[%d]" % index
+        idx_str = "ary[%d] : " % index
 
     print("%s%sidr_layer 0x%x" % (space_str, idx_str, idr_layer))
     print("%s  count = %d" % (space_str, idr_layer.count))
@@ -351,19 +369,33 @@ def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1):
 
     if idr_layer.layer == 0:
         total_count = total_count + idr_layer.count
-        return
+
     idx = 0
     for bitmap in idr_layer.bitmap:
-        print("%s  bitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
+        if idr_layer.layer > 0:
+            print("%s  bitmap[%d] = 0x%x" % (space_str, idx / (long_size * long_size), bitmap))
         mask = 1
-        while bitmap > 0:
+        while mask <= 0xffffffffffffffff:
             if bitmap & mask == mask:
-                show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1, idx)
+                if idr_layer.layer > 0:
+                    show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1,
+                                   idx, show_all, show_details)
+                elif show_details:
+                    show_mem_cgroup(idr_layer.ary[idx], depth + 1, idx)
+
+
+            elif show_all:
+                if idr_layer.layer > 0:
+                    show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1,
+                                   idx, show_all, show_details)
+                elif show_details:
+                    show_mem_cgroup(idr_layer.ary[idx], depth + 1, idx)
+
             bitmap = bitmap & ~mask
             idx = idx + 1
             mask = mask << 1
-        print("")
-
+        if idr_layer.layer > 0:
+            print("")
 
 
 def show_mem_cgroup_idr(options):
@@ -378,7 +410,8 @@ def show_mem_cgroup_idr(options):
     print("cur = %d" % (mem_cgroup_idr.cur))
 
     print("")
-    show_idr_layer(mem_cgroup_idr.top, mem_cgroup_idr.layers, 0)
+    show_idr_layer(mem_cgroup_idr.top, mem_cgroup_idr.layers, 0, -1,
+                  options.mem_cgroup_idr_all, options.show_detail)
 
 
     print("\nTotal allocated count = %d" % (total_count))
@@ -409,13 +442,17 @@ def cgroupinfo():
                   action="store_true",
                   help="mem_cgroup_idr detail")
 
+    op.add_option("-I", "--IDR", dest="mem_cgroup_idr_all", default=0,
+                  action="store_true",
+                  help="mem_cgroup_idr detail include free entries")
+
     (o, args) = op.parse_args()
 
     cgroup_count = 0
     empty_count = 0
     cgroup_subsys_id_init()
 
-    if (o.mem_cgroup_idr):
+    if (o.mem_cgroup_idr or o.mem_cgroup_idr_all):
         show_mem_cgroup_idr(o)
         sys.exit(0)
 
