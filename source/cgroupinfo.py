@@ -345,9 +345,9 @@ def show_mem_cgroup(mem_cgroup_addr, depth, idx):
     except:
         return
 
-    print("%s%d: mem_cgroup 0x%x : id = %d, refcnt = %d" %
+    print("%s%d: mem_cgroup 0x%x : id = %d, refcnt = %d, dead_count = %d" %
           (space_str, idx, mem_cgroup, mem_cgroup.id,
-           mem_cgroup.refcnt.counter))
+           mem_cgroup.refcnt.counter, mem_cgroup.dead_count.counter))
 
 
 def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1,
@@ -386,8 +386,10 @@ def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1,
 
             elif show_all:
                 if idr_layer.layer > 0:
+                    crashcolor.set_color(crashcolor.RED)
                     show_idr_layer(idr_layer.ary[idx], max_layer, depth + 1,
                                    idx, show_all, show_details)
+                    crashcolor.set_color(crashcolor.RESET)
                 elif show_details:
                     show_mem_cgroup(idr_layer.ary[idx], depth + 1, idx)
 
