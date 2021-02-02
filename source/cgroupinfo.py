@@ -71,14 +71,19 @@ def get_subsys_func_addr(subsys_id):
         return None
 
 
+cgroup_subsys_id_list = {}
+
 def cgroup_subsys_id_init():
     global cgroup_subsys_func_list
+    global cgroup_subsys_id_list
 
     cgroup_subsys_func_list = {}
+    cgroup_subsys_id_list = {}
     cgroup_subsys_id = EnumInfo("enum cgroup_subsys_id")
     for enum_name in cgroup_subsys_id:
         id = cgroup_subsys_id[enum_name]
         cgroup_subsys_func_list[id] = get_subsys_func_addr(enum_name)
+        cgroup_subsys_id_list[id] = enum_name
 
 
 def cgroup_details(task_group, cgroup, idx):
@@ -201,6 +206,49 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     crashcolor.set_color(crashcolor.RESET)
 
 
+def get_page_shift():
+    resultline = exec_crash_command("ptob 1")
+    if len(resultline) == 0:
+        return 0
+
+    words = resultline.split()
+    if len(words) < 2:
+        return 0
+
+    value = int(words[1], 16)
+    idx = 0
+    while (value > 0):
+        value = value >> 1
+        idx = idx + 1
+
+    return idx - 1
+
+
+PAGE_SIZE = 4096
+
+def print_mem_cgroup_details(idx, cur_cgroup_subsys_state):
+    offset = member_offset("struct mem_cgroup", "css")
+    if offset < 0:
+        return
+    idx_str = "  " * idx + "   "
+    mem_cgroup = readSU("struct mem_cgroup", cur_cgroup_subsys_state - offset)
+    usage_in_bytes = mem_cgroup.memory.count.counter * PAGE_SIZE
+    memory_limit_in_bytes = mem_cgroup.memory.limit * PAGE_SIZE
+    kmem_limit_in_bytes = mem_cgroup.kmem.limit * PAGE_SIZE
+    print("%sstruct mem_cgroup 0x%x" % (idx_str, mem_cgroup))
+    print("%smemory.limit_in_bytes = %ld, memory.kmem.limit_in_bytes = %ld" %
+          (idx_str, memory_limit_in_bytes, kmem_limit_in_bytes))
+    print("%smemory.usage_in_bytes = %ld" %
+          (idx_str, usage_in_bytes))
+
+
+def print_cgroup_details(idx, cur_cgroup):
+    for i in range(0, len(cur_cgroup.subsys)):
+        if cur_cgroup.subsys[i] != 0:
+            if cgroup_subsys_id_list[i] == "mem_cgroup_subsys_id":
+                print_mem_cgroup_details(idx, cur_cgroup.subsys[i])
+
+
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
     global empty_count
     global cgroup_count
@@ -241,6 +289,9 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         print ("%s%s%s at 0x%x (%d)" %
                ("  " * idx, "+--" if idx > 0 else "",
                 cgroup_name, cgroup, cgroup_counter))
+        if options.show_detail:
+            print_cgroup_details(idx, cgroup)
+
         if options.task_list:
             cgroup_task_list(cgroup, idx)
 #        if (cgroup.parent == 0):
@@ -422,6 +473,7 @@ def show_mem_cgroup_idr(options):
 def cgroupinfo():
     global empty_count
     global cgroup_count
+    global PAGE_SIZE
 
     op = OptionParser()
     op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
@@ -453,6 +505,7 @@ def cgroupinfo():
     cgroup_count = 0
     empty_count = 0
     cgroup_subsys_id_init()
+    PAGE_SIZE = 1 << get_page_shift()
 
     if (o.mem_cgroup_idr or o.mem_cgroup_idr_all):
         show_mem_cgroup_idr(o)
