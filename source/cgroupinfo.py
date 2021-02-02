@@ -256,14 +256,16 @@ def print_mem_cgroup_details(idx, cur_cgroup_subsys_state, cur_cgroup):
           (idx_str, memory_limit_in_bytes, kmem_limit_in_bytes))
     print("%smemory.usage_in_bytes = %ld" %
           (idx_str, usage_in_bytes))
-    print_task_list(idx, cur_cgroup)
 
 
 def print_cgroup_details(idx, cur_cgroup):
     for i in range(0, len(cur_cgroup.subsys)):
         if cur_cgroup.subsys[i] != 0:
+            subsys = cur_cgroup.subsys[i]
             if cgroup_subsys_id_list[i] == "mem_cgroup_subsys_id":
                 print_mem_cgroup_details(idx, cur_cgroup.subsys[i], cur_cgroup)
+
+    print_task_list(idx, cur_cgroup)
 
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
