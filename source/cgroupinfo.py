@@ -226,7 +226,23 @@ def get_page_shift():
 
 PAGE_SIZE = 4096
 
-def print_mem_cgroup_details(idx, cur_cgroup_subsys_state):
+
+def print_task_list(idx, cur_cgroup):
+    offset = member_offset("struct task_struct", "cg_list")
+    print("%stasks = " % ("  " * idx + "   "), end="")
+    for cg_link in readSUListFromHead(cur_cgroup.css_sets,
+                                           "cgrp_link_list",
+                                           "struct cg_cgroup_link"):
+        if cg_link.cg == 0:
+            continue
+        for task in readSUListFromHead(cg_link.cg.tasks,
+                                             "cg_list",
+                                             "struct task_struct"):
+            print("%d(%s) " % (task.pid, task.comm), end="")
+    print("")
+
+
+def print_mem_cgroup_details(idx, cur_cgroup_subsys_state, cur_cgroup):
     offset = member_offset("struct mem_cgroup", "css")
     if offset < 0:
         return
@@ -240,13 +256,14 @@ def print_mem_cgroup_details(idx, cur_cgroup_subsys_state):
           (idx_str, memory_limit_in_bytes, kmem_limit_in_bytes))
     print("%smemory.usage_in_bytes = %ld" %
           (idx_str, usage_in_bytes))
+    print_task_list(idx, cur_cgroup)
 
 
 def print_cgroup_details(idx, cur_cgroup):
     for i in range(0, len(cur_cgroup.subsys)):
         if cur_cgroup.subsys[i] != 0:
             if cgroup_subsys_id_list[i] == "mem_cgroup_subsys_id":
-                print_mem_cgroup_details(idx, cur_cgroup.subsys[i])
+                print_mem_cgroup_details(idx, cur_cgroup.subsys[i], cur_cgroup)
 
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
