@@ -470,6 +470,8 @@ def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1,
             print("")
 
 
+idr_max = 65534
+
 def show_mem_cgroup_idr(options):
     global total_count
 
@@ -486,7 +488,8 @@ def show_mem_cgroup_idr(options):
                   options.mem_cgroup_idr_all, options.show_detail)
 
 
-    print("\nTotal allocated count = %d" % (total_count))
+    print("\nTotal allocated count = %d out of %d" %
+          (total_count, idr_max))
 
 
 def cgroupinfo():
