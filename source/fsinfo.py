@@ -230,32 +230,54 @@ def show_file_details(options):
 
 
 def show_slab_dentry(options):
-    result_lines = exec_crash_command("kmem -S dentry").splitlines()
-    sb_dict = {}
-    for line in result_lines:
-        if line.startswith("  ["):
-            dentry_addr = int(line[3:-1], 16)
-            dentry   = readSU("struct dentry", dentry_addr)
-            if dentry.d_sb not in sb_dict:
-                sb_dict[dentry.d_sb] = 0
-            sb_dict[dentry.d_sb] = sb_dict[dentry.d_sb] + 1
-            if options.show_details:
-                print("0x%x %s" % (dentry_addr, dentry_to_filename(dentry_addr)))
+    try:
+        result_lines = exec_crash_command("kmem -S dentry").splitlines()
+        sb_dict = {}
+        slab_coming = False
+        for line in result_lines:
+            words = line.split()
+            if len(words) == 0:
+                continue
+            if words[0] == "SLAB":
+                slab_coming = True
+            elif slab_coming == True:
+                slab_coming = False
+                slab_lines = exec_crash_command("kmem -S 0x%s" % words[0])
+                for slab_line in slab_lines.splitlines():
+                    slab_line = slab_line.strip()
+                    dentry_addr = 0
+                    if slab_line.startswith("["):
+                        dentry_addr = int(slab_line[1:-1], 16)
 
-    print("\nsuberblock usage summary")
-    print("=" * 30)
-    print("%16s %8s %s" % ("super_block", "count", "root"))
-    print("-" * 30)
-    sorted_sb_dict = sorted(sb_dict.items(),
-                            key=operator.itemgetter(1), reverse=True)
-    total_count = 0
-    for sb, count in sorted_sb_dict:
-        print("0x%x %5d %s" %
-              (sb, count, dentry_to_filename(sb.s_root)))
-        total_count = total_count + count
-    print("-" * 40)
-    print("Total allocated object count = %d" % (total_count))
-    print("=" * 40)
+                    if dentry_addr > 0:
+                        dentry = readSU("struct dentry", dentry_addr)
+                        if dentry.d_sb not in sb_dict:
+                            sb_dict[dentry.d_sb] = 0
+                        sb_dict[dentry.d_sb] = sb_dict[dentry.d_sb] + 1
+                        if options.show_details:
+                            print("0x%x %s" % (dentry_addr, dentry_to_filename(dentry_addr)))
+
+        print("\nsuberblock usage summary")
+        print("=" * 30)
+        print("%16s %8s %s" % ("super_block", "count", "root"))
+        print("-" * 30)
+        sorted_sb_dict = sorted(sb_dict.items(),
+                                key=operator.itemgetter(1), reverse=True)
+        total_count = 0
+        for sb, count in sorted_sb_dict:
+            try:
+                print("0x%x %5d %s" %
+                      (sb, count, dentry_to_filename(sb.s_root)))
+            except:
+                pass
+
+            total_count = total_count + count
+        print("-" * 40)
+        print("Total allocated object count = %d" % (total_count))
+        print("=" * 40)
+    except Exception as e:
+        print(e)
+        pass
 
 
 def show_caches(options):
@@ -298,6 +320,37 @@ def show_caches(options):
     print("%18s %10d %10d" %\
           ("Total", total_dentry_unused, total_inodes_unused))
 
+
+def show_ext4_inode_cache_details(options, address):
+    ext4_inode_info = readSU("struct ext4_inode_info", int(address, 16))
+    options.inode = "%x" % ext4_inode_info.vfs_inode
+    show_inode_details(options)
+
+
+def show_ext4_inode_cache(options):
+    try:
+        slab_coming = False
+        lines = exec_crash_command("kmem -S ext4_inode_cache")
+        for line in lines.splitlines():
+            words = line.split()
+            if words[0] == "SLAB":
+                slab_coming = True
+            elif slab_coming == True:
+                slab_coming = False
+                slab_lines = exec_crash_command("kmem -S 0x%s" % words[0])
+                for slab_line in slab_lines.splitlines():
+                    slab_line = slab_line.strip()
+                    if slab_line.startswith("["):
+                        slab_line = slab_line[1:-1]
+                        show_ext4_inode_cache_details(options, slab_line)
+    except:
+        pass
+
+
+def show_cached_details(options):
+    ext4_inode_cachep = readSymbol("ext4_inode_cachep")
+    if ext4_inode_cachep != None and ext4_inode_cachep != 0:
+        show_ext4_inode_cache(options)
 
 BLOCK_SIZE_BITS = 10
 BLOCKSIZE = 1 << BLOCK_SIZE_BITS
@@ -609,6 +662,9 @@ def fsinfo():
     op.add_option("-c", "--caches", dest="show_caches", default=0,
                   action="store_true",
                   help="Show dentry/inodes caches")
+    op.add_option("-C", "--CACHED", dest="show_cached_details", default=0,
+                  action="store_true",
+                  help="Show CACHED details")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -641,6 +697,9 @@ def fsinfo():
         sys.exit(0)
     if (o.show_caches):
         show_caches(o)
+        sys.exit(0)
+    if (o.show_cached_details):
+        show_cached_details(o)
         sys.exit(0)
     if (o.dumpe2fs != ""):
         show_dumpe2fs(o)
