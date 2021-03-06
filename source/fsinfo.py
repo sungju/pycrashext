@@ -352,6 +352,80 @@ def show_cached_details(options):
     if ext4_inode_cachep != None and ext4_inode_cachep != 0:
         show_ext4_inode_cache(options)
 
+
+I_FREEING = (1 << 5)
+I_WILL_FREE = (1 << 4)
+I_NEW = (1 << 3)
+I_SKIP_STATE = I_FREEING | I_WILL_FREE | I_NEW
+
+MS_BORN = (1 << 29)
+
+page_caches = {}
+
+#
+# There's a little bit of differece between the calculated totla
+# and the output of kmem -i (CACHED).
+def show_page_caches(options):
+    global page_caches
+    page_caches = {}
+    super_blocks = readSymbol("super_blocks")
+    for sb in readSUListFromHead(super_blocks,
+                                 "s_list",
+                                 "struct super_block"):
+        if sb.s_instances.pprev == 0:
+            continue
+        if sb.s_root != 0 and (sb.s_flags & MS_BORN) != 0:
+            show_pagecache_sb(sb, options)
+
+
+    sorted_sb_dict = sorted(page_caches.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    total_count = 0
+    exclude_count = 0
+    print("=" * 60)
+    print("%18s %9s %s" %\
+          ("super_block   ", "pages", "root"))
+    print("-" * 60)
+    for sb, count in sorted_sb_dict:
+        try:
+            total_count = total_count + count
+            filename = dentry_to_filename(sb.s_root)
+            if filename == "<blank>" or filename == "/dev/":
+                exclude_count = exclude_count + count
+                continue
+            print("0x%x %9d %s" %
+                  (sb, count, filename))
+        except:
+            pass
+
+    print("-" * 60)
+    print("Total number of page caches = %d" % (total_count))
+    print("   (exclude /dev/ and unnamed root) = %d" % (total_count - exclude_count))
+    print("=" * 60)
+
+
+def show_pagecache_sb(sb, options):
+    global page_caches
+
+    for inode in readSUListFromHead(sb.s_inodes,
+                                    "i_sb_list",
+                                    "struct inode",
+                                   maxel=10000000):
+        mapping = inode.i_mapping
+        if mapping.nrpages == 0 or (inode.i_state & I_SKIP_STATE) != 0:
+            continue
+
+        if sb not in page_caches:
+            page_caches[sb] = 0
+        page_caches[sb] = page_caches[sb] + mapping.nrpages
+
+        if options.show_details:
+            options.inode = "%x" % inode
+            print("CACHED_PAGES : %d" % (mapping.nrpages))
+            show_inode_details(options)
+
+
+
 BLOCK_SIZE_BITS = 10
 BLOCKSIZE = 1 << BLOCK_SIZE_BITS
 
@@ -665,6 +739,9 @@ def fsinfo():
     op.add_option("-C", "--CACHED", dest="show_cached_details", default=0,
                   action="store_true",
                   help="Show CACHED details")
+    op.add_option("-r", "--page_caches", dest="show_page_caches", default=0,
+                  action="store_true",
+                  help="Show page caches")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
@@ -700,6 +777,9 @@ def fsinfo():
         sys.exit(0)
     if (o.show_cached_details):
         show_cached_details(o)
+        sys.exit(0)
+    if (o.show_page_caches):
+        show_page_caches(o)
         sys.exit(0)
     if (o.dumpe2fs != ""):
         show_dumpe2fs(o)
