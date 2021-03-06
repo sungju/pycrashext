@@ -392,7 +392,6 @@ def show_page_caches(options):
             filename = dentry_to_filename(sb.s_root)
             if filename == "<blank>" or filename == "/dev/":
                 exclude_count = exclude_count + count
-                continue
             print("0x%x %9d %s" %
                   (sb, count, filename))
         except:
