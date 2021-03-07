@@ -183,8 +183,18 @@ def show_inode_details(options):
         dentry = readSU('struct dentry', dentry_addr)
         dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
         print(dentry_details)
+    elif inode.i_mapping != 0:
+        i_mapping = inode.i_mapping
+        print("inode = 0x%x, mapping = 0x%x, page flags = 0x%x" %
+              (inode, i_mapping, i_mapping.flags))
+        if i_mapping.backing_dev_info != 0:
+            bdi = i_mapping.backing_dev_info
+            print("\tbacking_dev_info 0x%x : %s %s" %
+                  (bdi, bdi.name, bdi.dev.kobj.name))
+        print("")
 
     print("%s" % (get_inode_details(inode)))
+    print("")
 
 
 def get_inode_details(inode):
@@ -392,6 +402,9 @@ def show_page_caches(options):
             filename = dentry_to_filename(sb.s_root)
             if filename == "<blank>" or filename == "/dev/":
                 exclude_count = exclude_count + count
+                s_op_name = addr2sym(sb.s_op)
+                if s_op_name == "shmem_ops":
+                    filename = "shared memory"
             print("0x%x %9d %-12s %s" %
                   (sb, count, sb.s_id, filename))
         except:
