@@ -383,8 +383,8 @@ def show_page_caches(options):
     total_count = 0
     exclude_count = 0
     print("=" * 60)
-    print("%18s %9s %s" %\
-          ("super_block   ", "pages", "root"))
+    print("%18s %9s %-12s %s" %\
+          ("super_block   ", "pages", "s_id", "root"))
     print("-" * 60)
     for sb, count in sorted_sb_dict:
         try:
@@ -392,8 +392,8 @@ def show_page_caches(options):
             filename = dentry_to_filename(sb.s_root)
             if filename == "<blank>" or filename == "/dev/":
                 exclude_count = exclude_count + count
-            print("0x%x %9d %s" %
-                  (sb, count, filename))
+            print("0x%x %9d %-12s %s" %
+                  (sb, count, sb.s_id, filename))
         except:
             pass
 
