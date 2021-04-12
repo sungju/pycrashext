@@ -844,6 +844,12 @@ def show_vm(options):
             private_mem_pages = private_mem_pages + pages_list[0]
             shared_mem_pages = shared_mem_pages + pages_list[1]
             print(", P: %d, S: %d" % (pages_list[0], pages_list[1]), end="")
+            vm_ops = readSU("struct vm_area_struct", int(words[0], 16)).vm_ops
+            try:
+                vm_ops_name = " (" + addr2sym(vm_ops) + ")"
+            except:
+                vm_ops_name = ""
+            print(", %x%s" % (vm_ops, vm_ops_name), end="")
         print("")
         crashcolor.set_color(crashcolor.RESET)
 
