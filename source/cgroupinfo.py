@@ -423,6 +423,8 @@ def show_mem_cgroup(mem_cgroup_addr, depth, idx):
 def show_idr_layer(idr_layer, max_layer, depth = 0, index=-1,
                    show_all=False, show_details=False):
     global total_count
+    if idr_layer == 0:
+        return
 
     space_str = "\t" * depth
     idx_str = ""
