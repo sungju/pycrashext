@@ -22,8 +22,8 @@ END_ARCHITECTURE: i386 i686 x86_64 athlon
    unless the word is matching with the predefined keywords. 
 -----------------------------------------------------------------
 
-ARCHITECTURE: arm
-REGISTERS: arm
+ARCHITECTURE: arm aarch64
+REGISTERS: arm aarch64
 ** function parameters for ARM **
 r0 - r29: General Purpose Registers
     r0 - r7     : Arguments & Result
@@ -37,8 +37,8 @@ r30: This is the Link Register (LR)
 
 Procedure Call Standard for the Arm 64-bit Architecture
 https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
-END_REGISTERS: arm
-END_ARCHITECTURE: arm
+END_REGISTERS: arm aarch64
+END_ARCHITECTURE: arm aarch64
 
 ARCHITECTURE: s390
 REGISTERS: s390

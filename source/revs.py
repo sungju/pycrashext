@@ -47,6 +47,8 @@ def show_registers():
         show_register_details(arch)
     if (sys_info.machine.startswith("arm")):
         show_register_details("arm")
+    if (arch in ("aarch64")):
+        show_register_details("aarch64")
     if (sys_info.machine.startswith("ppc")):
         show_register_details("ppc")
     if (sys_info.machine.startswith("s390")):
