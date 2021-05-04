@@ -74,7 +74,7 @@ def read_database(filename):
 
         arch = sys_info.machine
         arch_total_msg = ""
-        with open(source_file, 'r') as f:
+        with open(source_file, 'r', encoding="utf-8") as f:
             for line in f:
                 words = line.split(":")
                 if words[0] == "ARCHITECTURE":
