@@ -897,11 +897,15 @@ def edis():
         encode_url = ""
 
     if encode_url != None and encode_url != "":
-        op.add_option("-n", "--noaction",
-                      action="store_true",
-                      dest="noaction",
-                      default=False,
-                      help="Only colorising the output and not connection to server")
+        noaction_default=False
+    else:
+        noaction_default=True
+
+    op.add_option("-n", "--noaction",
+                  action="store_true",
+                  dest="noaction",
+                  default=noaction_default,
+                  help="Only colorising the output and not connection to server")
 
     op.add_option("-s", "--sourceonly",
                   action="store_true",
