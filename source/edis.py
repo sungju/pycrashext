@@ -461,7 +461,7 @@ def set_asm_colors():
             "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    elif (arch.startswith("arm") or (arch in ("aarch64")):
+    elif (arch.startswith("arm") or (arch in ("aarch64"))):
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
@@ -783,7 +783,7 @@ def set_call_op_list():
         call_op_set = [ "call", "callq" ]
     elif (arch.startswith("ppc")):
         call_op_set = [ "bl", "ctrl" ]
-    elif (arch.startswith("arm") or (arch in ("aarch64")):
+    elif (arch.startswith("arm") or (arch in ("aarch64"))):
         call_op_set = [ "bl", "bic", "bics", "blx" ]
     else:
         call_op_set = ["callq" ]
