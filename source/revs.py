@@ -157,11 +157,11 @@ def revs():
     (o, args) = op.parse_args()
 
 
+    load_asm_set()
     if (o.Asm != ""):
         show_asm_details(o.Asm)
         sys.exit(0)
 
-    load_asm_set()
     if (o.Regs):
         show_registers()
         sys.exit(0)
