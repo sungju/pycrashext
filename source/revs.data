@@ -35,6 +35,10 @@ r0 - r29: General Purpose Registers
     r29         : Frame pointer
 r30: This is the Link Register (LR)
 
+xzr, wzr: The zero registers. Always read as 0 and ignore writes.
+sp: Stack pointer
+pc: Program counter
+
 Procedure Call Standard for the Arm 64-bit Architecture
 https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
 END_REGISTERS: arm aarch64
