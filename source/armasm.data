@@ -1,0 +1,41 @@
+--------------------------------------------------
+https://wiki.cdot.senecacollege.ca/wiki/AArch64_Register_and_Instruction_Quick_Start
+--------------------------------------------------
+
+ARCHITECTURE: arm aarch64
+INSTRUCTION: ALL
+
+add r0,r1,r2      // load r0 with r1+r2
+add r0,r1,99      // load r0 with r1+99
+adr r0,label      // load r0 with the address label (this actually calculates an address from the PC plus an offset)
+bl label          // branch (with link) to label - this is a procedure / subroutine / function call
+br label          // branch to label - this is a goto
+br register       // branch to the address in register
+b.eq label        // branch to label if equal
+b.ne label        // branch to label if not equal
+b.lt label        // branch to label if less
+b.gt label        // branch to label if greater
+cmp r0,r1         // compare register r0 with register r1. The comparison sets flags in the processor status register which affect conditional branches.
+cmp r0,99         // compare the number 99 with register r0. The comparison sets flags in the processor status register which affect conditional branches.
+ldr r0,[r1,0]     // load register r0 from the address pointed to by (r1 + (0 * size)) where size is 8 bytes for 64-bit stores, 4 bytes for 32-bit stores
+ldr w0,[r1,0]     // like above but reads 32 bits only - note the use of w0 instead of r0 for the source register name
+ldrb w0,[r1,0]    // like above but reads 1 byte (8 bits) only - note the use of w0 for the source register name
+ldur r0,[r1,0]    // load register r0 from the address pointed to by (r1 + 0) - the mnemonic means "load unscaled register"
+mov r0,r1         // move data from r1 to r0
+mov r0,99         // load r0 with 99 (only certain immediate values are possible)
+ret               // return from subroutine (counterpart to bl)
+str r0,[r1,0]     // store register r0 to address pointed to by (r1 + (0 * size)) where size is 8 bytes for 64-bit stores
+strb w0,[r1,0]    // like str but writes one byte only - note the use of w0 for the source register name
+stur r0,[r1,0]    // store register r0 to the address pointed to by (r1 + 0) - the mnemonic means "store unscaled register"
+svc 0             // perform a syscall
+msub r0,r1,r2,r3  // load r0 with r3-(r1*r2) (useful for calculating remainders)
+madd r0,r1,r2,r3  // load r0 with r3+(r1*r2)
+mul r0,r1,r2      // load r0 with r1*r2 (actually an alias - see ARM ARM)
+push r0           // push r0 onto the stack
+pop r0            // pop r0 off the stack
+udiv r0,r1,r2     // unsigned - divide r1 by r2, places quotient into r0 - remainder is not calculated (use msub)
+
+
+END_INSTRUCTION: ALL
+
+END_ARCHITECTURE: arm aarch64

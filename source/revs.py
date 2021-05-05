@@ -55,6 +55,18 @@ def show_registers():
         show_register_details("s390")
 
 
+def load_asm_set():
+    read_database("revs.data")
+
+    arch = sys_info.machine
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        read_database("x86asm.data")
+    if (sys_info.machine.startswith("arm")):
+        read_database("armasm.data")
+    if (arch in ("aarch64")):
+        read_database("armasm.data")
+
+
 def is_arch_match(arch, arch_list_str):
     arch_list = arch_list_str.split()
     for arch_entry in arch_list:
@@ -145,13 +157,11 @@ def revs():
     (o, args) = op.parse_args()
 
 
-    read_database("revs.data")
-    read_database("x86asm.data")
-
     if (o.Asm != ""):
         show_asm_details(o.Asm)
         sys.exit(0)
 
+    load_asm_set()
     if (o.Regs):
         show_registers()
         sys.exit(0)
