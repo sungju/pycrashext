@@ -38,4 +38,29 @@ udiv r0,r1,r2     // unsigned - divide r1 by r2, places quotient into r0 - remai
 
 END_INSTRUCTION: ALL
 
+INSTRUCTION: STP LDP
+** Load pair (LDP) and store pair (STP) **
+
+These pair instructions transfer two registers to and from memory. The first instruction loads [X0] into W3, and loads [X0 + 4] into W7:
+
+LDP        W3, W7, [X0]
+
+This second instruction stores D0 into [X4] and stores D1 to [X4 + 8]:
+
+STP        D0, D1, [X4]            
+
+Load and store pair instructions are often used for pushing, and popping off the stack. This first instruction pushes X0 and X1 onto the stack:
+
+STP        X0, X1, [SP, #-16]!
+
+This second instruction pops X0 and X1 from the stack:
+
+LDP        X0, X1, [SP], #16
+Remember that in AArch64 the stack-pointer must be 128-bit aligned.
+
+* Note: It is from https://developer.arm.com/documentation/102374/0101/Loads-and-stores---load-pair-and-store-pair
+
+END_INSTRUCTION: STP LDP
+
+
 END_ARCHITECTURE: arm aarch64

@@ -418,7 +418,9 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackfound = 1
 
     elif (arch.startswith("arm")):
-        stack_op_dict = {}
+        stack_op_dict = {
+            "stp": 0,
+        }
         stack_unit = 8
         stack_offset = 0
     elif (arch.startswith("ppc")):
@@ -465,6 +467,9 @@ def set_asm_colors():
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
+            "stp" : crashcolor.RED | crashcolor.UNDERLINE,
+            "ldp" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "ret" : crashcolor.MAGENTA | crashcolor.BOLD,
         }
     elif (arch.startswith("ppc")):
         asm_color_dict = {
