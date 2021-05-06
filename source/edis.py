@@ -291,6 +291,24 @@ def ppc_stack_reg_op(words, result_str):
     return result_str
 
 
+def get_stack_offset(stack_word):
+    op_words = stack_word.split(",")
+    if len(op_words) > 1:
+        if op_words[1].startswith("#"):
+            op = op_words[1][1:]
+        else:
+            op = op_words[1]
+        if op.startswith("0x"):
+            offset = int(op, 16)
+        else:
+            offset = int(op)
+    else:
+        offset = 0
+
+    return offset
+
+
+
 def arm_stack_reg_op(words, result_str):
     # 0xffff8000103fba34 <do_epoll_pwait+16>:	mov	x29, sp
     if words[2] == "mov" and words[len(words)-1] == "sp":
@@ -319,15 +337,7 @@ def arm_stack_reg_op(words, result_str):
             update_sp=False
 
         stack_word = stack_word[1:stack_word.find("]")]
-        op_words = stack_word.split(",")
-        if op_words[1].startswith("#"):
-            op = op_words[1][1:]
-        else:
-            op = op_words[1]
-        if op.startswith("0x"):
-            offset = int(op, 16)
-        else:
-            offset = int(op)
+        offset = get_stack_offset(stack_word)
 
         if update_sp == True:
             stackaddr_list = register_dict["%rsp"]
@@ -346,13 +356,78 @@ def arm_stack_reg_op(words, result_str):
             data2 = ("%x" % read_stack_data(actual_addr + 8, stack_unit)).zfill(stack_unit *2)
 
             if internal_count == 0:
-                result_str = "%s    ; 0x%s, 0x%s" % (result_str, data, data2)
+                result_str = "%s    ; 0x%s 0x%s" % (result_str, data, data2)
             else:
-                result_str = "%s, 0x%s, 0x%s" % (result_str, data, data2)
+                result_str = "%s, 0x%s 0x%s" % (result_str, data, data2)
             internal_count = internal_count + 1
-    elif words[2] == "ldp" and words[len(words)-2].find("[sp]") >= 0:
-        # 0xffff80001002afc4 <do_el0_svc+48>:	ldp	x29, x30, [sp],#16
-        pass
+    elif words[2] == "ldp":
+        if words[len(words)-2].find("[sp") >= 0:
+            # Stack Pop
+            # Example:
+            # 0xffff80001002afc4 <do_el0_svc+48>:	ldp	x29, x30, [sp],#16
+            # sp = sp - 64
+            # [sp] = x29
+            # [sp + 8] = x30
+            stack_word = words[len(words)-2]
+            stack_op = words[len(words) - 1][1:]
+            if stack_op.startswith("0x"):
+                sp_offset = int(stack_op, 16)
+            else:
+                sp_offset = int(stack_op)
+            update_sp=True
+        else:
+            # Normal stack access
+            # Example:
+            # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
+            # [sp + 16] = x19
+            # [sp + 16 + 8] = x20
+            stack_word = words[len(words)-1]
+            update_sp=False
+
+        stack_word = stack_word[1:stack_word.find("]")]
+        offset = get_stack_offset(stack_word)
+        internal_count = 0
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + offset
+            data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
+            data2 = ("%x" % read_stack_data(actual_addr + 8, stack_unit)).zfill(stack_unit *2)
+
+            if internal_count == 0:
+                result_str = "%s    ; 0x%s 0x%s" % (result_str, data, data2)
+            else:
+                result_str = "%s, 0x%s 0x%s" % (result_str, data, data2)
+            internal_count = internal_count + 1
+
+        if update_sp == True:
+            stackaddr_list = register_dict["%rsp"]
+            new_stackaddr_list = []
+            for stackaddr in stackaddr_list:
+                stackaddr = stackaddr + sp_offset
+                new_stackaddr_list.append(stackaddr)
+            register_dict["%rsp"] = new_stackaddr_list
+            sp_offset = 0
+    else:
+        stack_word = ""
+        for word in words:
+            if word.startswith("[sp"):
+                stack_word = word
+                break
+
+        if stack_word != "":
+            stack_word = stack_word[1:stack_word.find("]")]
+            offset = get_stack_offset(stack_word)
+
+            internal_count = 0
+            for stackaddr in register_dict["%rsp"]:
+                actual_addr = stackaddr + offset
+                data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
+
+                if internal_count == 0:
+                    result_str = "%s    ; 0x%s" % (result_str, data)
+                else:
+                    result_str = "%s, 0x%s" % (result_str, data)
+                internal_count = internal_count + 1
+
 
 
     return result_str

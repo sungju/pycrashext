@@ -25,15 +25,15 @@ END_ARCHITECTURE: i386 i686 x86_64 athlon
 ARCHITECTURE: arm aarch64
 REGISTERS: arm aarch64
 ** function parameters for ARM **
-r0 - r29: General Purpose Registers
-    r0 - r7     : Arguments & Result
-    r8          : Indirect result (struct) location
-    r9 - r15    : Spare temp registers
-    r16 - r17   : Intra-call registers (PLT, linker)
-    r18         : Platform specific (TLS)
-    r19 - r28   : Callee-saved registers
-    r29         : Frame pointer
-r30: This is the Link Register (LR)
+x0 - x29: General Purpose Registers
+    x0 - x7     : Arguments & Result
+    x8          : Indirect result (struct) location
+    x9 - x15    : Spare temp registers
+    x16 - x17   : Intra-call registers (PLT, linker)
+    x18         : Platform specific (TLS)
+    x19 - x28   : Callee-saved registers
+    x29         : Frame pointer
+x30: This is the Link Register (LR)
 
 xzr, wzr: The zero registers. Always read as 0 and ignore writes.
 sp: Stack pointer
