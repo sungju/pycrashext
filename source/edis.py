@@ -259,8 +259,8 @@ def stack_reg_op(words, result_str):
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
         result_str = x86_stack_reg_op(words, result_str)
-    elif (arch.startswith("arm")):
-        pass
+    elif (arch.startswith("arm") or (arch in ("aarch64"))):
+        result_str = arm_stack_reg_op(words, result_str)
     elif (arch.startswith("ppc")):
         result_str = ppc_stack_reg_op(words, result_str)
 
@@ -287,6 +287,73 @@ def ppc_stack_reg_op(words, result_str):
                     internal_count = internal_count + 1
 
                 break
+
+    return result_str
+
+
+def arm_stack_reg_op(words, result_str):
+    # 0xffff8000103fba34 <do_epoll_pwait+16>:	mov	x29, sp
+    if words[2] == "mov" and words[len(words)-1] == "sp":
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
+            reg_list.append(actual_addr)
+        register_dict["%rbp"] = reg_list
+
+    elif words[2] == "stp" and words[len(words)-1].find("[sp,") >= 0:
+        stack_word = words[len(words)-1]
+        if stack_word.endswith("]!"):
+            # Stack Push
+            # Example:
+            # 0xffff800010386560 <vfs_read+16>:	stp	x29, x30, [sp,#-64]!
+            # sp = sp - 64
+            # [sp] = x29
+            # [sp + 8] = x30
+            update_sp=True
+        else:
+            # Normal stack access
+            # Example:
+            # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
+            # [sp + 16] = x19
+            # [sp + 16 + 8] = x20
+            update_sp=False
+
+        stack_word = stack_word[1:stack_word.find("]")]
+        op_words = stack_word.split(",")
+        if op_words[1].startswith("#"):
+            op = op_words[1][1:]
+        else:
+            op = op_words[1]
+        if op.startswith("0x"):
+            offset = int(op, 16)
+        else:
+            offset = int(op)
+
+        if update_sp == True:
+            stackaddr_list = register_dict["%rsp"]
+            new_stackaddr_list = []
+            for stackaddr in stackaddr_list:
+                stackaddr = stackaddr + offset
+                new_stackaddr_list.append(stackaddr)
+            register_dict["%rsp"] = new_stackaddr_list
+            offset = 0
+
+
+        internal_count = 0
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + offset
+            data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
+            data2 = ("%x" % read_stack_data(actual_addr + 8, stack_unit)).zfill(stack_unit *2)
+
+            if internal_count == 0:
+                result_str = "%s    ; 0x%s, 0x%s" % (result_str, data, data2)
+            else:
+                result_str = "%s, 0x%s, 0x%s" % (result_str, data, data2)
+            internal_count = internal_count + 1
+    elif words[2] == "ldp" and words[len(words)-2].find("[sp]") >= 0:
+        # 0xffff80001002afc4 <do_el0_svc+48>:	ldp	x29, x30, [sp],#16
+        pass
+
 
     return result_str
 
@@ -417,12 +484,30 @@ def set_stack_data(disasm_str, disaddr_str):
             if words[2] == funcname and words[4] == disaddr_str:
                 stackfound = 1
 
-    elif (arch.startswith("arm")):
+    elif (arch.startswith("arm") or (arch in ("aarch64"))):
         stack_op_dict = {
-            "stp": 0,
         }
         stack_unit = 8
         stack_offset = 0
+
+        stackfound = 0
+        for one_line in bt_str.splitlines():
+            words = one_line.split()
+            if len(words) > 0:
+                if words[0] == "[exception":
+                    if words[2].startswith(funcname + "+"):
+                        stackfound = 1
+                    continue
+
+            if (len(words) < 5):
+                continue
+            if words[0].startswith("#") and stackfound == 1:
+                stackaddr_list.append(int(words[1][1:-1], 16))
+                stackfound = 0
+
+            if words[2] == funcname and words[4] == disaddr_str:
+                stackfound = 1
+
     elif (arch.startswith("ppc")):
         stack_op_dict = {}
         stack_unit = 8
