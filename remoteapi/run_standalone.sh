@@ -47,5 +47,34 @@ if [ -z $RHEL_SOURCE_DIR ] || [ $RHEL_SOURCE_DIR == "" ]; then
 	exit -1
 fi
 
+set_bg() {
+        if [[ "$unamestr" == 'Linux' ]]; then
+		echo "" -n
+	elif [[ "$unamestr" == 'Darwin' ]]; then
+	  osascript -e "tell application \"Terminal\" to set background color of window 1 to $1"
+	fi
+}
+
+if [[ "$unamestr" == 'Darwin' ]]; then
+on_exit() {
+  set_bg "{65535, 65535, 65535}"
+}
+trap on_exit EXIT
+fi
+
+
+set_background_color() {
+        if [[ "$unamestr" == 'Linux' ]]; then
+		echo "" -n
+	elif [[ "$unamestr" == 'Darwin' ]]; then
+		set_bg "{65535, 45232, 35980}" 
+		#set_bg "{65535, 62451, 63479}"
+		#set_bg "{61937, 60395, 47288}"
+		#set_bg "{58853, 65278, 65535}"
+		#set_bg "{65535, 61166, 54998}"
+	fi
+}
+
+set_background_color
 cd web
 sh ./entrypoint.sh
