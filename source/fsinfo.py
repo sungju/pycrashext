@@ -728,6 +728,10 @@ def show_fsnotify_group(options):
             pwq = readSU("struct poll_wqueues", wq.private)
             print("\tfunc: %s, task: %s <%s>" %
                   (func, pwq.polling_task, pwq.polling_task.comm))
+        elif func == "woken_wake_function":
+            tsk = readSU("struct task_struct", wq.private)
+            print("\tfunc: %s, task: %s <%s>" %
+                  (func, tsk, tsk.comm))
 
 
 
