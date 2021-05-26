@@ -739,33 +739,42 @@ def show_manual_module_detail(options, module):
             print("0x%x (%s%s%s) for %d bytes" %
                   (sym_data.st_value, sym_color, sym_name,
                    reset_color, sym_data.st_size))
-            if options.show_contents:
-                print("\t", end="")
-                print(sym_data)
-                show_symbol_detail(sym_type, sym_data)
-                print()
+            if options.show_contents or options.reverse_disasm:
+                show_symbol_detail(options, sym_type, sym_data)
         print("--" * 30)
         print()
 
 
-def show_symbol_detail(sym_type, sym_data):
-    if sym_type == (1 << STT_FUNC):
+def show_symbol_detail(options, sym_type, sym_data):
+    if sym_type == (1 << STT_FUNC) and options.reverse_disasm:
+        print("\t", end="")
+        print(sym_data)
         show_disasm(sym_data.st_value, sym_data.st_size)
-    elif sym_type == (1 << STT_OBJECT):
+        print()
+    elif sym_type == (1 << STT_OBJECT) and options.show_contents:
+        print("\t", end="")
+        print(sym_data)
         show_variable(sym_data.st_value, sym_data.st_size)
+        print()
 
 
 def show_disasm(addr, size):
-    return # TODO: No disassemble for now for the sake of speed
-            # Also, dis doesn't take count as bytes, but number of operations
-            # So, the result will be bigger than the actual function
-            # which needed to be fixed in the future.
     if size == 0:
-        print("WARN: size has value 0. Changing to 10")
-        size = 10 # Some effort
+        return
 
-    result = exec_crash_command("dis 0x%x 0x%x" % (addr, size))
-    print(result)
+    count = int(size / 2)
+    if count < 10:
+        count = 10
+
+    result = exec_crash_command("dis 0x%x 0x%x" % (addr, count))
+    lines = result.splitlines()
+    end_addr = "0x%x" % (addr + size)
+    for line in lines:
+        if line == "Quit":
+            sys.exit(0)
+        if line.strip().startswith(end_addr):
+            break
+        print(line)
 
 
 def show_variable(addr, size):
@@ -861,6 +870,9 @@ def modinfo():
     op.add_option('-y', '--symtab', dest="show_symtab", default=None,
                   action="store_true",
                   help="Trying to retrieve module's symbols")
+    op.add_option('-r', '--reverse', dest="reverse_disasm", default=None,
+                  action="store_true",
+                  help="Trying to disasm from unloaded module")
 
 
     (o, args) = op.parse_args()
