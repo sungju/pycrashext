@@ -631,7 +631,8 @@ def try_get_module_struct(options):
         print("\tstruct module 0x%x" % module)
         print("\tname : %s" % module.name)
         print("\tstatus : %s" % loaded_module)
-        show_manual_module_detail(options, module)
+        if options.show_symtab:
+            show_manual_module_detail(options, module)
     else:
         print("Cannot find module structure for %s" % options.module_addr)
 
@@ -857,6 +858,9 @@ def modinfo():
     op.add_option('-m', '--module', dest="module_addr", default=None,
                   action="store", type="string",
                   help="Trying to retrieve module structure")
+    op.add_option('-y', '--symtab', dest="show_symtab", default=None,
+                  action="store_true",
+                  help="Trying to retrieve module's symbols")
 
 
     (o, args) = op.parse_args()
