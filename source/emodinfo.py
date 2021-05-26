@@ -631,8 +631,151 @@ def try_get_module_struct(options):
         print("\tstruct module 0x%x" % module)
         print("\tname : %s" % module.name)
         print("\tstatus : %s" % loaded_module)
+        show_manual_module_detail(options, module)
     else:
         print("Cannot find module structure for %s" % options.module_addr)
+
+
+def read_string(addr, delimiter=0x0):
+    result = ""
+    idx = 0
+    while True:
+        one_byte = readU8(addr + idx)
+        idx = idx + 1
+        if one_byte == delimiter:
+            break
+        result = result + str(chr(one_byte))
+
+    return result
+
+
+def get_strtab_dict(options, module):
+    result = {}
+    strtab = Addr(module.strtab)
+    idx = 0
+    no_more = False
+    while True:
+        one_symbol = read_string(strtab + idx, 0x0)
+        result[idx] = one_symbol
+        idx = idx + len(one_symbol) + 1
+        if len(one_symbol) == 0:
+            if no_more == True:
+                break
+            else:
+                no_more = True
+
+    return result
+
+
+STT_NOTYPE  = 0
+STT_OBJECT  = 1
+STT_FUNC    = 2
+STT_SECTION = 3
+STT_FILE    = 4
+STT_COMMON  = 5
+STT_TLS     = 6
+
+
+def get_sym_type_str(sym_type):
+    sym_type = sym_type & 0xf
+    if sym_type == (1 << STT_OBJECT):
+        return "DATA"
+    elif sym_type == (1 << STT_FUNC):
+        return "FUNCTION"
+    elif sym_type == (1 << STT_SECTION):
+        return "SECTION"
+    elif sym_type == (1 << STT_FILE):
+        return "FILE"
+    elif sym_type == (1 << STT_COMMON):
+        return "COMMON"
+    elif sym_type == (1 << STT_TLS):
+        return "TLS"
+
+    return "NOTYPE"
+
+
+def show_manual_module_detail(options, module):
+    # Not using at the moment
+    syms = module.syms
+    num_syms = module.num_syms
+    num_gpl_syms = module.num_gpl_syms
+
+    # symtab and core_symtab are same
+    symtab = module.symtab
+    core_symtab = module.core_symtab
+    num_symtab = module.num_symtab
+    core_num_syms = module.core_num_syms
+
+    strtab = get_strtab_dict(options, module)
+    symtab_per_type = {}
+
+    for i in range(0, num_symtab):
+        symtab_type = symtab[i].st_info & 0xf
+        if symtab_type not in symtab_per_type:
+            symtab_dict = {}
+            symtab_per_type[symtab_type] = symtab_dict
+        else:
+            symtab_dict = symtab_per_type[symtab_type]
+
+        symtab_dict[strtab[symtab[i].st_name]] = symtab[i]
+
+    print()
+    print("=+" * 30)
+    reset_color = crashcolor.get_color(crashcolor.RESET)
+    for sym_type in symtab_per_type:
+        sym_type_str = get_sym_type_str(sym_type)
+        print("[[[ %s ]]]" % (sym_type_str))
+        symtab_dict = symtab_per_type[sym_type]
+        if sym_type_str == "FUNCTION":
+            sym_color = crashcolor.get_color(crashcolor.BLUE)
+        elif sym_type_str == "DATA":
+            sym_color = crashcolor.get_color(crashcolor.GREEN)
+        else:
+            sym_color = crashcolor.get_color(crashcolor.YELLOW)
+
+        for sym_name in symtab_dict:
+            sym_data = symtab_dict[sym_name]
+            print("0x%x (%s%s%s) for %d bytes" %
+                  (sym_data.st_value, sym_color, sym_name,
+                   reset_color, sym_data.st_size))
+            if options.show_contents:
+                print("\t", end="")
+                print(sym_data)
+                show_symbol_detail(sym_type, sym_data)
+                print()
+        print("--" * 30)
+        print()
+
+
+def show_symbol_detail(sym_type, sym_data):
+    if sym_type == (1 << STT_FUNC):
+        show_disasm(sym_data.st_value, sym_data.st_size)
+    elif sym_type == (1 << STT_OBJECT):
+        show_variable(sym_data.st_value, sym_data.st_size)
+
+
+def show_disasm(addr, size):
+    return # TODO: No disassemble for now for the sake of speed
+            # Also, dis doesn't take count as bytes, but number of operations
+            # So, the result will be bigger than the actual function
+            # which needed to be fixed in the future.
+    if size == 0:
+        print("WARN: size has value 0. Changing to 10")
+        size = 10 # Some effort
+
+    result = exec_crash_command("dis 0x%x 0x%x" % (addr, size))
+    print(result)
+
+
+def show_variable(addr, size):
+    if size < 8:
+        size = 8
+    result = exec_crash_command("rd 0x%x %d" % (addr, size/8))
+    lines = result.splitlines()
+    crashcolor.set_color(crashcolor.CYAN)
+    for line in lines:
+        print("\t%s" % (line))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def find_module_struct(module_addr):
