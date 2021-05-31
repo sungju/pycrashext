@@ -98,9 +98,12 @@ def show_ftrace_list(options):
             print_handler("", "break", kprobe.break_handler, kprobe)
             print_handler_handler("break", kprobe)
             if options.show_details:
-                trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
-                print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
-                print("\t\tcall.name = '%s'" % (trace_probe.call.name))
+                try:
+                    trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
+                    print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
+                    print("\t\tcall.name = '%s'" % (trace_probe.call.name))
+                except:
+                    pass
 
 
     if options.show_details:
@@ -110,8 +113,11 @@ def show_ftrace_list(options):
         for ftrace_event_call in readSUListFromHead(ftrace_events_list,
                                                     "list",
                                                     "struct ftrace_event_call"):
-            print("\t0x%x: name = %s" % (ftrace_event_call, ftrace_event_call.name))
-            count = count + 1
+            try:
+                print("\t0x%x: name = %s" % (ftrace_event_call, ftrace_event_call.name))
+                count = count + 1
+            except:
+                pass
 
         print("\n\ttotal event : %d" % (count))
 
@@ -121,10 +127,42 @@ def show_ftrace_list(options):
     if (global_trace.buffer_disabled == 0 and
         global_trace.trace_buffer.buffer.record_disabled.counter == 0):
         print("** ftrace Enabled (struct trace_array 0x%x)" % global_trace)
-        current_trace = global_trace.current_trace
-        print("current_tracer = '%s' (struct tracer 0x%x)" % (current_trace.name, current_trace))
     else:
         print("** ftrace Disabled")
+
+    current_trace = global_trace.current_trace
+    print("current_tracer = '%s' (struct tracer 0x%x)" % (current_trace.name, current_trace))
+
+
+def show_trace_types(options):
+    trace_types = readSymbol("trace_types")
+    for tracer in readStructNext(trace_types,
+                                     "next",
+                                 inchead = False):
+        print(tracer)
+        init_name = ""
+        try:
+            init_name = addr2sym(tracer.init)
+        except:
+            pass
+        print("\tname = %s, init = 0x%x (%s)" %
+              (tracer.name, tracer.init, init_name))
+
+
+def show_trace_modules(options):
+    tracepoint_module_list = readSymbol("tracepoint_module_list")
+    for tp_module in readSUListFromHead(tracepoint_module_list,
+                                        "list",
+                                        "struct tp_module"):
+        print(tp_module)
+        tp_ptrs_name = ""
+        try:
+            tp_ptrs_name = addr2sym(tp_module.tracepoints_ptrs)
+        except:
+            pass
+        print("\ttracepoints_ptrs = 0x%x (%s)" %
+              (tp_module.tracepoints_ptrs, tp_ptrs_name))
+
 
 def traceinfo():
     op = OptionParser()
@@ -132,7 +170,24 @@ def traceinfo():
                   action="store_true",
                   help="Show details")
 
+    op.add_option("-t", "--trace_types", dest="show_trace_types", default=0,
+                  action="store_true",
+                  help="Show ftrace types")
+
+    op.add_option("-m", "--trace_modules", dest="show_trace_modules", default=0,
+                  action="store_true",
+                  help="Show modules involved in ftrace")
+
     (o, args) = op.parse_args()
+
+
+    if o.show_trace_types:
+        show_trace_types(o)
+        sys.exit(0)
+
+    if o.show_trace_modules:
+        show_trace_modules(o)
+        sys.exit(0)
 
     show_ftrace_list(o)
 
