@@ -526,6 +526,8 @@ def cgroupinfo():
 
     (o, args) = op.parse_args()
 
+    sys.setrecursionlimit(10**6)
+
     cgroup_count = 0
     empty_count = 0
     cgroup_subsys_id_init()

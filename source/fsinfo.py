@@ -773,6 +773,8 @@ def fsinfo():
 
     (o, args) = op.parse_args()
 
+    sys.setrecursionlimit(10**6)
+
     if (o.file_addr_for_pid != ""):
         find_pid_from_file(o)
         sys.exit(0);
