@@ -241,6 +241,8 @@ def pstree():
 
     (o, args) = op.parse_args()
 
+    sys.setrecursionlimit(10**6)
+
     print_pstree(o)
 
 
