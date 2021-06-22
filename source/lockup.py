@@ -214,8 +214,13 @@ def lockup_display(reverse_sort, show_tasks, options):
 
     try:
         watchdog_thresh = readSymbol("watchdog_thresh")
+        softlockup_thresh = watchdog_thresh * 2
     except:
-        watchdog_thresh = -1
+        try:
+            softlockup_thresh = readSymbol("softlockup_thresh")
+            watchdog_thresh = 10
+        except:
+            watchdog_thresh = -1
 
     for rq in rqsorted:
         prio = rq.curr.prio
@@ -223,8 +228,11 @@ def lockup_display(reverse_sort, show_tasks, options):
             prio = rq.curr.rt_priority
 
         delayed_time = (now - rq.Timestamp) / 1000000000
-        if watchdog_thresh > 0 and delayed_time >= watchdog_thresh:
-            crashcolor.set_color(crashcolor.BLUE)
+        if watchdog_thresh > 0:
+            if delayed_time >= softlockup_thresh:
+                crashcolor.set_color(crashcolor.RED)
+            elif delayed_time >= watchdog_thresh:
+                crashcolor.set_color(crashcolor.BLUE)
 
         print ("CPU %3d: %10.2f sec behind by "
                "0x%x, %s [%s:%3d] (%d in queue)" %
