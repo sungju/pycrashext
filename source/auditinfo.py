@@ -420,7 +420,7 @@ def get_audit_pid():
     return audit_pid
 
 
-def show_audit_status():
+def show_audit_status(options):
     audit_enabled = readSymbol("audit_enabled")
     audit_failure = readSymbol("audit_failure")
     audit_pid = get_audit_pid()
@@ -445,6 +445,19 @@ def show_audit_status():
     print("%-17s %d" % ("backlog", audit_queue.qlen))
     print("%-17s %d" % ("backlog_wait_time", audit_backlog_wait_time))
 
+    if (options.show_details):
+        print("----< details >----")
+        print("struct sk_buff_head 0x%x" % (audit_queue))
+        print("-" * 40)
+        NLMSG_HDRLEN = struct_size("struct nlmsghdr")
+        for sk_buff in readSUListFromHead(audit_queue,
+                                          "next",
+                                          "struct sk_buff",
+                                          maxel=1000000):
+            s = readmem(sk_buff.head + NLMSG_HDRLEN, sk_buff.tail).decode("utf-8")
+            print("%s" % (s))
+
+
 
 def auditinfo():
     op = OptionParser()
@@ -454,15 +467,20 @@ def auditinfo():
     op.add_option("-s", "--status", dest="show_audit_status", default=False,
                   action="store_true",
                   help="Show audit status")
+    op.add_option("-d", "--details", dest="show_details", default=False,
+                  action="store_true",
+                  help="Show details if possible")
 
     (o, args) = op.parse_args()
+
+    sys.setrecursionlimit(10**6)
 
     # Default action. Should be at the bottom
     if (o.show_rules):
         show_audit_rules(o)
         sys.exit(0)
 
-    show_audit_status()
+    show_audit_status(o)
 
 
 if ( __name__ == '__main__'):
