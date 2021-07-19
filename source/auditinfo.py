@@ -454,7 +454,7 @@ def show_audit_status(options):
                                           "next",
                                           "struct sk_buff",
                                           maxel=1000000):
-            s = readmem(sk_buff.head + NLMSG_HDRLEN, sk_buff.tail)
+            s = readmem(sk_buff.head + NLMSG_HDRLEN, sk_buff.tail - NLMSG_HDRLEN)
             if (s != None):
                 try:
                     s = s.decode("UTF-8", "ignore")
