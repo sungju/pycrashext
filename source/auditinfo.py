@@ -380,17 +380,89 @@ def show_audit_rules(options):
             next_addr = audit_entry.rule.list.next
 
 
+def audit_enabled_str(audit_enabled):
+    if audit_enabled == 0:
+        return "no auditing"
+    elif audit_enabled == 1:
+        return "auditing enabled"
+    elif audit_enabled == 2:
+        return "auditing enabled and configuration is locked/unchangeable."
+    else:
+        return ""
+
+
+def audit_failure_str(audit_failure):
+    if audit_failure == 0:
+        return "AUDIT_FAIL_SILENT"
+    elif audit_failure == 1:
+        return "AUDIT_FAIL_PRINTK"
+    elif audit_failure == 2:
+        return "AUDIT_FAIL_PANIC"
+    else:
+        return ""
+
+
+def get_audit_pid():
+    audit_pid = -1
+    try:
+        audit_pid = readSymbol("audit_pid")
+        return audit_pid
+    except:
+        pass
+
+    try:
+        ac = readSymbol("auditd_conn")
+        # To complicate to find 'current'.
+        # So, no implementation for now for RHEL8
+    except:
+        pass
+
+    return audit_pid
+
+
+def show_audit_status():
+    audit_enabled = readSymbol("audit_enabled")
+    audit_failure = readSymbol("audit_failure")
+    audit_pid = get_audit_pid()
+    rate_limit = readSymbol("audit_rate_limit")
+    audit_backlog_limit = readSymbol("audit_backlog_limit")
+    audit_lost = readSymbol("audit_lost").counter
+    try:
+        audit_queue = readSymbol("audit_skb_queue")
+    except:
+        audit_queue = readSymbol("audit_queue")
+
+    audit_backlog_wait_time = readSymbol("audit_backlog_wait_time")
+
+    print("%-17s %d (%s)" % ("enabled", audit_enabled,
+                          audit_enabled_str(audit_enabled)))
+    print("%-17s %d (%s)" % ("failure", audit_failure,
+                          audit_failure_str(audit_failure)))
+    print("%-17s %d" % ("pid", audit_pid))
+    print("%-17s %d" % ("rate_limit", rate_limit))
+    print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
+    print("%-17s %d" % ("lost", audit_lost))
+    print("%-17s %d" % ("backlog", audit_queue.qlen))
+    print("%-17s %d" % ("backlog_wait_time", audit_backlog_wait_time))
+
+
 def auditinfo():
     op = OptionParser()
-    op.add_option("-r", "--rules", dest="show_rules", default=True,
+    op.add_option("-r", "--rules", dest="show_rules", default=False,
                   action="store_true",
                   help="Show audit rules")
+    op.add_option("-s", "--status", dest="show_audit_status", default=False,
+                  action="store_true",
+                  help="Show audit status")
 
     (o, args) = op.parse_args()
 
     # Default action. Should be at the bottom
     if (o.show_rules):
         show_audit_rules(o)
+        sys.exit(0)
+
+    show_audit_status()
 
 
 if ( __name__ == '__main__'):
