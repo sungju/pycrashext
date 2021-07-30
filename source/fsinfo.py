@@ -170,8 +170,10 @@ def get_file_open_mode_str(f_mode):
 
 def show_inode_details(options):
     inode = readSU("struct inode", int(options.inode, 16))
-    dentry_offset = member_offset('struct dentry',
-                                  'd_alias')
+    dentry_offset = member_offset('struct dentry', 'd_u')
+    if dentry_offset < 0:
+        dentry_offset = member_offset('struct dentry',
+                                      'd_alias')
     i_dentry_size = member_size("struct inode", "i_dentry")
     hlist_head_sz = struct_size("struct hlist_head")
     if i_dentry_size == hlist_head_sz:
@@ -181,16 +183,28 @@ def show_inode_details(options):
 
     if dentry_addr != -dentry_offset: # No dentry for this inode
         dentry = readSU('struct dentry', dentry_addr)
-        dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+        try:
+            dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
+        except:
+            dentry_details = ""
         print(dentry_details)
     elif inode.i_mapping != 0:
         i_mapping = inode.i_mapping
         print("inode = 0x%x, mapping = 0x%x, page flags = 0x%x" %
               (inode, i_mapping, i_mapping.flags))
-        if i_mapping.backing_dev_info != 0:
-            bdi = i_mapping.backing_dev_info
+        if inode.i_sb.s_bdi != 0:
+            bdi = inode.i_sb.s_bdi
+            try:
+                dev_name = bdi.name
+            except:
+                dev_name = bdi.dev_name
+            if dev_name != "":
+                dev_kobj_name = bdi.dev.kobj.name
+            else:
+                dev_kobj_name = ""
+
             print("\tbacking_dev_info 0x%x : %s %s" %
-                  (bdi, bdi.name, bdi.dev.kobj.name))
+                  (bdi, dev_name, dev_kobj_name))
         print("")
 
     print("%s" % (get_inode_details(inode)))
