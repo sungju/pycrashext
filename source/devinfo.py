@@ -19,7 +19,20 @@ def decode_devt(dev):
         minor = dev & 0xff
     return (int(major), int(minor))
 
-def show_blkdevs():
+
+def show_blkdevs_details(options, gendisk):
+    request_queue = gendisk.queue
+    nr_hw_queues = request_queue.nr_hw_queues
+    print("\tnr_hw_queues : %d" % (nr_hw_queues))
+    for idx in range(0, nr_hw_queues):
+       blk_mq_hw_ctx = request_queue.queue_hw_ctx[idx]
+       blk_mq_tags = blk_mq_hw_ctx.tags
+       print("\t\tqueue_hw_ctx[%d].tags.nr_tags = %d" % (idx, blk_mq_tags.nr_tags))
+
+    pass
+
+
+def show_blkdevs(options):
     pa = readSymbol('major_names')
     print ("BLKDEV        NAME")
     for major, s in enumerate(pa):
@@ -66,6 +79,8 @@ def show_blkdevs():
                 print ("%5d:%5d(%5d) %-17s 0x%16x 0x%16x" %
                        (major, minor, gendisk.minors, name, gendisk, gendisk.queue))
 
+                show_blkdevs_details(options, gendisk)
+
     elif (symbol_exists('all_bdevs')):
         print("%5s:%5s(%5s)%-17s  %-18s %-18s" %
               ("MAJOR", "MINOR", "COUNT", " NAME", "gendisk", "request_queue"))
@@ -82,6 +97,8 @@ def show_blkdevs():
             print ("%5d:%5d(%5d) %-17s 0x%16x 0x%16x" %
                    (major, minor, gendisk.minors, name, gendisk, gendisk.queue))
             print ("  %3d:%3d     %-10s" % (major, minor, name))
+
+            show_blkdevs_details(options, gendisk)
 
 
 def show_chrdevs():
@@ -124,11 +141,14 @@ def devinfo():
                   default=False,
                   help="Show character device list")
 
+    op.add_option("-d", "--details", dest="show_details", default=0,
+                  action="store_true",
+                  help="Show detailed information")
 
     (o, args) = op.parse_args()
 
     if o.show_block:
-        show_blkdevs()
+        show_blkdevs(o)
 
     if o.show_char:
         show_chrdevs()
