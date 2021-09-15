@@ -78,6 +78,8 @@ TASK_DEAD = 64
 def task_state_color(state):
     if isinstance(state, int):
         state = state & 0x7f
+    elif "|" in state:
+        state = state[:state.find("|")]
 
     return {
         TASK_RUNNING : crashcolor.BLUE,
@@ -92,6 +94,8 @@ def task_state_color(state):
         "TASK_INTERRUPTIBLE" : crashcolor.RESET,
         "TASK_UNINTERRUPTIBLE" : crashcolor.RED,
         "TASK_STOPPED" : crashcolor.CYAN,
+        "__TASK_STOPPED" : crashcolor.CYAN,
+        "__TASK_TRACED" : crashcolor.MAGENTA,
         "TASK_ZOMBIE" : crashcolor.YELLOW,
         "TASK_DEAD" : crashcolor.LIGHTRED,
     }[state]
@@ -100,6 +104,8 @@ def task_state_color(state):
 def task_state_str(state):
     if isinstance(state, int):
         state = state & 0x7f
+    elif "|" in state:
+        state = state[:state.find("|")]
 
     return {
         TASK_RUNNING: "RU",
@@ -114,6 +120,8 @@ def task_state_str(state):
         "TASK_INTERRUPTIBLE" : "IN",
         "TASK_UNINTERRUPTIBLE" : "UN",
         "TASK_STOPPED" : "ST",
+        "__TASK_STOPPED" : "ST",
+        "__TASK_TRACED" : "TR",
         "TASK_ZOMBIE" : "ZO",
         "TASK_DEAD" : "DE",
     }[state]
