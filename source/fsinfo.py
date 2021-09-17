@@ -748,6 +748,30 @@ def show_fsnotify_group(options):
                   (func, tsk, tsk.comm))
 
 
+DCACHE_ENTRY_TYPE=0x07000000
+DCACHE_MISS_TYPE=0x00000000
+
+def show_negative_dentries(options):
+    result_lines = exec_crash_command("kmem -S dentry").splitlines()
+    neg_cnt = 0
+    total_cnt = 0
+    for line in result_lines:
+        words = line.split()
+        if (len(words) == 0 or not words[0].startswith("[")):
+            continue
+        try:
+            dentry = readSU("struct dentry", int(words[0][1:-1], 16))
+            total_cnt = total_cnt + 1
+            if (dentry.d_flags & DCACHE_ENTRY_TYPE) == DCACHE_MISS_TYPE:
+                neg_cnt = neg_cnt + 1
+                if options.show_details:
+                    print("%s" % dentry_to_filename(dentry))
+        except:
+            continue
+
+    print("Negative dentries : %d" % (neg_cnt))
+    print("Total dentries    : %d" % (total_cnt))
+
 
 def fsinfo():
     op = OptionParser()
@@ -784,6 +808,9 @@ def fsinfo():
     op.add_option("-n", "--fsnotify", dest="fsnotify_group", default="",
                   action="store",
                   help="Show fsnotify details for fsnotify_group")
+    op.add_option("--negdents", dest="degative_dentries", default=0,
+                  action="store_true",
+                  help="Show negative dentries")
 
     (o, args) = op.parse_args()
 
@@ -819,6 +846,10 @@ def fsinfo():
 
     if (o.fsnotify_group != ""):
         show_fsnotify_group(o)
+        sys.exit(0)
+
+    if (o.degative_dentries):
+        show_negative_dentries(o)
         sys.exit(0)
 
 
