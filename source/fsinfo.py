@@ -769,8 +769,13 @@ def show_negative_dentries(options):
         except:
             continue
 
+    print("Based on kmem -S dentry")
     print("Negative dentries : %d" % (neg_cnt))
     print("Total dentries    : %d" % (total_cnt))
+
+    result_lines = exec_crash_command("p dentry_stat -d")
+    print()
+    print(result_lines)
 
 
 def fsinfo():
