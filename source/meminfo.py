@@ -878,6 +878,21 @@ def show_error_code(options):
             print("[%d,%d] : %s" % (i, idx, error_str[i][idx]))
 
 
+def show_tlb_csd_list(options):
+    csd_addr =int(options.tlb_list, 16)
+    for csd in readSUListFromHead(csd_addr,
+                                         "llist",
+                                         "struct __call_single_data"):
+        func_str = addr2sym(csd.func)
+        print("0x%x: func = 0x%x (%s), info = 0x%x, flags = 0x%x" %
+              (csd, csd.func, func_str, csd.info, csd.flags))
+        if options.details:
+            if func_str == "flush_tlb_func_remote":
+                f = readSU("struct flush_tlb_info", csd.info)
+                print("\tmm : 0x%x (owner = %d, %s), range = 0x%x - 0x%x" %
+                      (f.mm, f.mm.owner.pid, f.mm.owner.comm, f.start, f.end))
+
+
 
 def meminfo():
     op = OptionParser()
@@ -925,6 +940,10 @@ def meminfo():
     op.add_option("-m", "--numa", dest="numa", default=0,
                   action="store_true",
                   help="Show NUMA info")
+    op.add_option("-f", "--tlb", dest="tlb_list", default="",
+                  action="store",
+                  type="string",
+                  help="Shows tlb list (csd). example) meminfo -f 0xffffade6b68037e0 -d")
 
     (o, args) = op.parse_args()
 
@@ -965,6 +984,10 @@ def meminfo():
 
     if (o.numa):
         show_numa_info(o)
+        sys.exit(0)
+
+    if (o.tlb_list != ""):
+        show_tlb_csd_list(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
