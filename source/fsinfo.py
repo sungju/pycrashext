@@ -732,10 +732,19 @@ def show_dumpe2fs(options):
 def show_fsnotify_group(options):
     fsnotify_group = readSU("struct fsnotify_group",
                             int(options.fsnotify_group, 16))
-    notification_tasklist = fsnotify_group.notification_waitq.task_list
+    if member_offset("struct wait_queue_head_t", "task_list") >= 0:
+        notification_tasklist = fsnotify_group.notification_waitq.task_list
+        field_name="task_list"
+        wait_queue_name="struct __wait_queue"
+    else:
+        # RHEL8 uses different names for structure and entries
+        notification_tasklist = fsnotify_group.notification_waitq.head
+        field_name="entry"
+        wait_queue_name="struct wait_queue_entry"
+
     for wq in readSUListFromHead(notification_tasklist,
-                                 "task_list",
-                                 "struct __wait_queue"):
+                                 field_name,
+                                 wait_queue_name):
         func = addr2sym(wq.func)
         print(wq)
         if func == "pollwake":
