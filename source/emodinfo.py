@@ -652,7 +652,10 @@ def read_string(addr, delimiter=0x0):
 
 def get_strtab_dict(options, module):
     result = {}
-    strtab = Addr(module.strtab)
+    if member_offset("struct module", "core_kallsyms") >= 0:
+        strtab = Addr(module.core_kallsyms.strtab)
+    else:
+        strtab = Addr(module.strtab)
     idx = 0
     no_more = False
     while True:
@@ -702,10 +705,12 @@ def show_manual_module_detail(options, module):
     num_gpl_syms = module.num_gpl_syms
 
     # symtab and core_symtab are same
-    symtab = module.symtab
-    core_symtab = module.core_symtab
-    num_symtab = module.num_symtab
-    core_num_syms = module.core_num_syms
+    if member_offset("struct module", "core_kallsyms") >= 0:
+        symtab = module.core_kallsyms.symtab
+        num_symtab = module.core_kallsyms.num_symtab
+    else:
+        symtab = module.symtab
+        num_symtab = module.num_symtab
 
     strtab = get_strtab_dict(options, module)
     symtab_per_type = {}
