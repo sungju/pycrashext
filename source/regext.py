@@ -284,3 +284,12 @@ rprog("selinuxinfo",
         "show selinux status",
         "-h     list available options",
         help)
+
+help='''
+Screen handling
+'''
+
+rprog("screen",
+        "handle screen",
+        "-h     list available options",
+        help)
