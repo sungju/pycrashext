@@ -786,6 +786,14 @@ def show_negative_dentries(options):
     print()
     print(result_lines)
 
+def show_task_info(options):
+    task_addr = int(options.task_info, 16)
+    task_struct =readSU("struct task_struct", task_addr)
+    print("0x%x : %s (%d)" % (task_struct, task_struct.comm, task_struct.pid))
+    print("")
+    options.file = "%x" % (task_struct.mm.exe_file)
+    show_file_details(options)
+
 
 def fsinfo():
     op = OptionParser()
@@ -825,6 +833,9 @@ def fsinfo():
     op.add_option("--negdents", dest="degative_dentries", default=0,
                   action="store_true",
                   help="Show negative dentries")
+    op.add_option("-t", "--task", dest="task_info", default="",
+                  action="store",
+                  help="Show task related information")
 
     (o, args) = op.parse_args()
 
@@ -864,6 +875,10 @@ def fsinfo():
 
     if (o.degative_dentries):
         show_negative_dentries(o)
+        sys.exit(0)
+
+    if (o.task_info):
+        show_task_info(o)
         sys.exit(0)
 
 
