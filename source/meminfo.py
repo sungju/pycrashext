@@ -913,7 +913,7 @@ def show_pte_flags(options):
     _PAGE_BIT_SPLITTING =_PAGE_BIT_UNUSED1
     _PAGE_BIT_SOFTDIRTY =_PAGE_BIT_HIDDEN
     _PAGE_BIT_NX        =   63
-    
+
     pte_flags_dict = {
         (1 << _PAGE_BIT_PRESENT) : "_PAGE_PRESENT",
         (1 << _PAGE_BIT_RW) : "_PAGE_RW",
@@ -933,12 +933,12 @@ def show_pte_flags(options):
         (1 << _PAGE_BIT_SPLITTING) : "_PAGE_SPLITTING",
         (1 << _PAGE_BIT_SOFTDIRTY) : "_PAGE_SOFTDIRTY",
     }
-    
+
     pte_flags = int(options.pte_flags, 16)
 
     for val in pte_flags_dict:
         if val & pte_flags == val:
-            print(pte_flags_dict[val])
+            print("%20s : 0x%x" % (pte_flags_dict[val], val))
 
 
 def meminfo():
