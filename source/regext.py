@@ -293,3 +293,10 @@ rprog("screen",
         "handle screen",
         "-h     list available options",
         help)
+
+
+import crashcolor
+
+crashcolor.set_color(crashcolor.BLUE)
+print("\n\tWritten by Daniel Kwon (dkwon@redhat.com)")
+crashcolor.set_color(crashcolor.RESET)

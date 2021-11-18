@@ -893,59 +893,115 @@ def show_tlb_csd_list(options):
                       (f.mm, f.mm.owner.pid, f.mm.owner.comm, f.start, f.end))
 
 
+def show_pte_flags(options):
+    _PAGE_BIT_PRESENT   =0
+    _PAGE_BIT_RW        =1
+    _PAGE_BIT_USER      =2
+    _PAGE_BIT_PWT       =3
+    _PAGE_BIT_PCD       =4
+    _PAGE_BIT_ACCESSED  =5
+    _PAGE_BIT_DIRTY     =6
+    _PAGE_BIT_PSE       =7
+    _PAGE_BIT_PAT       =7
+    _PAGE_BIT_GLOBAL    =8
+    _PAGE_BIT_UNUSED1   =9
+    _PAGE_BIT_IOMAP     =10
+    _PAGE_BIT_HIDDEN    =11
+    _PAGE_BIT_PAT_LARGE =12
+    _PAGE_BIT_SPECIAL   =_PAGE_BIT_UNUSED1
+    _PAGE_BIT_CPA_TEST  =_PAGE_BIT_UNUSED1
+    _PAGE_BIT_SPLITTING =_PAGE_BIT_UNUSED1
+    _PAGE_BIT_SOFTDIRTY =_PAGE_BIT_HIDDEN
+    _PAGE_BIT_NX        =   63
+    
+    pte_flags_dict = {
+        (1 << _PAGE_BIT_PRESENT) : "_PAGE_PRESENT",
+        (1 << _PAGE_BIT_RW) : "_PAGE_RW",
+        (1 << _PAGE_BIT_USER) : "_PAGE_USER",
+        (1 << _PAGE_BIT_PWT) : "_PAGE_PWT",
+        (1 << _PAGE_BIT_PCD) : "_PAGE_PCD",
+        (1 << _PAGE_BIT_ACCESSED) : "_PAGE_ACCESSED",
+        (1 << _PAGE_BIT_DIRTY) : "_PAGE_DIRTY",
+        (1 << _PAGE_BIT_PSE) : "_PAGE_PSE",
+        (1 << _PAGE_BIT_GLOBAL) : "_PAGE_GLOBAL",
+        (1 << _PAGE_BIT_UNUSED1) : "_PAGE_UNUSED1",
+        (1 << _PAGE_BIT_IOMAP) : "_PAGE_IOMAP",
+        (1 << _PAGE_BIT_PAT) : "_PAGE_PAT",
+        (1 << _PAGE_BIT_PAT_LARGE) : "_PAGE_PAT_LARGE",
+        (1 << _PAGE_BIT_SPECIAL) : "_PAGE_SPECIAL",
+        (1 << _PAGE_BIT_CPA_TEST) : "_PAGE_CPA_TEST",
+        (1 << _PAGE_BIT_SPLITTING) : "_PAGE_SPLITTING",
+        (1 << _PAGE_BIT_SOFTDIRTY) : "_PAGE_SOFTDIRTY",
+    }
+    
+    pte_flags = int(options.pte_flags, 16)
+
+    for val in pte_flags_dict:
+        if val & pte_flags == val:
+            print(pte_flags_dict[val])
+
 
 def meminfo():
     op = OptionParser()
-    op.add_option("-u", "--memusage", dest="memusage", default=0,
-                  action="store_true",
-                  help="Show memory usages by tasks")
-    op.add_option("-n", "--nogroup", dest="nogroup", default=0,
-                  action="store_true",
-                  help="Show data in individual tasks")
     op.add_option("-a", "--all", dest="all", default=0,
                   action="store_true",
                   help="Show all the output")
     op.add_option("-b", "--budyinfo", dest="buddyinfo", default=0,
                   action="store_true",
                   help="Show /proc/buddyinfo like output")
+    op.add_option("-d", "--details", dest="details", default=0,
+                  action="store_true",
+                  help="Show detailed output")
+    op.add_option("-e", "--error", dest="error_code", default="",
+                  action="store",
+                  type="string",
+                  help="Interpret page_fault error code")
+    op.add_option("-f", "--tlb", dest="tlb_list", default="",
+                  action="store",
+                  type="string",
+                  help="Shows tlb list (csd). example) meminfo -f 0xffffade6b68037e0 -d")
+    op.add_option("-F", "--pte_flags", dest="pte_flags", default="",
+                  action="store",
+                  type="string",
+                  help="Shows the meaning of pte flags")
+    op.add_option("-g", "--gfp_mask", dest="gfp_mask", default="",
+                  action="store",
+                  type="string",
+                  help="Interpret gfp_mask value")
+    op.add_option("-i", "--meminfo", dest="meminfo", default=0,
+                  action="store_true",
+                  help="Show /proc/meminfo-like output")
+    op.add_option("-m", "--numa", dest="numa", default=0,
+                  action="store_true",
+                  help="Show NUMA info")
+    op.add_option("-n", "--nogroup", dest="nogroup", default=0,
+                  action="store_true",
+                  help="Show data in individual tasks")
+    op.add_option("-p", "--percpu", dest="percpu", default="",
+                  action="store", type="string",
+                  help="Convert percpu address into virtual address")
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
     op.add_option("-S", "--slabdetail", dest="slabdetail", default="",
                   action="store", type="string",
                   help="Show details of a slab")
-    op.add_option("-i", "--meminfo", dest="meminfo", default=0,
-                  action="store_true",
-                  help="Show /proc/meminfo-like output")
-    op.add_option("-p", "--percpu", dest="percpu", default="",
-                  action="store", type="string",
-                  help="Convert percpu address into virtual address")
     op.add_option("-t", "--type", dest="percpu_type", default="",
                   action="store", type="string",
                   help="Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int")
-    op.add_option("-d", "--details", dest="details", default=0,
+    op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
-                  help="Show detailed output")
+                  help="Show memory usages by tasks")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
-    op.add_option("-e", "--error", dest="error_code", default="",
-                  action="store",
-                  type="string",
-                  help="Interpret page_fault error code")
-    op.add_option("-g", "--gfp_mask", dest="gfp_mask", default="",
-                  action="store",
-                  type="string",
-                  help="Interpret gfp_mask value")
-    op.add_option("-m", "--numa", dest="numa", default=0,
-                  action="store_true",
-                  help="Show NUMA info")
-    op.add_option("-f", "--tlb", dest="tlb_list", default="",
-                  action="store",
-                  type="string",
-                  help="Shows tlb list (csd). example) meminfo -f 0xffffade6b68037e0 -d")
+
 
     (o, args) = op.parse_args()
+
+    if (o.pte_flags != ""):
+        show_pte_flags(o)
+        sys.exit(0)
 
     if (o.buddyinfo):
         show_buddyinfo(o)
