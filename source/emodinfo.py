@@ -634,7 +634,30 @@ def try_get_module_struct(options):
         if options.show_symtab:
             show_manual_module_detail(options, module)
     else:
-        print("Cannot find module structure for %s" % options.module_addr)
+        crashcolor.set_color(crashcolor.RED)
+        print("\nCannot find module structure for %s" % options.module_addr)
+        crashcolor.set_color(crashcolor.RESET)
+        module_addr_min = 0
+        module_addr_max = 0
+        module_addr = int(options.module_addr, 16)
+        try:
+            module_addr_min = readSymbol("module_addr_min")
+            module_addr_max = readSymbol("module_addr_max")
+        except:
+            pass
+
+        if module_addr_max == 0:
+            try:
+                mod_tree = readSymbol("mod_tree")
+                module_addr_min = mod_tree.addr_min
+                module_addr_max = mod_tree.addr_max
+            except:
+                pass
+
+        if (module_addr_min < module_addr) and (module_addr < module_addr_max):
+            print("\nThis address belongs to module allocation memory range")
+            print("\tmodule address min: 0x%x" % (module_addr_min))
+            print("\tmodule address max: 0x%x" % (module_addr_max))
 
 
 def read_string(addr, delimiter=0x0):
