@@ -316,7 +316,10 @@ def module_info(options):
                 if c in taint_flags_desc:
                     print("\t%s : %s" % (c, taint_flags_desc[c]))
 
+        print_last_unloaded_module()
 
+
+def print_last_unloaded_module():
     last_unloaded_module = readSymbol("last_unloaded_module")
     if len(last_unloaded_module) > 0:
         crashcolor.set_color(crashcolor.BLUE)
@@ -658,6 +661,8 @@ def try_get_module_struct(options):
             print("\nThis address belongs to module allocation memory range")
             print("\tmodule address min: 0x%x" % (module_addr_min))
             print("\tmodule address max: 0x%x" % (module_addr_max))
+
+    print_last_unloaded_module()
 
 
 def read_string(addr, delimiter=0x0):
