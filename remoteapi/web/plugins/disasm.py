@@ -45,6 +45,9 @@ def set_kernel_version(asm_str):
         gitdir = 'alt'
     elif kernel_version.find(".el8") >= 0:
         gitdir = 'rhel8'
+    elif release_version.find(".el8_") >= 0:
+        kernel_version = "kernel-rt-" + release_version
+        gitdir = 'rhel8'
     elif first_line.find(".rt") >= 0:
         gitdir = "kernel-rt"
         kernel_version = "kernel-rt-" + release_version
@@ -72,7 +75,7 @@ def set_kernel_version(asm_str):
         if err != None and \
            (err.startswith(b"error:") or err.startswith(b"fatal:")):
             return 'FAILED to git checkout\n' + err.decode("utf-8") +\
-                    "\n" + kernel_version + ", " + cur_rhel_path
+                    kernel_version + ", " + cur_rhel_path + "\n"
 
         cur_kernel_version = kernel_version
         cur_release_version = release_version.split("/")[0]
