@@ -12,6 +12,9 @@ import crashcolor
 
 
 def vmw_mem(options):
+    print("VMware virtual machine")
+    print("----------------------\n")
+
     try:
         pa = readSymbol('balloon');
         if (pa == 0):
@@ -54,8 +57,8 @@ def hv_mem(options):
     if dm_device == 0:
         return
 
-    print("Hyper-V initialized")
-    print("-------------------\n")
+    print("Hyper-V virtual machine")
+    print("-----------------------\n")
     print("%22s = %d" % ("num_pages_balloonedd", dm_device.num_pages_ballooned))
     print("%22s = %d" % ("num_pages_onlined", dm_device.num_pages_onlined))
     print("%22s = %d" % ("num_pages_added", dm_device.num_pages_added))
