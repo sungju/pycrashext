@@ -52,7 +52,15 @@ def vmw_mem(options):
     print ("\n")
 
 
-def hv_mem(options):
+def show_hv_details(options, hv_context, dm_device):
+    addr = hv_context.cpu_context
+    print("\nstruct hv_per_cpu_context")
+    for i in range(sys_info.CPUS):
+        hv_per_cpu_context = percpu.percpu_ptr(addr, i)
+        print("CPU %d : 0x%x" % (i, hv_per_cpu_context))
+
+
+def hv_mem(options, hv_context):
     dm_device = readSymbol("dm_device")
     if dm_device == 0:
         return
@@ -63,11 +71,14 @@ def hv_mem(options):
     print("%22s = %d" % ("num_pages_onlined", dm_device.num_pages_onlined))
     print("%22s = %d" % ("num_pages_added", dm_device.num_pages_added))
 
+    if options.show_details == True:
+        show_hv_details(options, hv_context, dm_device)
+
 
 def balloon_info(options):
     hv_context = readSymbol("hv_context")
     if hv_context != 0 and hv_context.synic_initialized == 1:
-        hv_mem(options)
+        hv_mem(options, hv_context)
     else:
         vmw_mem(options)
 
