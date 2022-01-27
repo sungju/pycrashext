@@ -34,7 +34,7 @@ help = '''
 vmware information
 '''
 
-rprog("vmwareinfo", "vmware information ",
+rprog("vminfo", "virtual machine information ",
       "-h   - list available options",
       help)
 

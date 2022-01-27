@@ -49,7 +49,27 @@ def vmw_mem(options):
     print ("\n")
 
 
-def vmwareinfo():
+def hv_mem(options):
+    dm_device = readSymbol("dm_device")
+    if dm_device == 0:
+        return
+
+    print("Hyper-V initialized")
+    print("-------------------\n")
+    print("%22s = %d" % ("num_pages_balloonedd", dm_device.num_pages_ballooned))
+    print("%22s = %d" % ("num_pages_onlined", dm_device.num_pages_onlined))
+    print("%22s = %d" % ("num_pages_added", dm_device.num_pages_added))
+
+
+def balloon_info(options):
+    hv_context = readSymbol("hv_context")
+    if hv_context != 0 and hv_context.synic_initialized == 1:
+        hv_mem(options)
+    else:
+        vmw_mem(options)
+
+
+def vminfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
@@ -58,10 +78,8 @@ def vmwareinfo():
     (o, args) = op.parse_args()
 
 
-    vmw_mem(o)
-
-
+    balloon_info(o)
 
 
 if ( __name__ == '__main__'):
-    vmwareinfo()
+    vminfo()
