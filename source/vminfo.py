@@ -67,7 +67,7 @@ def hv_mem(options, hv_context):
 
     print("Hyper-V virtual machine")
     print("-----------------------\n")
-    print("%22s = %d" % ("num_pages_balloonedd", dm_device.num_pages_ballooned))
+    print("%22s = %d" % ("num_pages_ballooned", dm_device.num_pages_ballooned))
     print("%22s = %d" % ("num_pages_onlined", dm_device.num_pages_onlined))
     print("%22s = %d" % ("num_pages_added", dm_device.num_pages_added))
 
