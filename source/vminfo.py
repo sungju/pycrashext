@@ -76,7 +76,12 @@ def hv_mem(options, hv_context):
 
 
 def balloon_info(options):
-    hv_context = readSymbol("hv_context")
+    hv_context = 0
+    try:
+        hv_context = readSymbol("hv_context")
+    except:
+        pass
+
     if hv_context != 0 and hv_context.synic_initialized == 1:
         hv_mem(options, hv_context)
     else:
