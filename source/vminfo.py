@@ -14,15 +14,6 @@ import crashcolor
 def vmw_mem(options):
     print("VMware virtual machine")
     print("----------------------\n")
-
-    try:
-        pa = readSymbol('balloon');
-        if (pa == 0):
-            return
-    except:
-        print ("VMware balloon symbol does not exist")
-        return
-
     if options.show_details:
         baddr = sym2addr('balloon')
         balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
@@ -84,8 +75,19 @@ def balloon_info(options):
 
     if hv_context != 0 and hv_context.synic_initialized == 1:
         hv_mem(options, hv_context)
-    else:
+        return
+
+    balloon = 0
+    try:
+        balloon = readSymbol('balloon');
+    except:
+        pass
+
+    if balloon != 0:
         vmw_mem(options)
+        return
+
+    print("Not VM environment or not recognizable VM")
 
 
 def vminfo():
