@@ -11,7 +11,7 @@ import sys
 import crashcolor
 
 
-def vmw_mem(options):
+def vmw_mem(options, balloon):
     print("VMware virtual machine")
     print("----------------------\n")
     if options.show_details:
@@ -20,25 +20,25 @@ def vmw_mem(options):
         print ('%s' % (balloon_result))
 
     crashcolor.set_color(crashcolor.LIGHTRED)
-    print ("allocated size (pages)     = %d" % pa.size)
+    print ("allocated size (pages)     = %d" % balloon.size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %
-           (pa.size * crash.PAGESIZE,
-           ((pa.size * crash.PAGESIZE)/1024/1024/1024)))
-    print ("required target (pages)    = %d" % pa.target)
+           (balloon.size * crash.PAGESIZE,
+           ((balloon.size * crash.PAGESIZE)/1024/1024/1024)))
+    print ("required target (pages)    = %d" % balloon.target)
     print ("required target (bytes)    = %d, (%.2fGB)" %
-           (pa.target * crash.PAGESIZE,
-           ((pa.target * crash.PAGESIZE)/1024/1024/1024)))
+           (balloon.target * crash.PAGESIZE,
+           ((balloon.target * crash.PAGESIZE)/1024/1024/1024)))
     crashcolor.set_color(crashcolor.RESET)
 
     print ("")
 
-    if (member_offset(pa, "n_refused_pages") > -1):
+    if (member_offset(balloon, "n_refused_pages") > -1):
         print ("refuesed pages             = %d" %
-               pa.n_refused_pages)
-    print ("rate_alloc                 = %d" % pa.rate_alloc)
+               balloon.n_refused_pages)
+    print ("rate_alloc                 = %d" % balloon.rate_alloc)
 
-    if (member_offset(pa, "rate_free") > -1):
-        print ("rate_free                  = %d" % pa.rate_free)
+    if (member_offset(balloon, "rate_free") > -1):
+        print ("rate_free                  = %d" % balloon.rate_free)
 
     print ("\n")
 
@@ -84,7 +84,7 @@ def balloon_info(options):
         pass
 
     if balloon != 0:
-        vmw_mem(options)
+        vmw_mem(options, balloon)
         return
 
     print("Not VM environment or not recognizable VM")
