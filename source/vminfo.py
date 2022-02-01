@@ -90,14 +90,67 @@ def balloon_info(options):
     print("Not VM environment or not recognizable VM")
 
 
+def show_vmci_handle_arr(vmci_handle_arr, name):
+    print("\t%s" % name)
+    print("\t\tcapacity: %d" % (vmci_handle_arr.capacity))
+    print("\t\tmax_capacity: %d" % (vmci_handle_arr.max_capacity))
+    print("\t\tsize: %d" % (vmci_handle_arr.size))
+    print("\t\tentries: %d" % (vmci_handle_arr.entries))
+    try:
+        for i in range(0, vmci_handle_arr.capacity):
+            vmci_handle = vmci_handle_arr.entries[i]
+            print("\t\t\tentries[%d] : context = %d, resource = %d" %
+                  (i, vmci_handle.context, vmci_handle.resource))
+    except:
+        pass
+
+
+def show_vmci_context(options, ctx_list):
+    for vmci_ctx in readSUListFromHead(ctx_list.head,
+                                       "list_item",
+                                       "struct vmci_ctx"):
+        print(vmci_ctx)
+        show_vmci_handle_arr(vmci_ctx.queue_pair_array, "queue_pair_array")
+        show_vmci_handle_arr(vmci_ctx.doorbell_array, "doorbell_array")
+        show_vmci_handle_arr(vmci_ctx.pending_doorbell_array, "pending_doorbell_array")
+
+
+def show_vmci_qp_guest_endpoints(options, qp_guest_endpoints):
+    for qp_entry in readSUListFromHead(qp_guest_endpoints.head,
+                                       "list_item",
+                                       "struct qp_entry"):
+        print(qp_entry)
+        ep = readSU("struct qp_guest_endpoint", qp_entry)
+        print(ep)
+
+
+def show_vm_context(options):
+    try:
+        ctx_list = readSymbol("ctx_list")
+        show_vmci_context(options, ctx_list)
+
+        print("")
+        qp_guest_endpoints = readSymbol("qp_guest_endpoints")
+        show_vmci_qp_guest_endpoints(options, qp_guest_endpoints)
+        return
+    except:
+        pass
+
+
 def vminfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
+    op.add_option("-c", "--context", dest="show_context", default=0,
+                  action="store_true",
+                  help="Show VM Context")
 
     (o, args) = op.parse_args()
 
+    if o.show_context:
+        show_vm_context(o)
+        sys.exit(0)
 
     balloon_info(o)
 
