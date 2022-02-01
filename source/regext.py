@@ -296,11 +296,11 @@ rprog("screen",
 
 
 help='''
-RPC information 
+IPC information 
 '''
 
-rprog("rpcinfo",
-        "rpc information",
+rprog("ipcinfo",
+        "ipc information",
         "-h     list available options",
         help)
 
