@@ -295,8 +295,19 @@ rprog("screen",
         help)
 
 
+help='''
+RPC information 
+'''
+
+rprog("rpcinfo",
+        "rpc information",
+        "-h     list available options",
+        help)
+
+
+
 import crashcolor
 
 crashcolor.set_color(crashcolor.BLUE)
-print("\n\tWritten by Daniel Kwon (dkwon@redhat.com)")
+#print("\n\tWritten by Daniel Kwon (dkwon@redhat.com)")
 crashcolor.set_color(crashcolor.RESET)
