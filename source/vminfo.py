@@ -95,7 +95,7 @@ def show_vmci_handle_arr(vmci_handle_arr, name):
     print("\t\tcapacity: %d" % (vmci_handle_arr.capacity))
     print("\t\tmax_capacity: %d" % (vmci_handle_arr.max_capacity))
     print("\t\tsize: %d" % (vmci_handle_arr.size))
-    print("\t\tentries: %d" % (vmci_handle_arr.entries))
+    print("\t\tentries[]: 0x%x" % (vmci_handle_arr.entries))
     try:
         for i in range(0, vmci_handle_arr.capacity):
             vmci_handle = vmci_handle_arr.entries[i]
