@@ -386,6 +386,22 @@ MS_BORN = (1 << 29)
 
 page_caches = {}
 
+
+def pages_to_str(pages):
+    page_bytes = pages * 4096
+    result_str = ""
+    if page_bytes > 1024*1024*1024:
+        result_str = "%d GB" % (page_bytes/1024/1024/1024)
+    elif page_bytes > 1024*1024:
+        result_str = "%d MB" % (page_bytes/1024/1024)
+    elif page_bytes > 1024:
+        result_str = "%d KB" % (page_bytes/1024)
+    else:
+        result_str = "%d B" % (page_bytes)
+
+    return result_str
+
+
 #
 # There's a little bit of differece between the calculated totla
 # and the output of kmem -i (CACHED).
@@ -406,10 +422,10 @@ def show_page_caches(options):
                             key=operator.itemgetter(1), reverse=True)
     total_count = 0
     exclude_count = 0
-    print("=" * 60)
-    print("%18s %9s %-12s %s" %\
-          ("super_block   ", "pages", "s_id", "root"))
-    print("-" * 60)
+    print("=" * 75)
+    print("%18s %9s %9s %-12s %s" %\
+          ("super_block   ", "pages ", "bytes  ", " s_id", "root"))
+    print("-" * 75)
     for sb, count in sorted_sb_dict:
         try:
             total_count = total_count + count
@@ -419,15 +435,19 @@ def show_page_caches(options):
                 s_op_name = addr2sym(sb.s_op)
                 if s_op_name == "shmem_ops":
                     filename = "shared memory"
-            print("0x%x %9d %-12s %s" %
-                  (sb, count, sb.s_id, filename))
+            page_bytes = pages_to_str(count)
+            print("0x%x %9d (%7s) %-12s %s" %
+                  (sb, count, page_bytes, sb.s_id, filename))
         except:
             pass
 
-    print("-" * 60)
-    print("Total number of page caches = %d" % (total_count))
-    print("   (exclude /dev/ and unnamed root) = %d" % (total_count - exclude_count))
-    print("=" * 60)
+    print("-" * 75)
+    print("Total number of page caches = %d (%s)" %
+          (total_count, pages_to_str(total_count)))
+    pages_without_dev = (total_count - exclude_count)
+    print("   (exclude /dev/ and unnamed root) = %d (%s)" %
+          (pages_without_dev, pages_to_str(pages_without_dev)))
+    print("=" * 75)
 
 
 def show_pagecache_sb(sb, options):

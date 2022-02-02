@@ -60,6 +60,10 @@ def ipcinfo():
         sys.exit(0)
 
 
+    # when no selection is given
+    show_shared_memory(o)
+
+
 
 if ( __name__ == '__main__'):
     ipcinfo()
