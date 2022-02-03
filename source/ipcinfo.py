@@ -10,25 +10,43 @@ from pykdump.API import *
 import sys
 import crashcolor
 
+
+def bytes_to_str(num_bytes):
+    num_str = ""
+    if num_bytes > (1024*1024*1024):
+        num_str = "%d GB" % (num_bytes / 1024/1024/1024)
+    elif num_bytes > (1024*1024):
+        num_str = "%d MB" % (num_bytes / 1024/1024)
+    elif num_bytes > 1024:
+        num_str = "%d KB" % (num_bytes / 1024)
+    else:
+        num_str = "%d Bytes" % (num_bytes)
+
+    return num_str
+
+
 def show_shared_memory(options):
     try:
         result_lines = exec_crash_command("ipcs -m").splitlines()
         print(result_lines[0])
         if len(result_lines) == 1:
             return
+        total_bytes = 0
         for shm_line in result_lines[1:]:
             words = shm_line.split()
+            if len(words) < 6:
+                continue
             alloc_bytes = int(words[5])
+            total_bytes = total_bytes + alloc_bytes
             alloc_str = ""
             if alloc_bytes > (1024*1024*1024): #GB
                 crashcolor.set_color(crashcolor.LIGHTRED)
-                alloc_str = "%d GB" % (alloc_bytes / 1024/1024/1024)
             elif alloc_bytes > (1024*1024): # MB
                 crashcolor.set_color(crashcolor.LIGHTGREEN)
-                alloc_str = "%d MB" % (alloc_bytes / 1024/1024)
             else:
                 crashcolor.set_color(crashcolor.RESET)
-                alloc_str = "%d Bytes" % (alloc_bytes)
+
+            alloc_str = bytes_to_str(alloc_bytes)
 
             print(shm_line)
             if options.show_details:
@@ -43,7 +61,10 @@ def show_shared_memory(options):
                 print("\tcreator = 0x%x (%s) : %s" %
                       (creator, creator_comm, alloc_str))
 
-    except:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("\n\tTotal allocation = %s" % (bytes_to_str(total_bytes)))
+    except Exception as e:
+        print(e)
         pass
 
     crashcolor.set_color(crashcolor.RESET)
