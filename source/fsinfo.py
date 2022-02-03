@@ -412,8 +412,12 @@ def show_page_caches(options):
     for sb in readSUListFromHead(super_blocks,
                                  "s_list",
                                  "struct super_block"):
-        if sb.s_instances.pprev == 0:
-            continue
+        try:
+            if sb.s_instances.pprev == 0:
+                continue
+        except:
+            pass
+
         if sb.s_root != 0 and (sb.s_flags & MS_BORN) != 0:
             show_pagecache_sb(sb, options)
 

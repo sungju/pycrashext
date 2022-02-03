@@ -33,10 +33,15 @@ def show_shared_memory(options):
             print(shm_line)
             if options.show_details:
                 shmid_kernel = readSU("struct shmid_kernel", int(words[0], 16))
-                if (shmid_kernel.shm_creator != 0):
-                    creator = shmid_kernel.shm_creator
-                    print("\tcreator = 0x%x (%s) : %s" %
-                          (creator, creator.comm, alloc_str))
+                creator = 0
+                creator_comm = ""
+                if member_offset("struct shmid_kernel", "shm_creator") >= 0:
+                    if (shmid_kernel.shm_creator != 0):
+                        creator = shmid_kernel.shm_creator
+                        creator_comm = creator.comm
+
+                print("\tcreator = 0x%x (%s) : %s" %
+                      (creator, creator_comm, alloc_str))
 
     except:
         pass
