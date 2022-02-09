@@ -756,7 +756,7 @@ def show_dumpe2fs(options):
 def show_fsnotify_group(options):
     fsnotify_group = readSU("struct fsnotify_group",
                             int(options.fsnotify_group, 16))
-    if member_offset("struct wait_queue_head_t", "task_list") >= 0:
+    if member_offset("struct __wait_queue_head", "task_list") >= 0:
         notification_tasklist = fsnotify_group.notification_waitq.task_list
         field_name="task_list"
         wait_queue_name="struct __wait_queue"
@@ -779,6 +779,14 @@ def show_fsnotify_group(options):
             tsk = readSU("struct task_struct", wq.private)
             print("\tfunc: %s, task: %s <%s>" %
                   (func, tsk, tsk.comm))
+        elif func == "ep_poll_callback":
+            print(func)
+            epitem_offset = member_offset("struct eppoll_entry", "wait")
+            eppoll_entry = readSU("struct eppoll_entry", wq - epitem_offset)
+            epi = eppoll_entry.base
+            ep = epi.ep
+            print(epi)
+            print(ep.wq)
 
 
 DCACHE_ENTRY_TYPE=0x07000000
