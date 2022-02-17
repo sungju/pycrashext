@@ -370,6 +370,9 @@ def arm_stack_reg_op(words, result_str):
             # [sp + 8] = x30
             stack_word = words[len(words)-2]
             stack_op = words[len(words) - 1][1:]
+            if stack_op.endswith("]"):
+                stack_op = stack_op[:-1]
+
             if stack_op.startswith("0x"):
                 sp_offset = int(stack_op, 16)
             else:
