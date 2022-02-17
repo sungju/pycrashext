@@ -152,6 +152,17 @@ def get_thread_count(task):
                                      maxel=1000000);
     return len(thread_list)
 
+
+def get_task_state(task):
+    if member_offset("struct task_struct", "state") >= 0:
+        return task.state
+
+    if member_offset("struct task_struct", "__state") >= 0:
+        return task.__state
+
+    return 0
+
+
 def print_task(task, depth, first, options):
     global pid_cnt
     global branch_locations
@@ -175,7 +186,8 @@ def print_task(task, depth, first, options):
     if (task.comm != 0):
         comm_str = task.comm
 
-    task_color = task_state_color(task.state)
+    task_state = get_task_state(task)
+    task_color = task_state_color(task_state)
     if task_color != crashcolor.RESET:
         crashcolor.set_color(task_color)
 
