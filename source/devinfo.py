@@ -127,6 +127,23 @@ def show_chrdevs():
                    (major, name, ops, addr2sym(ops)))
 
 
+def show_iotlb(options):
+    io_tlb_list = readSymbol("io_tlb_list")
+    io_tlb_nslabs = readSymbol("io_tlb_nslabs")
+    io_tlb_used = readSymbol("io_tlb_used")
+    io_tlb_index = readSymbol("io_tlb_index")
+    print("io_tlb_list = 0x%x" % (io_tlb_list))
+    print("io_tlb_nslabs = %d" % (io_tlb_nslabs))
+    print("io_tlb_used = %d" % (io_tlb_used))
+    print("io_tlb_index = %d" % (io_tlb_index))
+    print("io_tlb_list[%d] = %d" % (io_tlb_index, io_tlb_list[io_tlb_index]))
+
+    if options.show_details:
+        for i in range(0, io_tlb_nslabs):
+            print("io_tlb_list[%d] = %d" % (i, io_tlb_list[i]))
+
+
+
 def devinfo():
     op = OptionParser()
     op.add_option("-b", "--block",
@@ -145,6 +162,10 @@ def devinfo():
                   action="store_true",
                   help="Show detailed information")
 
+    op.add_option("-i", "--iotlb", dest="show_iotlb", default=False,
+                  action="store_true",
+                  help="Show IOTLB data")
+
     (o, args) = op.parse_args()
 
     if o.show_block:
@@ -152,6 +173,9 @@ def devinfo():
 
     if o.show_char:
         show_chrdevs()
+
+    if o.show_iotlb:
+        show_iotlb(o)
 
 
 if ( __name__ == '__main__'):
