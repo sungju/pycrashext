@@ -195,7 +195,7 @@ def print_task(task, depth, first, options):
            (comm_str,
             "(" + str(task.pid) + ")"
                 if options.print_pid else "",
-            "[" + task_state_str(task.state) +"]"
+            "[" + task_state_str(get_task_state(task)) +"]"
                 if options.print_state else "",
             thread_str))
     print ("%s" % (print_str), end='')
