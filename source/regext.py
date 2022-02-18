@@ -70,7 +70,7 @@ cgroup information
 --tree      - hierarchial display of cgroups
 '''
 
-rprog("cgroupinfo", "cgroup information",
+rprog("cginfo", "cgroup information",
       "-h    - list available options",
       help)
 

@@ -100,19 +100,54 @@ def cgroup_details(task_group, cgroup, idx):
 
 def cgroup_task_count(cgroup):
     count = 0
-    for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
-                                             'cgrp_link_list',
-                                             'struct cg_cgroup_link',
+    if member_offset("struct cgroup", "css_sets") >= 0:
+        list_start = cgroup.css_sets
+        entry_name = "cgrp_link_list"
+        struct_name = "struct cg_cgroup_link"
+    elif member_offset("struct cgroup", "cset_links") >= 0:
+        list_start = cgroup.cset_links
+        entry_name = "cset_link"
+        struct_name = "struct cgrp_cset_link"
+    else:
+        return 0
+
+    for cg_cgroup_link in readSUListFromHead(list_start,
+                                             entry_name,
+                                             struct_name,
                                              maxel=1000000):
-        count = count + cg_cgroup_link.cg.refcount.counter
+        if struct_name == "struct cg_cgroup_link":
+            count = count + cg_cgroup_link.cg.refcount.counter
+        elif struct_name == "struct cgrp_cset_link":
+            count = count + cg_group_link.cset.nr_tasks
+        else:
+            break
+
     return count
 
 
 def cgroup_task_list(cgroup, idx):
-    for cg_cgroup_link in readSUListFromHead(cgroup.css_sets,
-                                             'cgrp_link_list',
-                                             'struct cg_cgroup_link',
+    if member_offset("struct cgroup", "css_sets") >= 0:
+        list_start = cgroup.css_sets
+        entry_name = "cgrp_link_list"
+        struct_name = "struct cg_cgroup_link"
+    elif member_offset("struct cgroup", "cset_links") >= 0:
+        list_start = cgroup.cset_links
+        entry_name = "cset_link"
+        struct_name = "struct cgrp_cset_link"
+    else:
+        return 0
+
+    for cg_cgroup_link in readSUListFromHead(list_start,
+                                             entry_name,
+                                             struct_name,
                                              maxel=1000000):
+        if struct_name == "struct cg_cgroup_link":
+            task_list = cg_group_link.cg.tasks
+        elif struct_name == "struct cgrp_cset_link":
+            task_list = cg_group_link.cgrp.tasks
+        else:
+            break
+
         for task in readSUListFromHead(cg_cgroup_link.cg.tasks,
                                        "cg_list",
                                        "struct task_struct",
@@ -140,14 +175,16 @@ def show_cgroup_tree(options):
         rootnode = readSymbol("rootnode")
         show_cgroup_tree_from_rootnode(rootnode, options)
         return
-    except:
+    except Exception as e:
+        print(e)
         pass
 
     try:
         cgroup_roots = readSymbol("cgroup_roots")
         show_cgroup_tree_from_cgroup_roots(cgroup_roots, options)
         return
-    except:
+    except Exception as e:
+        print(e)
         pass
 
 
@@ -230,12 +267,32 @@ PAGE_SIZE = 4096
 def print_task_list(idx, cur_cgroup):
     offset = member_offset("struct task_struct", "cg_list")
     print("%stasks = " % ("  " * idx + "   "), end="")
-    for cg_link in readSUListFromHead(cur_cgroup.css_sets,
-                                           "cgrp_link_list",
-                                           "struct cg_cgroup_link"):
-        if cg_link.cg == 0:
+
+    if member_offset("struct cgroup", "css_sets") >= 0:
+        list_start = cur_cgroup.css_sets
+        entry_name = "cgrp_link_list"
+        struct_name = "struct cg_cgroup_link"
+    elif member_offset("struct cgroup", "cset_links") >= 0:
+        list_start = cur_cgroup.cset_links
+        entry_name = "cset_link"
+        struct_name = "struct cgrp_cset_link"
+    else:
+        return 0
+
+    for cg_link in readSUListFromHead(list_start,
+                                      entry_name,
+                                      struct_name):
+
+        if struct_name == "struct cg_cgroup_link":
+            cg_link_cg = cg_link.cg
+        elif struct_name == "struct cgrp_cset_link":
+            cg_link_cg = cg_link.cgrp
+        else:
+            break
+
+        if cg_link_cg == 0:
             continue
-        for task in readSUListFromHead(cg_link.cg.tasks,
+        for task in readSUListFromHead(cg_link_cg.tasks,
                                              "cg_list",
                                              "struct task_struct"):
             print("%d(%s) " % (task.pid, task.comm), end="")
