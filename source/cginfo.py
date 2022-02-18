@@ -362,7 +362,10 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         else:
             crashcolor.set_color(crashcolor.RESET)
 
-        subsys_name = addr2sym(subsys.ss)
+        if (member_offset("struct cgroup_subsys_state", "ss") >= 0):
+            subsys_name = addr2sym(subsys.ss)
+        else:
+            subsys_name =""
 
         show_entry = True
         if (options.filter_cgroup_name != "" and
