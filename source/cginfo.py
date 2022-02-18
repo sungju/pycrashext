@@ -362,12 +362,21 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         else:
             crashcolor.set_color(crashcolor.RESET)
 
-        if (options.filter_cgroup_name == "" or
-                cgroup_name.find(options.filter_cgroup_name) >= 0):
+        subsys_name = addr2sym(subsys.ss)
+
+        show_entry = True
+        if (options.filter_cgroup_name != "" and
+                cgroup_name.find(options.filter_cgroup_name) == -1):
+            show_entry = False
+
+        if (options.filter_subsys != "" and
+                subsys_name.find(options.filter_subsys) == -1):
+            show_entry = False
+
+        if (show_entry == True):
             print ("%s%s%s at 0x%x (%d) // %s" %
                    ("  " * idx, "+--" if idx > 0 else "",
-                    cgroup_name, cgroup, cgroup_counter,
-                    addr2sym(subsys.ss)))
+                    cgroup_name, cgroup, cgroup_counter, subsys_name))
             if options.show_detail:
                 print_cgroup_details(idx, cgroup)
 
@@ -586,6 +595,10 @@ def cgroupinfo():
     op.add_option("-n", "--name", dest="filter_cgroup_name", default="",
                   action="store", type="string",
                   help="Shows cgroups with specified name only")
+
+    op.add_option("-s", "--subsys", dest="filter_subsys", default="",
+                  action="store", type="string",
+                  help="Shows cgroups with specified subsystem only")
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)
