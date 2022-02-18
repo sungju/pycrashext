@@ -118,7 +118,7 @@ def cgroup_task_count(cgroup):
         if struct_name == "struct cg_cgroup_link":
             count = count + cg_cgroup_link.cg.refcount.counter
         elif struct_name == "struct cgrp_cset_link":
-            count = count + cg_group_link.cset.nr_tasks
+            count = count + cg_cgroup_link.cset.nr_tasks
         else:
             break
 
@@ -142,9 +142,9 @@ def cgroup_task_list(cgroup, idx):
                                              struct_name,
                                              maxel=1000000):
         if struct_name == "struct cg_cgroup_link":
-            task_list = cg_group_link.cg.tasks
+            task_list = cg_cgroup_link.cg.tasks
         elif struct_name == "struct cgrp_cset_link":
-            task_list = cg_group_link.cgrp.tasks
+            task_list = cg_cgroup_link.cgrp.tasks
         else:
             break
 
@@ -286,7 +286,7 @@ def print_task_list(idx, cur_cgroup):
         if struct_name == "struct cg_cgroup_link":
             cg_link_cg = cg_link.cg
         elif struct_name == "struct cgrp_cset_link":
-            cg_link_cg = cg_link.cgrp
+            cg_link_cg = cg_link.cset
         else:
             break
 
@@ -362,16 +362,18 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         else:
             crashcolor.set_color(crashcolor.RESET)
 
-        print ("%s%s%s at 0x%x (%d)" %
-               ("  " * idx, "+--" if idx > 0 else "",
-                cgroup_name, cgroup, cgroup_counter))
-        if options.show_detail:
-            print_cgroup_details(idx, cgroup)
+        if (options.filter_cgroup_name == "" or
+                cgroup_name.find(options.filter_cgroup_name) >= 0):
+            print ("%s%s%s at 0x%x (%d) // %s" %
+                   ("  " * idx, "+--" if idx > 0 else "",
+                    cgroup_name, cgroup, cgroup_counter,
+                    addr2sym(subsys.ss)))
+            if options.show_detail:
+                print_cgroup_details(idx, cgroup)
 
-        if options.task_list:
-            cgroup_task_list(cgroup, idx)
-#        if (cgroup.parent == 0):
-#            top_cgroup = cgroup
+            if options.task_list:
+                cgroup_task_list(cgroup, idx)
+
 
         head_of_list = None
         if member_offset("struct cgroup", "children") > -1:
@@ -581,6 +583,9 @@ def cgroupinfo():
                   action="store_true",
                   help="mem_cgroup_idr detail include free entries")
 
+    op.add_option("-n", "--name", dest="filter_cgroup_name", default="",
+                  action="store", type="string",
+                  help="Shows cgroups with specified name only")
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)
@@ -596,13 +601,10 @@ def cgroupinfo():
 
     if (o.taskgroup_list):
         show_task_group(o)
-#        sys.exit(0)
+        sys.exit(0)
 
-    if (o.cgroup_tree):
-        show_cgroup_tree(o)
-#        sys.exit(0)
-
-    # show_task_group()
+    # default is showing tree
+    show_cgroup_tree(o)
 
 
 if ( __name__ == '__main__'):
