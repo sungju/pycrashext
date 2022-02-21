@@ -325,6 +325,10 @@ def print_cgroup_details(idx, cur_cgroup):
     print_task_list(idx, cur_cgroup)
 
 
+def list_empty(list_head):
+    return list_head.next == list_head.prev
+
+
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
     global empty_count
     global cgroup_count
@@ -392,19 +396,23 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
             head_of_list = cgroup.children
             struct_name = "struct cgroup"
         elif member_offset("struct cgroup_subsys_state", "children") > -1:
-            head_of_list = subsys.children
+            head_of_list = cgroup.self.children
             struct_name = "struct cgroup_subsys_state"
 
         for childaddr in readSUListFromHead(head_of_list,
                                             'sibling', struct_name,
                                             maxel=1000000):
+            has_child = True
             if struct_name == "struct cgroup":
                 cgroup = readSU(struct_name, childaddr)
             else:
                 subsys_state = readSU(struct_name, childaddr)
                 cgroup = subsys_state.cgroup
+                if list_empty(subsys_state.children):
+                    has_child = False
 
-            print_cgroup_entry(top_cgroup, cgroup, idx + 1, options)
+            if has_child == True:
+                print_cgroup_entry(top_cgroup, cgroup, idx + 1, options)
 
 #        if (idx == 0):
 #            print ("")
