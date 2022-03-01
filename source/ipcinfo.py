@@ -25,18 +25,31 @@ def bytes_to_str(num_bytes):
     return num_str
 
 
+def getKey(shmObj):
+    shm_bytes = shmObj["bytes"]
+    return shm_bytes
+
+
 def show_shared_memory(options):
     try:
         result_lines = exec_crash_command("ipcs -m").splitlines()
         print(result_lines[0])
         if len(result_lines) == 1:
             return
-        total_bytes = 0
+
+        shm_list = []
         for shm_line in result_lines[1:]:
             words = shm_line.split()
             if len(words) < 6:
                 continue
-            alloc_bytes = int(words[5])
+            shm_data = {"bytes" : int(words[5]), "data": words, "raw": shm_line}
+            shm_list.append(shm_data)
+
+        shm_list_sorted = sorted(shm_list, key=getKey, reverse=False)
+
+        total_bytes = 0
+        for shm_data in shm_list_sorted:
+            alloc_bytes = shm_data["bytes"]
             total_bytes = total_bytes + alloc_bytes
             alloc_str = ""
             if alloc_bytes > (1024*1024*1024): #GB
@@ -48,9 +61,10 @@ def show_shared_memory(options):
 
             alloc_str = bytes_to_str(alloc_bytes)
 
-            print(shm_line)
+            print(shm_data["raw"])
             if options.show_details:
-                shmid_kernel = readSU("struct shmid_kernel", int(words[0], 16))
+                shmid_kernel = readSU("struct shmid_kernel",
+                                      int(shm_data["data"][0], 16))
                 creator = 0
                 creator_comm = ""
                 if member_offset("struct shmid_kernel", "shm_creator") >= 0:
