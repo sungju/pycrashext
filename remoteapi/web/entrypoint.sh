@@ -3,7 +3,11 @@
 rm -rf bin/
 
 python3 -m venv .
-. bin/activate
+if [[ "$OSTYPE" == "msys" ]]; then
+	source Scripts/activate.bat
+else
+	. bin/activate
+fi
 
 export PYTHONPATH="/usr/lib/python3/dist-packages:/usr/local/lib/python3.6/dist-packages:/usr/lib/python3.6/site-packages:$PWD/insights-core"
 
