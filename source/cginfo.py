@@ -5,17 +5,35 @@
 from __future__ import print_function
 
 from pykdump.API import *
+from LinuxDump.trees import *
 
 import sys
 from optparse import OptionParser
 
 import crashcolor
 
+PAGE_SIZE = 4096
+
 empty_count = 0
 cgroup_count = 0
 
 cgroup_subsys_func_list = {}
 
+first_ksymbol = 0
+
+def check_global_symbols():
+    global first_ksymbol
+
+    try:
+        help_s_out = exec_crash_command("help -s")
+        lines = help_s_out.splitlines()
+        for line in lines:
+            words = line.split(":")
+            if words[0].strip() == "first_ksymbol":
+                first_ksymbol = int(words[1].split()[0], 16)
+                return
+    except Exception as e:
+        pass
 
 def cpu_cgroup_subsys_detail(task_group, cgroup, subsys, idx):
     cfs_period_us = task_group.cfs_bandwidth.period.tv64 / 1000
@@ -170,13 +188,235 @@ def dentry_to_filename (dentry) :
     except:
         return "<invalid>"
 
+
+def show_cgroup2_file_detail(options, kernfs_node, idx):
+    global first_ksymbol
+
+    cgroup = readSU("struct cgroup", kernfs_node.parent.priv)
+    cftype = readSU("struct cftype", kernfs_node.priv)
+    ss = cftype.ss
+#    print(cgroup) # DEBUG
+#    print(cftype) # DEBUG
+    if ss != None and ss != 0 and int(ss) >= first_ksymbol:
+        ss_id = ss.id
+        ss_name = ss.name
+        css = cgroup.subsys[ss_id]
+    else:
+        css = cgroup.self
+        ss = css.ss
+        if ss != None and ss != 0:
+            ss_name = ss.name
+        elif cftype.name.startswith("cgroup."):
+            ss_name = cftype.name
+        else:
+            print("")
+            return
+
+    idx_str = "  " * idx + "      `"
+    if ss_name == "memory":
+        show_memory_value(kernfs_node, cgroup, cftype, ss, css)
+    elif ss_name == "cpu":
+        show_cpu_value(kernfs_node, cgroup, cftype, ss, css)
+    elif ss_name.startswith("cgroup."):
+        show_cgroup_value(kernfs_node, cgroup, cftype, ss, css)
+    else:
+        print("")
+        print("%s%s (0x%x)" % (idx_str, ss_name, css))
+
+    #print(cftype)
+
+
+def show_cpu_value_max(tg):
+    cfs_period = tg.cfs_bandwidth.period / 1000
+    cfs_quota = tg.cfs_bandwidth.quota
+    if cfs_quota == 18446744073709551615: # RUNTIME_INF     ((u64)~0ULL)
+        cfs_quota = -1
+    else:
+        cfs_quota = cfs_quota / 1000
+
+    quota_str = "max" if cfs_quota < 0 else ("%d" % cfs_quota)
+    print(" = %s %d" % (quota_str, cfs_period))
+
+
+def show_cpu_value_weight(tg):
+    CGROUP_WEIGHT_DFL=100
+    weight = tg.shares * CGROUP_WEIGHT_DFL
+    weight = weight / (1024/2)
+    print(" = %d" % (weight))
+
+
+MAX_NICE = 19
+MIN_NICE = -20
+NICE_WIDTH = (MAX_NICE - MIN_NICE + 1)
+MAX_RT_PRIO = 100
+DEFAULT_PRIO = (MAX_RT_PRIO + NICE_WIDTH / 2)
+
+def show_cpu_value_weight_nice(tg):
+    weight = tg.shares
+    last_delta = sys.maxsize
+    sched_prio_to_weight = readSymbol("sched_prio_to_weight")
+    prio = 0
+
+    for i in range(0, len(sched_prio_to_weight)):
+        delta = abs(sched_prio_to_weight[i] - weight)
+        prio = i
+        if delta >= last_delta:
+            break
+        last_delta = delta
+
+    weight = (prio - 1 + MAX_RT_PRIO) - DEFAULT_PRIO
+    print(" = %d" % (weight))
+
+
+def show_cpu_value_burst(tg):
+    burst = tg.cfs_bandwidth.burst / 1000
+    print(" = %d" % (burst))
+
+
+def show_cpu_value_idle(tg):
+    print(" = %d" % (tg.idle))
+
+
+def show_cpu_value(kn, cgroup, cftype, ss, css):
+    css_offset = member_offset("struct task_group", "css")
+    tg = readSU("struct task_group", css - css_offset)
+    crashcolor.set_color(crashcolor.BLUE)
+    if kn.name.endswith(".max"):
+        show_cpu_value_max(tg)
+    elif kn.name.endswith(".weight"):
+        show_cpu_value_weight(tg)
+    elif kn.name.endswith(".weight.nice"):
+        show_cpu_value_weight_nice(tg)
+    elif kn.name.endswith(".burst"):
+        show_cpu_value_burst(tg)
+    elif kn.name.endswith(".idle"):
+        show_cpu_value_idle(tg)
+    else:
+        print("")
+    crashcolor.set_color(crashcolor.RESET)
+        
+
+
+def show_memory_value(kn, cgroup, cftype, ss, css):
+    css_offset = member_offset("struct mem_cgroup", "css")
+    mem_cgroup = readSU("struct mem_cgroup", css - css_offset)
+    crashcolor.set_color(crashcolor.BLUE)
+    if kn.name.endswith(".max"):
+        print(" = %d" % (mem_cgroup.memory.max))
+    elif kn.name.endswith(".high"):
+        print(" = %d" % (mem_cgroup.memory.high))
+    elif kn.name.endswith(".min"):
+        print(" = %d" % (mem_cgroup.memory.min))
+    elif kn.name.endswith(".low"):
+        print(" = %d" % (mem_cgroup.memory.low))
+    elif kn.name.endswith(".current"):
+        print(" = %d" % (mem_cgroup.memory.usage.counter * PAGE_SIZE))
+    else:
+        print("")
+    crashcolor.set_color(crashcolor.RESET)
+
+
+
+def show_cgroup_value(kn, cgroup, cftype, ss, css):
+    crashcolor.set_color(crashcolor.BLUE)
+    if kn.name.endswith(".procs"):
+        show_cgroup_value_procs(kn, cgroup, cftype, ss, css)
+    elif kn.name.endswith(".threads"):
+        show_cgroup_value_procs(kn, cgroup, cftype, ss, css)
+    else:
+        print("")
+    crashcolor.set_color(crashcolor.RESET)
+    pass
+
+
+def show_cgroup_value_procs(kn, cgroup, cftype, ss, css):
+    first_print = True
+
+    task_offset = member_offset("struct task_struct", "cg_list")
+    if ss != None and ss != 0:
+        cset_pos = cgroup.e_csets[ss.id]
+    else:
+        cset_pos = cgroup.cset_links
+
+    for cgrp_cset_link in readSUListFromHead(cset_pos,
+                                            'cset_link',
+                                            'struct cgrp_cset_link',
+                                            maxel=1000000):
+        for task in readSUListFromHead(cgrp_cset_link.cset.tasks,
+                                        "cg_list",
+                                        "struct task_struct",
+                                        maxel=1000000):
+            if first_print == True:
+                first_print = False
+                print(" =", end="")
+            print(" %d(%s) " % (task.pid, task.comm), end="")
+
+    print("")
+
+
+def show_cgroup2_files(options, cgrp, idx):
+    idx_str = "  " * idx + "   * "
+    for kerndir in for_all_rbtree(cgrp.kn.dir.children,
+                                "struct kernfs_node",
+                                "rb"):
+        try:
+            kn = readSU("struct kernfs_node", kerndir)
+#            if kn.count.counter == 0:
+#                continue
+            print("%s%s (0x%x)" % (idx_str, kn.name, kn), end="")
+            show_cgroup2_file_detail(options, kn, idx)
+        except Exception as e:
+            print(e)
+            pass
+
+
+def show_cgroup2_tree_node(options, cgrp, idx):
+    idx_str = "  " * idx
+    cg_name = cgrp.kn.name
+    if len(cg_name) == 0:
+        cg_name = "/"
+    print("%s+- %s (0x%x)" % (idx_str, cg_name, cgrp))
+    if options.show_detail:
+        show_cgroup2_files(options, cgrp, idx)
+
+    self_offset = member_offset("struct cgroup", "self")
+    for subsys in readSUListFromHead(cgrp.self.children,
+                                    'sibling',
+                                    'struct cgroup_subsys_state',
+                                    maxel=1000000):
+        subcgrp = readSU("struct cgroup", subsys + self_offset)
+
+        show_cgroup2_tree_node(options, subcgrp, idx + 1)
+    pass
+
+
+def show_cgroup2_tree(options):
+    cgrp_dfl_root = readSymbol("cgrp_dfl_root")
+    show_cgroup2_tree_node(options, cgrp_dfl_root.cgrp, 0)
+    pass
+
+
+CGRP_ROOT_CPUSET_V2_MODE=(1<<4)
+
 def show_cgroup_tree(options):
+    try:
+        cpuset_cgrp_subsys_on_dfl_key = readSymbol("cpuset_cgrp_subsys_on_dfl_key")
+        key_enabled = cpuset_cgrp_subsys_on_dfl_key.key.enabled.counter
+        cpuset_cgrp_subsys = readSymbol("cpuset_cgrp_subsys")
+        subsys_flags = cpuset_cgrp_subsys.root.flags
+        if (key_enabled != 0 or
+                (subsys_lags & CGRP_ROOT_CPUSET_V2_MODE) == CGRP_ROOT_CPUSET_V2_MODE):
+            show_cgroup2_tree(options)
+            return
+    except Exception as e:
+        print(e)
+        pass
+
     try:
         rootnode = readSymbol("rootnode")
         show_cgroup_tree_from_rootnode(rootnode, options)
         return
     except Exception as e:
-        print(e)
         pass
 
     try:
@@ -184,7 +424,6 @@ def show_cgroup_tree(options):
         show_cgroup_tree_from_cgroup_roots(cgroup_roots, options)
         return
     except Exception as e:
-        print(e)
         pass
 
 
@@ -261,7 +500,6 @@ def get_page_shift():
     return idx - 1
 
 
-PAGE_SIZE = 4096
 
 
 def print_task_list(idx, cur_cgroup):
@@ -632,4 +870,5 @@ def cgroupinfo():
 
 
 if ( __name__ == '__main__'):
+    check_global_symbols()
     cgroupinfo()
