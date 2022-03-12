@@ -8,6 +8,7 @@ from pykdump.API import *
 from LinuxDump.trees import *
 
 import sys
+import operator
 from optparse import OptionParser
 
 import crashcolor
@@ -354,20 +355,33 @@ def show_cgroup_value_procs(kn, cgroup, cftype, ss, css):
     print("")
 
 
+def getKNName(kernfs_node):
+    return kernfs_node.name
+
+
 def show_cgroup2_files(options, cgrp, idx):
     idx_str = "  " * idx + "   * "
+    kn_list = []
     for kerndir in for_all_rbtree(cgrp.kn.dir.children,
                                 "struct kernfs_node",
                                 "rb"):
         try:
             kn = readSU("struct kernfs_node", kerndir)
-#            if kn.count.counter == 0:
-#                continue
-            print("%s%s (0x%x)" % (idx_str, kn.name, kn), end="")
-            show_cgroup2_file_detail(options, kn, idx)
+            kn_list.append(kn)
         except Exception as e:
             print(e)
             pass
+
+
+    sorted_kn_list = sorted(kn_list, key=getKNName, reverse=False)
+
+    for kn in sorted_kn_list:
+        print("%s%s (0x%x)" % (idx_str, kn.name, kn), end="")
+        show_cgroup2_file_detail(options, kn, idx)
+
+
+def getCgroupName(cgroup):
+    return cgroup.kn.name
 
 
 def show_cgroup2_tree_node(options, cgrp, idx):
@@ -380,14 +394,19 @@ def show_cgroup2_tree_node(options, cgrp, idx):
         show_cgroup2_files(options, cgrp, idx)
 
     self_offset = member_offset("struct cgroup", "self")
+    cgroup_list = []
     for subsys in readSUListFromHead(cgrp.self.children,
                                     'sibling',
                                     'struct cgroup_subsys_state',
                                     maxel=1000000):
         subcgrp = readSU("struct cgroup", subsys + self_offset)
+        cgroup_list.append(subcgrp)
 
+    sorted_cgroup_list = sorted(cgroup_list, key=getCgroupName, reverse=False)
+
+    for subcgrp in sorted_cgroup_list:
         show_cgroup2_tree_node(options, subcgrp, idx + 1)
-    pass
+
 
 
 def show_cgroup2_tree(options):
