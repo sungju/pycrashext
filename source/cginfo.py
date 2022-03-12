@@ -321,16 +321,16 @@ def show_memory_value(kn, cgroup, cftype, ss, css):
 def show_cgroup_value(kn, cgroup, cftype, ss, css):
     crashcolor.set_color(crashcolor.BLUE)
     if kn.name.endswith(".procs"):
-        show_cgroup_value_procs(kn, cgroup, cftype, ss, css)
+        show_cgroup_value_procs(kn, cgroup, cftype, ss, css, False)
     elif kn.name.endswith(".threads"):
-        show_cgroup_value_procs(kn, cgroup, cftype, ss, css)
+        show_cgroup_value_procs(kn, cgroup, cftype, ss, css, True)
     else:
         print("")
     crashcolor.set_color(crashcolor.RESET)
     pass
 
 
-def show_cgroup_value_procs(kn, cgroup, cftype, ss, css):
+def show_cgroup_value_procs(kn, cgroup, cftype, ss, css, show_thread):
     first_print = True
 
     task_offset = member_offset("struct task_struct", "cg_list")
@@ -347,6 +347,8 @@ def show_cgroup_value_procs(kn, cgroup, cftype, ss, css):
                                         "cg_list",
                                         "struct task_struct",
                                         maxel=1000000):
+            if show_thread == False and task.pid != task.tgid:
+                continue
             if first_print == True:
                 first_print = False
                 print(" =", end="")
