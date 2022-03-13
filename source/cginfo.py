@@ -412,8 +412,13 @@ def show_cgroup2_tree_node(options, cgrp, idx):
 
 
 def show_cgroup2_tree(options):
-    cgrp_dfl_root = readSymbol("cgrp_dfl_root")
-    show_cgroup2_tree_node(options, cgrp_dfl_root.cgrp, 0)
+    if options.cgroup_addr != "":
+        cgroup = readSU("struct cgroup", int(options.cgroup_addr, 16))
+    else:
+        cgrp_dfl_root = readSymbol("cgrp_dfl_root")
+        cgroup = cgrp_dfl_root.cgrp
+        
+    show_cgroup2_tree_node(options, cgroup, 0)
     pass
 
 
@@ -838,6 +843,10 @@ def cgroupinfo():
     global PAGE_SIZE
 
     op = OptionParser()
+    op.add_option("-c", "--cgroup", dest="cgroup_addr", default="",
+                  action="store", type="string",
+                  help="Shows a speicific cgroup tree")
+
     op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
                   help="task_group list")
