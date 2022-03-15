@@ -236,11 +236,63 @@ Reserved GDT blocks:           319
 ```
 
 
-### cgroupinfo ###
+### cginfo ###
 It provides cgroup related information. It is mostly useful to find out how many cgroups were created in the system.
 
+#### cgroup v2 ####
+
 ```
-crash> cgroupinfo --tree
+crash> cginfo
++- / (0xffffffff8b24bc90)
+  +- dev-hugepages.mount (0xffff8e3cdd9c8000)
+  +- dev-mqueue.mount (0xffff8e3cce925000)
+  +- init.scope (0xffff8e3cc1e1e000)
+  +- sys-fs-fuse-connections.mount (0xffff8e3cc5a9c000)
+  +- sys-kernel-config.mount (0xffff8e3cc5a9b000)
+  +- sys-kernel-debug.mount (0xffff8e3cce924000)
+  +- sys-kernel-tracing.mount (0xffff8e3cce921000)
+  +- system.slice (0xffff8e3cc1e1b000)
+    +- ModemManager.service (0xffff8e3cc91e4000)
+    +- NetworkManager.service (0xffff8e3cc91e7000)
+    +- accounts-daemon.service (0xffff8e3cc7d56000)
+    +- alsa-state.service (0xffff8e3cc3567000)
+    +- atd.service (0xffff8e3cc92e3000)
+    +- auditd.service (0xffff8e3cc3563000)
+...
+
+
+crash> cginfo -d
++- / (0xffffffff8b24bc90)
+   * cgroup.controllers (0xffff8e3cc121b000)
+   * cgroup.max.depth (0xffff8e3cc121b280)
+   * cgroup.max.descendants (0xffff8e3cc121bd80)
+   * cgroup.procs (0xffff8e3cc121b700) = 2(kthreadd)  3(rcu_gp)  4(rcu_par_gp)  6(kworker/0:0H)  9(mm_percpu_wq)  10(rcu_tasks_kthre)  11(rcu_tasks_rude_)  12(rcu_tasks_trace)  13(ksoftirqd/0)
+
+   ...
+
+          +- pipewire.service (0xffff8e3cf8388000)
+             * cgroup.controllers (0xffff8e3ceda42700)
+             * cgroup.events (0xffff8e3ceda43880)
+             * cgroup.freeze (0xffff8e3ceda56500)
+             * cgroup.kill (0xffff8e3ceda56a80)
+             * cgroup.max.depth (0xffff8e3ceda43400)
+             * cgroup.max.descendants (0xffff8e3ceda42980)
+             * cgroup.procs (0xffff8e3ceda42380) = 1418(pipewire) 
+             * cgroup.stat (0xffff8e3ceda57d00)
+             * cgroup.subtree_control (0xffff8e3ceda43a00)
+             * cgroup.threads (0xffff8e3ceda42300) = 1418(pipewire)  1453(pipewire) 
+             * cgroup.type (0xffff8e3ceda42800)
+             * cpu.pressure (0xffff8e3ceda56080)
+             * cpu.stat (0xffff8e3ceda56180)
+             * io.pressure (0xffff8e3ceda57800)
+             * memory.current (0xffff8e3ceda57380) = 499712
+...
+```
+
+#### cgroup v1 ####
+
+```
+crash> cginfo --tree
 ** cgroup subsystems **
 
 ** cgroup tree **
@@ -258,7 +310,7 @@ crash> cgroupinfo --tree
     +--/sys/fs/cgroup/net_cls,net_prio/system.slice/docker-c6e550101905020b91505cf30b97446924d5f28109928a22a0a58f679cd1fe3f.scope at 0xffffa1683a329600
 
 
-crash> cgroupinfo --tglist
+crash> cginfo --tglist
 task_group = 0xffffa18893ff3400, cgroup = 0xffffa16b44e43c00
         (/sys/fs/cgroup/cpu,cpuacct/system.slice/docker-c6e550101905020b91505cf30b97446924d5f28109928a22a0a58f679cd1fe3f.scope)
 task_group = 0xffffa1686cedc400, cgroup = 0xffffa167622dd400
