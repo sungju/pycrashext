@@ -383,14 +383,14 @@ def show_cgroup2_files(options, cgrp, idx):
 
 
 def getCgroupName(cgroup):
+    if len(cg_name) == 0:
+        return "/"
     return cgroup.kn.name
 
 
 def show_cgroup2_tree_node(options, cgrp, idx):
     idx_str = "  " * idx
-    cg_name = cgrp.kn.name
-    if len(cg_name) == 0:
-        cg_name = "/"
+    cg_name = getCgroupName(cgrp)
     print("%s+- %s (0x%x)" % (idx_str, cg_name, cgrp))
     if options.show_detail:
         show_cgroup2_files(options, cgrp, idx)
