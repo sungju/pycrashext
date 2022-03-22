@@ -383,15 +383,19 @@ def show_cgroup2_files(options, cgrp, idx):
 
 
 def getCgroupName(cgroup):
-    if len(cg_name) == 0:
+    if len(cgroup.kn.name) == 0:
         return "/"
     return cgroup.kn.name
 
 
-def show_cgroup2_tree_node(options, cgrp, idx):
+def show_cgroup2_tree_node(options, cgrp, idx, full_path):
     idx_str = "  " * idx
     cg_name = getCgroupName(cgrp)
-    print("%s+- %s (0x%x)" % (idx_str, cg_name, cgrp))
+    if options.show_detail:
+        cg_full_name = full_path + cg_name
+    else:
+        cg_full_name = cg_name
+    print("%s+- %s (0x%x)" % (idx_str, cg_full_name, cgrp))
     if options.show_detail:
         show_cgroup2_files(options, cgrp, idx)
 
@@ -407,7 +411,8 @@ def show_cgroup2_tree_node(options, cgrp, idx):
     sorted_cgroup_list = sorted(cgroup_list, key=getCgroupName, reverse=False)
 
     for subcgrp in sorted_cgroup_list:
-        show_cgroup2_tree_node(options, subcgrp, idx + 1)
+        show_cgroup2_tree_node(options, subcgrp, idx + 1,
+                full_path + cg_name + ("/" if cg_name != "/" else ""))
 
 
 
@@ -418,7 +423,7 @@ def show_cgroup2_tree(options):
         cgrp_dfl_root = readSymbol("cgrp_dfl_root")
         cgroup = cgrp_dfl_root.cgrp
         
-    show_cgroup2_tree_node(options, cgroup, 0)
+    show_cgroup2_tree_node(options, cgroup, 0, "")
     pass
 
 
