@@ -435,7 +435,6 @@ def show_cgroup_tree(options):
             show_cgroup2_tree(options)
             return
     except Exception as e:
-        print(e)
         pass
 
     try:
