@@ -889,7 +889,8 @@ def cgroupinfo():
     cgroup_count = 0
     empty_count = 0
     cgroup_subsys_id_init()
-    PAGE_SIZE = 1 << get_page_shift()
+    #PAGE_SIZE = 1 << get_page_shift()
+    PAGE_SIZE=crash.PAGESIZE
 
     if (o.mem_cgroup_idr or o.mem_cgroup_idr_all):
         show_mem_cgroup_idr(o)

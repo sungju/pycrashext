@@ -245,6 +245,61 @@ def lockup_display(reverse_sort, show_tasks, options):
         crashcolor.set_color(crashcolor.RESET)
 
 
+
+NR_CPUS=0
+
+def get_nr_cpus():
+    global NR_CPUS
+
+    lines = exec_crash_command("help -k").splitlines()
+    for line in lines:
+        words = line.split(':')
+        if words[0] == 'kernel_NR_CPUS':
+            NR_CPUS = int(words[1])
+            return NR_CPUS
+
+    NR_CPUS = sys_info.CPUS
+    return sys_info.CPUS
+
+def show_qspinlock(options):
+    '''
+include/asm-generic/qspinlock_types.h
+/*
+ * Bitfields in the atomic value:
+ *
+ * When NR_CPUS < 16K
+ *  0- 7: locked byte
+ *     8: pending
+ *  9-15: not used
+ * 16-17: tail index
+ * 18-31: tail cpu (+1)
+ *
+ * When NR_CPUS >= 16K
+ *  0- 7: locked byte
+ *     8: pending
+ *  9-10: tail index
+ * 11-31: tail cpu (+1)
+ */
+    '''
+    qspinlock = readSU("struct qspinlock", int(options.qspinlock, 16))
+    get_nr_cpus()
+
+    lock_val = qspinlock.val.counter
+    print("spinlock status".center(26))
+    print("=" * 26)
+    print("%12s : 0x%x" % ("value", lock_val))
+    print()
+    print("%12s : %d" % ("locked", (lock_val & 0xff)))
+    print("%12s : %d" % ("pending", (1 if (lock_val & 0x100) == 0x100 else 0)))
+    if NR_CPUS < 16000:
+        print("%12s : %d" % ("tail index", ((lock_val >> 16) & 0x3)))
+        print("%12s : %d" % ("tail cpu", (((lock_val >> 18) & 0x7ff) - 1)))
+    else:
+        print("%12s : %d" % ("tail index", ((lock_val >> 9) & 0x3)))
+        print("%12s : %d" % ("tail cpu", (((lock_val >> 11) & 0x3fffff) - 1)))
+
+
+
 def lockup():
     op = OptionParser()
     op.add_option("-r", "--reverse", dest="reverse_sort", default=0,
@@ -259,8 +314,16 @@ def lockup():
     op.add_option("-d", "--details", dest="task_details", default=0,
                   action="store_true",
                   help="show task details")
+    op.add_option("-q", "--qspinlock", dest="qspinlock", default="",
+                  action="store", type="string",
+                  help="Shows qspinlock details")
 
     (o, args) = op.parse_args()
+
+
+    if (o.qspinlock != ""):
+        show_qspinlock(o)
+        sys.exit(0)
 
     if (o.rt_stat):
         show_rt_stat(o)
