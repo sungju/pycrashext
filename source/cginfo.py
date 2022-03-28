@@ -218,6 +218,8 @@ def show_cgroup2_file_detail(options, kernfs_node, idx):
         show_memory_value(kernfs_node, cgroup, cftype, ss, css)
     elif ss_name == "cpu":
         show_cpu_value(kernfs_node, cgroup, cftype, ss, css)
+    elif ss_name == "pids":
+        show_pids_value(kernfs_node, cgroup, cftype, ss, css)
     elif ss_name.startswith("cgroup."):
         show_cgroup_value(kernfs_node, cgroup, cftype, ss, css)
     else:
@@ -225,6 +227,21 @@ def show_cgroup2_file_detail(options, kernfs_node, idx):
         print("%s%s (0x%x)" % (idx_str, ss_name, css))
 
     #print(cftype)
+
+
+def show_pids_value(kn, cgroup, cftype, ss, css):
+    css_offset = member_offset("struct pids_cgroup", "css")
+    pids_cgroup = readSU("struct pids_cgroup", css - css_offset)
+    crashcolor.set_color(crashcolor.BLUE)
+    if kn.name.endswith(".current"):
+        print(" = %d" % (pids_cgroup.counter.counter))
+    elif kn.name.endswith(".events"):
+        print(" = max %d" % (pids_cgroup.events_limit.counter))
+    elif kn.name.endswith(".max"):
+        print(" = %d" % (pids_cgroup.limit.counter))
+    else:
+        print("%s (0x%x)" % (ss_name, css))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def show_cpu_value_max(tg):
