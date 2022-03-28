@@ -673,6 +673,9 @@ def show_cgroup_tree_from_rootnode(rootnode, options):
     top_cgroup = rootnode.top_cgroup
     curlimit = sys.getrecursionlimit()
     sys.setrecursionlimit(1000)
+    if options.cgroup_addr != "":
+        top_cgroup = readSU("struct cgroup", int(options.cgroup_addr, 16))
+
     print_cgroup_entry(top_cgroup, top_cgroup, 0, options)
     sys.setrecursionlimit(curlimit)
     print ("-" * 70)
