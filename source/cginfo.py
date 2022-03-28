@@ -26,11 +26,11 @@ def check_global_symbols():
     global first_ksymbol
 
     try:
-        help_s_out = exec_crash_command("help -s")
+        help_s_out = exec_crash_command("help -m")
         lines = help_s_out.splitlines()
         for line in lines:
             words = line.split(":")
-            if words[0].strip() == "first_ksymbol":
+            if words[0].strip() == "kvbase":
                 first_ksymbol = int(words[1].split()[0], 16)
                 return
     except Exception as e:
@@ -314,6 +314,32 @@ def show_cpu_value(kn, cgroup, cftype, ss, css):
     crashcolor.set_color(crashcolor.RESET)
         
 
+MEMCG_LOW = 0
+MEMCG_HIGH = 1
+MEMCG_MAX = 2
+MEMCG_OOM = 3
+MEMCG_OOM_KILL = 4
+MEMCG_SWAP_HIGH = 5
+MEMCG_SWAP_MAX = 6
+MEMCG_SWAP_FAIL = 7
+
+def get_memory_events(events):
+    result = "low %d, high = %d, max = %d, oom = %d, oom_kill = %d" %\
+            (events[MEMCG_LOW].counter,
+             events[MEMCG_HIGH].counter,
+             events[MEMCG_MAX].counter,
+             events[MEMCG_OOM].counter,
+             events[MEMCG_OOM_KILL].counter)
+    return result
+
+
+def get_memory_swap_events(events):
+    result = "high = %d, max = %d, fail = %d" %\
+            (events[MEMCG_SWAP_HIGH].counter,
+             events[MEMCG_SWAP_MAX].counter,
+             events[MEMCG_SWAP_FAIL].counter)
+    return result
+
 
 def show_memory_value(kn, cgroup, cftype, ss, css):
     css_offset = member_offset("struct mem_cgroup", "css")
@@ -329,10 +355,147 @@ def show_memory_value(kn, cgroup, cftype, ss, css):
         print(" = %d" % (mem_cgroup.memory.low))
     elif kn.name.endswith(".current"):
         print(" = %d" % (mem_cgroup.memory.usage.counter * PAGE_SIZE))
+    elif kn.name.endswith(".oom.group"):
+        print(" = %d" % (mem_cgroup.oom_group))
+    elif kn.name.endswith("memory.events"):
+        print(" = %s" % (get_memory_events(mem_cgroup.memory_events)))
+    elif kn.name.endswith("memory.events.local"):
+        print(" = %s" % (get_memory_events(mem_cgroup.memory_events_local)))
+    elif kn.name.endswith("swap.events"):
+        print(" = %s" % (get_memory_swap_events(mem_cgroup.memory_events)))
+    elif kn.name.endswith("memory.numa_stat"):
+        print("") # memory_numa_stat_show()
+    elif kn.name.endswith("memory.stat"):
+        print("") # memory_stat_format(mem_cgroup)
+    elif kn.name.endswith(".pressure"):
+        print(cftype)
     else:
         print("")
     crashcolor.set_color(crashcolor.RESET)
 
+
+CGRP_FROZEN = 3
+
+def cgroup_is_populated(cgroup):
+    popcnt = cgroup.nr_populated_csets + \
+            cgroup.nr_populated_domain_children +\
+            cgroup.nr_populated_threaded_children
+    return (1 if popcnt > 0 else 0)
+
+
+def get_cgroup_events(cgroup):
+    result = "populated %d, frozen %d" % \
+            (cgroup_is_populated(cgroup),
+             1 if (cgroup.flags & CGRP_FROZEN) == CGRP_FROZEN else 0)
+    return result
+
+
+def cgroup_is_threaded(cgroup):
+    return cgroup.dom_cgrp != cgroup
+
+
+def cgroup_parent(cgrp):
+    parent_css = cgrp.self.parent
+    css_offset = member_offset("struct cgroup", "self")
+    if parent_css != 0 and parent_css != None:
+        return readSU("struct cgroup", parent_css - css_offset)
+
+    return None
+
+
+def cgroup_has_tasks(cgroup):
+    return cgroup.nr_populated_csets > 0
+
+
+def cgroup_is_thread_root(cgroup):
+    if cgroup_is_threaded(cgroup):
+        return False
+
+    if cgroup.nr_threaded_children:
+        return True
+
+    cgrp_dfl_threaded_ss_mask = readSymbol("cgrp_dfl_threaded_ss_mask")
+
+    if cgroup_has_tasks(cgroup) and \
+        (cgroup.subtree_control & cgrp_dfl_threaded_ss_mask):
+        return True
+
+    return False
+
+
+def cgroup_is_mixable(cgroup):
+    return cgroup_parent(cgroup) == None
+
+
+def cgroup_is_valid_domain(cgroup):
+    if cgroup_is_threaded(cgroup):
+        return False
+
+    cgroup = cgroup_parent(cgroup)
+    while cgroup != None:
+        if (not cgroup_is_mixable(cgroup) and cgroup_is_thread_root(cgroup)):
+            return False
+        if cgroup_is_threaded(cgroup):
+            return False
+
+        cgroup = cgroup_parent(cgroup)
+
+    return True
+
+
+def get_cgroup_type(cgroup):
+    if cgroup_is_threaded(cgroup):
+        return "threaded"
+    elif not cgroup_is_valid_domain(cgroup):
+        return "domain invalid"
+    elif cgroup_is_thread_root(cgroup):
+        return "domain threaded"
+    else:
+        return "domain"
+
+
+def get_subtree_control(ss_mask):
+    cgroup_subsys = readSymbol("cgroup_subsys")
+    idx = 0
+    result = ""
+    while ss_mask != 0:
+        if (ss_mask & 0x1) == 0x1:
+            result = result + ("%s " % (cgroup_subsys[idx].name))
+        idx = idx + 1
+        ss_mask = ss_mask >> 1
+
+    return result
+
+
+def cgroup_on_dfl(cgroup):
+    cgrp_dfl_root = readSymbol("cgrp_dfl_root")
+    return cgroup.root == cgrp_dfl_root
+
+
+def get_cgroup_parent(cgroup):
+    parent_css = cgroup.self.parent
+    if parent_css != None and Addr(parent_css) >= first_ksymbol:
+        css_offset = member_offset("struct cgroup", "self")
+        return readSU("struct cgroup", parent_css - css_offset)
+
+    return None
+
+
+def get_cgroup_control(cgroup):
+    parent = get_cgroup_parent(cgroup)
+    root_ss_mask = cgroup.root.subsys_mask
+    cgrp_dfl_threaded_ss_mask = readSymbol("cgrp_dfl_threaded_ss_mask")
+    cgrp_dfl_implicit_ss_mask = readSymbol("cgrp_dfl_implicit_ss_mask")
+    if parent != None:
+        ss_mask = parent.subtree_control
+        if cgroup_is_threaded(cgroup):
+            ss_mask = ss_mask & cgrp_dfl_threaded_ss_mask
+        return ss_mask
+
+    if cgroup_on_dfl(cgroup):
+        root_ss_mask = root_ss_mask & ~(cgrp_dfl_threaded_ss_mask | cgrp_dfl_implicit_ss_mask)
+
+    return root_ss_mask
 
 
 def show_cgroup_value(kn, cgroup, cftype, ss, css):
@@ -341,6 +504,22 @@ def show_cgroup_value(kn, cgroup, cftype, ss, css):
         show_cgroup_value_procs(kn, cgroup, cftype, ss, css, False)
     elif kn.name.endswith(".threads"):
         show_cgroup_value_procs(kn, cgroup, cftype, ss, css, True)
+    elif kn.name.endswith(".controllers"):
+        print(" = %s" % (get_subtree_control(get_cgroup_control(cgroup))))
+    elif kn.name.endswith(".events"):
+        print(" = %s" % (get_cgroup_events(cgroup)))
+    elif kn.name.endswith(".freeze"):
+        print(" = %d" % (cgroup.freezer.freeze))
+    elif kn.name.endswith(".kill"):
+        print("") # Write-Only file
+    elif kn.name.endswith(".max.depth"):
+        print(" = %d" % (cgroup.max_depth))
+    elif kn.name.endswith(".max.descendants"):
+        print(" = %d" % (cgroup.max_descendants))
+    elif kn.name.endswith(".subtree_control"):
+        print(" = %s" % (get_subtree_control(cgroup.subtree_control)))
+    elif kn.name.endswith("cgroup.type"):
+        print(" = %s" % (get_cgroup_type(cgroup)))
     else:
         print("")
     crashcolor.set_color(crashcolor.RESET)
@@ -457,6 +636,7 @@ def show_cgroup_tree(options):
             show_cgroup2_tree(options)
             return
     except Exception as e:
+        #print(e)
         pass
 
     try:
