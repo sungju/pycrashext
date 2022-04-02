@@ -76,7 +76,14 @@ def check_syscall_table(options):
     idx = 0
     for sys_call in sys_call_table:
         if sys_call == None:
-            break
+            if idx > max_syscalls:
+                break
+            hook_call_no += 1
+            result = exec_crash_command("sys -c %d" % (idx)).splitlines()[1]
+            print(result)
+            idx += 1
+            continue
+
         call_addr = sym2addr(sys_call)
         result = exec_crash_command("sym 0x%x" % call_addr)
         if result != None and result.startswith("sym"):
