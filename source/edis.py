@@ -154,7 +154,7 @@ def draw_branches(disasm_str, jump_op_list):
 
 def is_command_exist(name):
     result_str = crashhelper.run_gdb_command("!which %s" % (name))
-    if result_str.startswith("which"):
+    if result_str.find(":") >= 0:
         return False
     return True
 
@@ -826,6 +826,14 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
                 line = ("%s%s" % (words[-1], find_symbol(words[-1]))).join(line.rsplit(words[-1], 1))
             color_str = get_colored_asm(words[2].strip())
+            constsym = ""
+            if len(words) > 3:
+                if  words[3].startswith("$0x"):
+                    constaddr = words[3].split(',')[0][1:]
+                    constsym = find_symbol(constaddr)
+                    if len(constsym) > 0:
+                        constsym = '  ;' + constsym
+
             idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
             print(line[:idx], end='')
             if color_str != None:
@@ -859,6 +867,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     line = line[next_idx:]
 
                 crashcolor.set_color(crashcolor.RESET)
+                print(constsym, end='')
 
                 if (is_disasm_line):
                     comment_idx = line.find(";")
