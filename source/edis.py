@@ -831,8 +831,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 if  words[3].startswith("$0x"):
                     constaddr = words[3].split(',')[0][1:]
                     constsym = find_symbol(constaddr)
-                    if len(constsym) > 0:
-                        constsym = '  ;' + constsym
+                elif words[2].startswith("call") and len(words) == 4:
+                   constsym = find_symbol(words[3])
+
+                if len(constsym) > 0:
+                    constsym = '  ;' + constsym
 
             idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
             print(line[:idx], end='')
