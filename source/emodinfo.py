@@ -949,6 +949,9 @@ def modinfo():
 
             error_origin = set_error("redirect")
             batch_run_all(o)
+            print()
+            print("\t%s %s %s\n" % ("="*10, "vmcore information", "="*10))
+            print(sys_info)
             set_error(error_origin)
             if o.target_dir is not None:
                 sys.stdout.close()
