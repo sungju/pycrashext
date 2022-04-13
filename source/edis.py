@@ -830,9 +830,10 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if len(words) > 3:
                 if  words[3].startswith("$0x"):
                     constaddr = words[3].split(',')[0][1:]
-                    constsym = find_symbol(constaddr)
+                    #constsym = find_symbol(constaddr)
                 elif words[2].startswith("call") and len(words) == 4:
-                   constsym = find_symbol(words[3])
+                    #constsym = find_symbol(words[3])
+                    pass
 
                 if len(constsym) > 0:
                     constsym = '  ;' + constsym
