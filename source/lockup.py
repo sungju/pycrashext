@@ -244,6 +244,13 @@ def lockup_display(reverse_sort, show_tasks, options):
 
         crashcolor.set_color(crashcolor.RESET)
 
+    print("\n\tkernel.watchdog_thresh = %d, " % (watchdog_thresh), end="")
+    crashcolor.set_color(crashcolor.BLUE)
+    print("Hard LOCKUP : %d seconds, " % (watchdog_thresh), end="")
+    crashcolor.set_color(crashcolor.RED)
+    print("Soft LOCKUP : %d seconds" % (softlockup_thresh))
+    crashcolor.set_color(crashcolor.RESET)
+
 
 
 NR_CPUS=0
