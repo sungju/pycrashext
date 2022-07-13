@@ -789,6 +789,47 @@ def show_fsnotify_group(options):
             print(ep.wq)
 
 
+    if options.show_details:
+        if member_offset("struct fsnotify_group", "notification_list") >= 0:
+            print("%s Notification List %s" % ("-"*20, "-"*20))
+            inode_list = {}
+            notification_list = fsnotify_group.notification_list
+            for fsnotify_event in readSUListFromHead(notification_list,
+                                                     "list",
+                                                     "struct fsnotify_event"):
+                inode_list[fsnotify_event.inode] = fsnotify_event
+
+            for inode in inode_list:
+                print(inode_list[inode])
+                options.inode = "%x" % inode
+                show_inode_details(options)
+
+        print("%s Process with fsnofiy_group %s" % ("-"*20, "-"*20))
+        tt = Tasks.TaskTable()
+        for t in tt.allThreads():
+            files_result = exec_crash_command("files %d" % t.pid)
+            if files_result.find("[fanotify]") < 0:
+                continue
+            files_list = files_result.splitlines()
+            for f in files_list:
+                if f.find("[fanotify]") < 0:
+                    continue
+                words = f.split()
+                file_data = readSU("struct file", int(words[1], 16))
+                if file_data.private_data == fsnotify_group:
+                    print("PID : %d (%s)" % (t.pid, t.comm))
+                    print(f)
+
+'''
+        if member_offset("struct fsnotify_group", "fanotify_data") >= 0:
+            print("%s Access wait List %s" % ("-"*20, "-"*20))
+            access_waitq = fsnotify_group.fanotify_data.access_waitq
+            cmd_str = "waitq 0x%x" % access_waitq
+            print(cmd_str)
+            print(exec_crash_command(cmd_str))
+'''
+
+
 DCACHE_ENTRY_TYPE=0x07000000
 DCACHE_MISS_TYPE=0x00000000
 
