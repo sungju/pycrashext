@@ -326,6 +326,18 @@ def check_userdata_available():
             break
 
 
+def get_policy_str(policy):
+    return {
+        0: "NORMAL",
+        1: "FIFO",
+        2: "RR",
+        3: "BATCH",
+        4: "ISO",
+        5: "IDLE",
+        6: "DEADLINE",
+    } [policy]
+
+
 def task_policy(policy_str):
     return {
         "SCHED_OTHER": 0,
@@ -526,6 +538,22 @@ def do_searchstack(options, bt_flag):
                 print_bt_search(stackdata, include_list)
 
 
+import fsinfo
+
+def show_task_path(task, options):
+    exe_file = task.mm.exe_file
+    options.file = "0x%x" % (Addr(exe_file))
+    fsinfo.show_file_details(options)
+
+
+def show_task_details(options):
+    task = readSU("struct task_struct", int(options.taskaddr, 16))
+    print("%d (%s)" % (task.pid, task.comm))
+    print("SCHED: %s" % (get_policy_str(task.policy)))
+    print("==== Binary Details ====")
+    show_task_path(task, options)
+
+
 def psinfo():
     op = OptionParser()
     op.add_option("--aux", dest="aux", default=0,
@@ -564,9 +592,13 @@ def psinfo():
                   action="store",
                   help="comma separated value list to ignore in --searchstack")
 
-    op.add_option("-t", "--task", dest="task_name", default="",
+    op.add_option("-k", "--taskname", dest="task_name", default="",
                   action="store", type="string",
                   help="limit search range only to tasks with matching task name")
+
+    op.add_option("-t", "--task", dest="taskaddr", default="",
+                  action="store", type="string",
+                  help="Shows general information about a task")
 
     (o, args) = op.parse_args()
 
@@ -593,6 +625,10 @@ def psinfo():
 
     if (o.policy_type != ""):
         print(processes_with_policy(task_policy(o.policy_type)))
+        sys.exit(0)
+
+    if (o.taskaddr != ""):
+        show_task_details(o)
         sys.exit(0)
 
     print(get_ps_ef())
