@@ -549,6 +549,7 @@ def show_task_path(task, options):
 def show_task_details(options):
     task = readSU("struct task_struct", int(options.taskaddr, 16))
     print("%d (%s)" % (task.pid, task.comm))
+    print("login id = %d" % (task.loginuid.val))
     print("SCHED: %s, PRIORITY: %d" % (get_policy_str(task.policy),
             task.prio if task.policy == 0 else task.rt_priority))
     print("==== Binary Details ====")
