@@ -552,8 +552,9 @@ def show_task_details(options):
     print("login id = %d" % (task.loginuid.val))
     print("SCHED: %s, PRIORITY: %d" % (get_policy_str(task.policy),
             task.prio if task.policy == 0 else task.rt_priority))
-    print("==== Binary Details ====")
-    show_task_path(task, options)
+    if task.mm != 0:
+        print("==== Binary Details ====")
+        show_task_path(task, options)
 
 
 def psinfo():
