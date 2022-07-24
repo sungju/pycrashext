@@ -545,6 +545,10 @@ def show_task_path(task, options):
     options.file = "0x%x" % (Addr(exe_file))
     fsinfo.show_file_details(options)
 
+def get_pid_namespace(task):
+    thread_pid = task.thread_pid
+    return thread_pid.numbers[thread_pid.level].ns
+
 
 def show_task_details(options):
     task = readSU("struct task_struct", int(options.taskaddr, 16))
@@ -552,6 +556,7 @@ def show_task_details(options):
     print("login id = %d" % (task.loginuid.val))
     print("SCHED: %s, PRIORITY: %d" % (get_policy_str(task.policy),
             task.prio if task.policy == 0 else task.rt_priority))
+    print("pid_namespace = 0x%x" % (get_pid_namespace(task)))
     if task.mm != 0:
         print("==== Binary Details ====")
         show_task_path(task, options)
