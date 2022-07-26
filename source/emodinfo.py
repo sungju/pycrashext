@@ -821,6 +821,8 @@ def show_variable(addr, size):
     crashcolor.set_color(crashcolor.RESET)
 
 
+MODULE_STATE_LIVE = 0
+
 def find_module_struct(module_addr):
     try:
         result = exec_crash_command("kmem %s" % module_addr)
@@ -849,6 +851,8 @@ def find_module_struct(module_addr):
             offset = offset + member_offset("struct module_kobject", "kobj")
             offset = offset + member_offset("struct kobject", "ktype")
             module = readSU("struct module", ktype_location - offset)
+            if module.state == MODULE_STATE_LIVE:
+                loaded_module = "loaded"
             return module, loaded_module
     except:
         pass
