@@ -546,7 +546,11 @@ def show_task_path(task, options):
     fsinfo.show_file_details(options)
 
 def get_pid_namespace(task):
-    thread_pid = task.thread_pid
+    if member_offset("struct task_struct", "thread_pid") >= 0:
+        thread_pid = task.thread_pid
+    else:
+        return 0 
+
     return thread_pid.numbers[thread_pid.level].ns
 
 
