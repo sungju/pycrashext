@@ -471,6 +471,7 @@ def show_pagecache_sb(sb, options):
 
         if options.show_details:
             options.inode = "%x" % inode
+            print("-" * 10)
             print("CACHED_PAGES : %d" % (mapping.nrpages))
             show_inode_details(options)
 
