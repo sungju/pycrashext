@@ -31,12 +31,14 @@ def getKey(shmObj):
 
 
 def show_shared_memory(options):
+    width = 0
     try:
         result_lines = exec_crash_command("ipcs -m").splitlines()
         print(result_lines[0])
         if len(result_lines) == 1:
             return
 
+        width = len(result_lines[0])
         shm_list = []
         for shm_line in result_lines[1:]:
             words = shm_line.split()
@@ -61,7 +63,7 @@ def show_shared_memory(options):
 
             alloc_str = bytes_to_str(alloc_bytes)
 
-            print(shm_data["raw"])
+            print("%-*s  %s" % (width, shm_data["raw"], alloc_str))
             if options.show_details:
                 shmid_kernel = readSU("struct shmid_kernel",
                                       int(shm_data["data"][0], 16))
@@ -72,8 +74,8 @@ def show_shared_memory(options):
                         creator = shmid_kernel.shm_creator
                         creator_comm = creator.comm
 
-                print("\tcreator = 0x%x (%s) : %s" %
-                      (creator, creator_comm, alloc_str))
+                print("\tcreator = 0x%x (%s), shm_file = 0x%x" %
+                      (creator, creator_comm, shmid_kernel.shm_file))
 
         crashcolor.set_color(crashcolor.BLUE)
         print("\n\tTotal allocation = %s" % (bytes_to_str(total_bytes)))
