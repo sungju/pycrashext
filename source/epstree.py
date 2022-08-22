@@ -191,12 +191,17 @@ def print_task(task, depth, first, options):
     if task_color != crashcolor.RESET:
         crashcolor.set_color(task_color)
 
-    print_str = ("%s%s%s%s " %
+    task_uid = task.loginuid.val
+    if task_uid == 0xffffffff:
+        task_uid = 0
+    print_str = ("%s%s%s%s%s " %
            (comm_str,
             "(" + str(task.pid) + ")"
                 if options.print_pid else "",
             "[" + task_state_str(get_task_state(task)) +"]"
                 if options.print_state else "",
+            "{" + str(task_uid) + "}"
+                if options.print_uid else "",
             thread_str))
     print ("%s" % (print_str), end='')
     if task_color != crashcolor.RESET:
@@ -249,6 +254,9 @@ def pstree():
     op.add_option("-p", dest="print_pid", default=0,
                   action="store_true",
                   help="Print process ID")
+    op.add_option("-u", dest="print_uid", default=0,
+                  action="store_true",
+                  help="Print User ID")
     op.add_option("-g", dest="print_thread", default=0,
                   action="store_true",
                   help="Print number of threads")
