@@ -565,6 +565,19 @@ def show_task_details(options):
         print("==== Binary Details ====")
         show_task_path(task, options)
 
+    thread = task.thread
+    fpu = thread.fpu
+    if member_offset("struct fpu", "fpstate") >= 0:
+        # struct fpu.fpstate
+        if member_offset("struct fpstate", "regs") >= 0:
+            if member_offset("union fpregs_state", "fxsave") >= 0:
+                print(fpu.fpstate.regs.fxsave)
+    elif member_offset("struct fpu", "state") >= 0:
+        # struct fpu.state
+        if member_offset("union thread_xstate", "fxsave") >= 0:
+            print(fpu.state.fxsave)
+
+
 
 def psinfo():
     op = OptionParser()
