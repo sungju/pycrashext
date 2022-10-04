@@ -305,16 +305,17 @@ def module_info(options):
         if options.shows_gaps or options.shows_unloaded:
             prev_end_addr = end_addr
 
-    if tainted_count > 0:
-        tainted_mask = readSymbol("tainted_mask")
-        taint_result = taint_str(tainted_mask)
+    tainted_mask = readSymbol("tainted_mask")
+    taint_result = taint_str(tainted_mask)
+    if tainted_mask > 0:
         print("=" * 75)
         print("There are %d tainted modules, tainted_mask = 0x%x (%s)" %
               (tainted_count, tainted_mask, taint_result))
-        if options.shows_flags_str and tainted_mask > 0:
-            for c in taint_result.split(':')[1]:
-                if c in taint_flags_desc:
-                    print("\t%s : %s" % (c, taint_flags_desc[c]))
+
+    if options.shows_flags_str and tainted_mask > 0:
+        for c in taint_result.split(':')[1]:
+            if c in taint_flags_desc:
+                print("\t%s : %s" % (c, taint_flags_desc[c]))
 
         print_last_unloaded_module()
 
