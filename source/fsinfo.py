@@ -155,6 +155,16 @@ O_RDONLY = 0x0
 O_WRONLY = 0x1
 O_RDWR = 0x2
 O_ACCMODE = 0x3
+O_CREATE = 0x40
+O_EXCL = 0x80
+O_NOCTTY = 0x100
+O_TRUNC = 0x200
+O_APPEND = 0x400
+O_NONBLOCK = 0x800
+O_DSYNC = 0x1000
+FASYNC = 0x2000
+O_DIRECT = 0x4000
+O_LARGEFILE = 0x8000
 
 def get_file_open_mode_str(f_mode):
     result_str = ""
@@ -164,6 +174,27 @@ def get_file_open_mode_str(f_mode):
         result_str = result_str + "Write-Only"
     if ((f_mode & 0x03) == O_RDWR):
         result_str = result_str + "Read/Write"
+
+    if ((f_mode & O_CREATE) == O_CREATE):
+        result_str = result_str + ", O_CREATE"
+    if ((f_mode & O_EXCL) == O_EXCL):
+        result_str = result_str + ", O_EXCL"
+    if ((f_mode & O_NOCTTY) == O_NOCTTY):
+        result_str = result_str + ", O_NOCTTY"
+    if ((f_mode & O_TRUNC) == O_TRUNC):
+        result_str = result_str + ", O_TRUNC"
+    if ((f_mode & O_APPEND) == O_APPEND):
+        result_str = result_str + ", O_APPEND"
+    if ((f_mode & O_NONBLOCK) == O_NONBLOCK):
+        result_str = result_str + ", O_NONBLOCK"
+    if ((f_mode & O_DSYNC) == O_DSYNC):
+        result_str = result_str + ", O_DSYNC"
+    if ((f_mode & FASYNC) == FASYNC):
+        result_str = result_str + ", FASYNC"
+    if ((f_mode & O_DIRECT) == O_DIRECT):
+        result_str = result_str + ", O_DIRECT"
+    if ((f_mode & O_LARGEFILE) == O_LARGEFILE):
+        result_str = result_str + ", O_LARGEFILE"
 
     return result_str
 
@@ -211,6 +242,22 @@ def show_inode_details(options):
     print("")
 
 
+def size_to_human_readable(byte_size):
+    result = "%d bytes" % (byte_size)
+    conv_size = int(byte_size/1024/1024/1024) # GiB
+    if conv_size > 0:
+        return result + (" (%d GB)" % conv_size)
+
+    conv_size = int(byte_size/1024/1024) # MiB
+    if conv_size > 0:
+        return result + (" (%d MB)" % conv_size)
+
+    conv_size = int(byte_size/1024) # KiB
+    if conv_size > 0:
+        return result + (" (%d KB)" % conv_size)
+
+    return result
+
 def get_inode_details(inode):
     try:
         i_uid = inode.i_uid.val
@@ -219,8 +266,8 @@ def get_inode_details(inode):
         i_uid = inode.i_uid
         i_gid = inode.i_gid
 
-    return "file size = %d bytes, ino = %d, link count = %d\n\tuid = %d, gid = %d" %\
-          (inode.i_size, inode.i_ino, inode.i_nlink, i_uid, i_gid)
+    return "file size = %s, ino = %d, link count = %d\n\tuid = %d, gid = %d" %\
+          (size_to_human_readable(inode.i_size), inode.i_ino, inode.i_nlink, i_uid, i_gid)
 
 
 def show_file_details(options):
@@ -251,6 +298,18 @@ def show_file_details(options):
                 print("== Mount Info ==")
             print(mount_line)
             found = True
+
+
+
+def show_open_file_size(options):
+    all_files = exec_crash_command("foreach files").splitlines()
+    for one_file in all_files:
+        if one_file.find(" REG ") < 0:
+            continue
+
+        entries = one_file.split()
+        options.file = entries[1]
+        show_file_details(options)
 
 
 def show_slab_dentry(options):
@@ -910,6 +969,9 @@ def fsinfo():
     op.add_option("-t", "--task", dest="task_info", default="",
                   action="store",
                   help="Show task related information")
+    op.add_option("--show_open_file_size", dest="show_open_file_size", default=0,
+                  action="store_true",
+                  help="Show file size of each open files")
 
     (o, args) = op.parse_args()
 
@@ -953,6 +1015,10 @@ def fsinfo():
 
     if (o.task_info):
         show_task_info(o)
+        sys.exit(0)
+
+    if (o.show_open_file_size):
+        show_open_file_size(o)
         sys.exit(0)
 
 
