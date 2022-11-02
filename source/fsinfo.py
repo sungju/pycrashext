@@ -754,9 +754,13 @@ def show_extX_details(sb, fs_type):
 def show_xfs_details(sb, fs_type):
     xfs_mount = readSU("struct xfs_mount", sb.s_fs_info)
     xfs_sb = xfs_mount.m_sb
+    if member_offset("struct xfs_mount", "m_fsname") >= 0:
+        volume_name = get_volume_name(xfs_mount.m_fsname)
+    else:
+        volume_name = get_volume_name(xfs_sb.sb_fname)
 
     print("< struct super_block 0x%x >" % sb)
-    print("%-30s %s" % ("Filesystem volume name", get_volume_name(xfs_mount.m_fsname)))
+    print("%-30s %s" % ("Filesystem volume name", volume_name))
     mnt_point = dentry_to_filename(sb.s_root)
     print("%-30s %s" % ("Mount point", mnt_point))
     print("%-30s %x" % ("Magic number", xfs_sb.sb_magicnum))
