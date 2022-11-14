@@ -23,8 +23,17 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
     if handler_addr != 0:
         handler_name = addr2sym(handler_addr)
         mod_name = get_module_name(handler_name)
-        print("\t%s%s_handler = 0x%x (%s)%s" % (tab_str, handler_type, handler_addr, handler_name,
-                                                mod_name))
+        rp_offset = member_offset("struct trace_kprobe", "rp")
+        kp_offset = member_offset("struct kretprobe", "kp")
+        if rp_offset >= 0 and kp_offset >= 0:
+            trace_kprobe = readSU("struct trace_kprobe", kp - rp_offset - kp_offset)
+            call_name = trace_kprobe.tp.call.name
+        else:
+            trace_kprobe = 0
+            call_name = ""
+
+        print("\t%s%s_handler = 0x%x (%s)%s : struct trace_kprobe 0x%x (%s)" % (tab_str, handler_type, handler_addr, handler_name,
+                                                mod_name, trace_kprobe, call_name))
         if handler_name is not None and handler_name.endswith("_kretprobe"):
             kretprobe = readSU("struct kretprobe", kp)
             ret_handler_name = addr2sym(kretprobe.handler)
