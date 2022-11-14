@@ -27,7 +27,10 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
         kp_offset = member_offset("struct kretprobe", "kp")
         if rp_offset >= 0 and kp_offset >= 0:
             trace_kprobe = readSU("struct trace_kprobe", kp - rp_offset - kp_offset)
-            call_name = trace_kprobe.tp.call.name
+            try:
+                call_name = trace_kprobe.tp.call.name
+            except:
+                call_name = ""
         else:
             trace_kprobe = 0
             call_name = ""
