@@ -211,8 +211,8 @@ def get_directmap_details():
         return 0, 0, 0, 0
 
     idx = 0
-    dmval = [0, 0, 0, 0]
-    shift_val = [2, 11, 12, 20]
+    dmval = [0, 0, 0, 0, 0]
+    shift_val = [2, 11, 12, 20, 0]
     for dp in direct_pages_count:
         dmval[idx] = dp << shift_val[idx]
         idx = idx + 1
@@ -283,7 +283,12 @@ def si_mem_available():
     LRU_ACTIVE_FILE = lru_list.LRU_ACTIVE_FILE
     LRU_INACTIVE_FILE = lru_list.LRU_INACTIVE_FILE
     NR_LRU_LISTS = lru_list.NR_LRU_LISTS
-    vm_stat = readSymbol("vm_stat")
+    if symbol_exists("vm_stat"):
+        vm_stat = readSymbol("vm_stat")
+    elif symbol_exists("vm_zone_stat"):
+        vm_stat = readSymbol("vm_zone_stat")
+    else:
+        vm_stat = None
 
     for i in range(LRU_BASE, NR_LRU_LISTS):
         pages.append(global_page_state(i))
@@ -298,11 +303,22 @@ def si_mem_available():
         words = line.split()
         task_addr = words[5]
         zone = readSU("struct zone", int(task_addr, 16))
-        wmark_low = wmark_low + zone.watermark[WMARK_LOW]
+        if member_offset("struct zone", "watermark") >= 0:
+            wmark_low = wmark_low + zone.watermark[WMARK_LOW]
+        elif member_offset("struct zone", "_watermark") >= 0:
+            wmark_low = wmark_low + zone._watermark[WMARK_LOW]
 
     zone_state_item = EnumInfo("enum zone_stat_item")
+    node_state_item = EnumInfo("enum node_stat_item")
     NR_FREE_PAGES = zone_state_item.NR_FREE_PAGES
-    NR_SLAB_RECLAIMABLE = zone_state_item.NR_SLAB_RECLAIMABLE
+    try:
+        NR_SLAB_RECLAIMABLE = zone_state_item.NR_SLAB_RECLAIMABLE
+    except:
+        try:
+            NR_SLAB_RECLAIMABLE = node_state_item.NR_SLAB_RECLAIMABLE_B
+        except:
+            NR_SLAB_RECLAIMABLE = 5
+
     totalreserve_pages = readSymbol("totalreserve_pages")
     available = global_page_state(NR_FREE_PAGES) - totalreserve_pages
 
@@ -354,7 +370,13 @@ def get_vmalloc_info():
 
 def vm_commit_limit():
     sysctl_overcommit_kbytes = readSymbol("sysctl_overcommit_kbytes")
-    totalram_pages = readSymbol("totalram_pages")
+    if symbol_exists("totalram_pages"):
+        totalram_pages = readSymbol("totalram_pages")
+    elif symbol_exists("_totalram_pages"):
+        totalram_pages = readSymbol("_totalram_pages")
+    else:
+        totalram_pages = 0
+
     sysctl_overcommit_ratio = readSymbol("sysctl_overcommit_ratio")
     total_swap_pages = readSymbol("total_swap_pages")
     allowed = 0
@@ -507,6 +529,11 @@ def get_meminfo():
     meminfo['VmallocUsed'] = vmallocused
     meminfo['VmallocChunk'] = vmallocchunk
 
+    if symbol_exists("pcpu_nr_populated") and symbol_exists("pcpu_nr_units"):
+        pcpu_nr_populated = readSymbol("pcpu_nr_populated")
+        pcpu_nr_units = readSymbol("pcpu_nr_units")
+        meminfo['Percpu'] = int(pcpu_nr_populated * pcpu_nr_units * page_unit / 1024)
+
     meminfo['HardwareCorrupted'] = get_hardware_corrupted()
 
     hp_total, hp_free, hp_rsvd, hp_surp, hp_size = get_hugepages_details()
@@ -557,7 +584,8 @@ def get_meminfo():
                 get_entry_in_dict(meminfo, "Committed_AS", " kB\n") +\
                 get_entry_in_dict(meminfo, "VmallocTotal", " kB\n") +\
                 get_entry_in_dict(meminfo, "VmallocUsed", " kB\n") +\
-                get_entry_in_dict(meminfo, "VmallocChunk", " kB\n") +\
+                get_entry_in_dict(meminfo, "VmallocChunk", " kB\n") + \
+                get_entry_in_dict(meminfo, "Percpu", " kB\n") + \
                 get_entry_in_dict(meminfo, "HardwareCorrupted", " kB\n") +\
                 get_entry_in_dict(meminfo, "AnonHugePages", " kB\n") +\
                 get_entry_in_dict(meminfo, "HugePages_Total", "\n") +\
