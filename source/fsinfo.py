@@ -444,6 +444,7 @@ I_SKIP_STATE = I_FREEING | I_WILL_FREE | I_NEW
 MS_BORN = (1 << 29)
 
 page_caches = {}
+wb_caches = {}
 
 
 def pages_to_str(pages):
@@ -466,7 +467,9 @@ def pages_to_str(pages):
 # and the output of kmem -i (CACHED).
 def show_page_caches(options):
     global page_caches
+    global wb_caches
     page_caches = {}
+    wb_caches = {}
     super_blocks = readSymbol("super_blocks")
     for sb in readSUListFromHead(super_blocks,
                                  "s_list",
@@ -485,10 +488,10 @@ def show_page_caches(options):
                             key=operator.itemgetter(1), reverse=True)
     total_count = 0
     exclude_count = 0
-    print("=" * 75)
-    print("%18s %9s %9s %-12s %s" %\
-          ("super_block   ", "pages ", "bytes  ", " s_id", "root"))
-    print("-" * 75)
+    print("=" * 79)
+    print("%18s %9s %9s %-12s %-15s // %s" %\
+          ("super_block   ", "pages ", "bytes  ", " s_id", "root", "wb"))
+    print("-" * 79)
     for sb, count in sorted_sb_dict:
         try:
             total_count = total_count + count
@@ -499,22 +502,35 @@ def show_page_caches(options):
                 if s_op_name == "shmem_ops":
                     filename = "shared memory"
             page_bytes = pages_to_str(count)
-            print("0x%x %9d (%7s) %-12s %s" %
-                  (sb, count, page_bytes, sb.s_id, filename))
+            wb_bytes = pages_to_str(wb_caches[sb])
+            print("0x%x %9d (%7s) %-12s %-15s // %s" %
+                  (sb, count, page_bytes, sb.s_id, filename, wb_bytes))
         except:
             pass
 
-    print("-" * 75)
+    print("-" * 79)
     print("Total number of page caches = %d (%s)" %
           (total_count, pages_to_str(total_count)))
     pages_without_dev = (total_count - exclude_count)
     print("   (exclude /dev/ and unnamed root) = %d (%s)" %
           (pages_without_dev, pages_to_str(pages_without_dev)))
-    print("=" * 75)
+    print("=" * 79)
 
 
 def show_pagecache_sb(sb, options):
     global page_caches
+    global wb_caches
+
+    count = 0
+    if addr2sym(sb.s_type) == "xfs_fs_type":
+        for wb_node in readSUListFromHead(sb.s_inodes_wb,
+                                        "next",
+                                        "struct list_head"):
+            offset = member_offset("struct xfs_inode", "i_wblist")
+            xfs_inode = readSU("struct xfs_inode", wb_node - offset)
+            count = count + xfs_inode.i_vnode.i_mapping.nrpages
+
+    wb_caches[sb] = count
 
     for inode in readSUListFromHead(sb.s_inodes,
                                     "i_sb_list",
