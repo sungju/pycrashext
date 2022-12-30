@@ -517,18 +517,21 @@ def show_page_caches(options):
     print("=" * 79)
 
 
+FS_HAS_WBLIST=131072
+
 def show_pagecache_sb(sb, options):
     global page_caches
     global wb_caches
 
     count = 0
-    if addr2sym(sb.s_type) == "xfs_fs_type":
-        for wb_node in readSUListFromHead(sb.s_inodes_wb,
-                                        "next",
-                                        "struct list_head"):
-            offset = member_offset("struct xfs_inode", "i_wblist")
-            xfs_inode = readSU("struct xfs_inode", wb_node - offset)
-            count = count + xfs_inode.i_vnode.i_mapping.nrpages
+    if (sb.s_type.fs_flags & FS_HAS_WBLIST) == FS_HAS_WBLIST:
+        if addr2sym(sb.s_type) == "xfs_fs_type":
+            for wb_node in readSUListFromHead(sb.s_inodes_wb,
+                                            "next",
+                                            "struct list_head"):
+                offset = member_offset("struct xfs_inode", "i_wblist")
+                xfs_inode = readSU("struct xfs_inode", wb_node - offset)
+                count = count + xfs_inode.i_vnode.i_mapping.nrpages
 
     wb_caches[sb] = count
 
