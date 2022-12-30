@@ -78,9 +78,12 @@ def check_syscall_table(options):
         if sys_call == None:
             if idx > max_syscalls:
                 break
-            hook_call_no += 1
-            result = exec_crash_command("sys -c %d" % (idx)).splitlines()[1]
-            print(result)
+            try:
+                result = exec_crash_command("sys -c %d" % (idx)).splitlines()[1]
+                hook_call_no += 1
+                print(result)
+            except:
+                pass
             idx += 1
             continue
 
