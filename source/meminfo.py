@@ -637,7 +637,10 @@ def show_tasks_memusage(options):
         result_line = result_lines[i].split()
         if (len(result_line) < 9):
             continue
-        pname = result_line[8]
+        if options.all:
+            pname = "%s (%s)" % (result_line[8], result_line[1])
+        else:
+            pname = result_line[8]
         rss = result_line[7]
         total_rss = total_rss + int(rss)
         if (pname in mem_usage_dict):
