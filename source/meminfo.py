@@ -924,6 +924,109 @@ def show_tlb_csd_list(options):
                       (f.mm, f.mm.owner.pid, f.mm.owner.comm, f.start, f.end))
 
 
+SLAB_STORE_USER=0x10000
+
+alloc_func_list = {}
+alloc_count = 0
+
+def read_a_track(options, kmem_cache, track_addr):
+    global alloc_func_list
+    global alloc_count
+
+    alloc_count = alloc_count + 1
+    track = readSU("struct track", track_addr)
+    if track.addr not in alloc_func_list:
+        alloc_func_list[track.addr] = 1
+
+    alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
+
+    if options.details:
+        print(exec_crash_command("rd 0x%x -S 16" % track_addr))
+
+
+
+def show_alloc_track(options, kmem_cache, track_size, addr, total_slab):
+    offset = kmem_cache.red_left_pad + kmem_cache.inuse + 8
+    if kmem_cache.red_left_pad > 0:
+        offset = kmem_cache.red_left_pad + kmem_cache.align
+    track_offset = track_size * 2 + kmem_cache.inuse
+
+    for idx in range(0, total_slab):
+        track_addr = addr + offset + track_offset * idx - 0x8
+        read_a_track(options, kmem_cache, track_addr)
+
+
+def show_partial_alloc_track(options, kmem_cache, track_size, slab_addr):
+    lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line.startswith("["):
+            continue
+        line = line[1:-1]
+        track_addr = int(line, 16) + kmem_cache.object_size
+        read_a_track(options, kmem_cache, track_addr)
+
+
+def show_slub_debug_user(options):
+    global alloc_func_list
+    global alloc_count
+
+    lines = exec_crash_command("kmem -s %s" % options.user_alloc)
+    if len(lines) == 0:
+        return
+    words = lines.splitlines()[1].split()
+    kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
+    if ((kmem_cache.flags & SLAB_STORE_USER) != SLAB_STORE_USER):
+        print("Please use 'slub_deubg=U' to collect alloc tracking")
+        return
+
+    track_size = struct_size("struct track")
+    lines = exec_crash_command("kmem -S %s" % options.user_alloc).splitlines()
+    full_mode = False
+    partial_mode = False
+    alloc_count = 0
+    for line in lines:
+        line = line.strip()
+        if line.startswith("NODE") or line.startswith("KMEM_CACHE_NODE"):
+            full_mode = False
+            partial_mode = False
+
+            if not line.endswith("FULL:") and not line.endswith("PARTIAL:"):
+                continue
+
+        if line.endswith("FULL:"):
+            full_mode = True
+
+        if line.endswith("PARTIAL:"):
+            partial_mode = True
+
+        if full_mode != True and partial_mode != True:
+            continue
+
+        words = line.split()
+        if len(words) < 5 or words[0] == "SLAB":
+            continue
+
+        if full_mode:
+            show_alloc_track(options, kmem_cache, track_size,
+                             int(words[1], 16), int(words[4]))
+        elif partial_mode:
+            show_partial_alloc_track(options, kmem_cache, track_size, int(words[0], 16))
+
+
+    sorted_alloc_func_list = sorted(alloc_func_list.items(),
+                          key=operator.itemgetter(1), reverse=False)
+    for addr, count in sorted_alloc_func_list:
+        sym_name = exec_crash_command("sym 0x%x" % (addr))
+        words = sym_name.split()
+        if len(words) == 5:
+            sym_name = sym_name[:sym_name.find(words[3])]
+        sym_name = sym_name.strip()
+        print("%10d : %s" % (count, sym_name))
+
+    print("\nTotal allocated slab count = %d" % (alloc_count))
+
+
 def show_pte_flags(options):
     _PAGE_BIT_PRESENT   =0
     _PAGE_BIT_RW        =1
@@ -1023,6 +1126,9 @@ def meminfo():
     op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
                   help="Show memory usages by tasks")
+    op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
+                  action="store", type="string",
+                  help="Show slub_debug=U usage")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
@@ -1075,6 +1181,10 @@ def meminfo():
 
     if (o.tlb_list != ""):
         show_tlb_csd_list(o)
+        sys.exit(0)
+
+    if (o.user_alloc != ""):
+        show_slub_debug_user(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
