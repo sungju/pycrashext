@@ -944,26 +944,34 @@ def read_a_track(options, kmem_cache, track_addr):
         print(exec_crash_command("rd 0x%x -S 16" % track_addr))
 
 
+def show_alloc_track(options, kmem_cache, track_size, addr, slab_addr):
+    page = readSU("struct page", slab_addr)
+    total_slab = page.objects & 0xff # Make sure it only uses a byte
 
-def show_alloc_track(options, kmem_cache, track_size, addr, total_slab):
-    offset = kmem_cache.red_left_pad + kmem_cache.inuse + 8
-    if kmem_cache.red_left_pad > 0:
-        offset = kmem_cache.red_left_pad + kmem_cache.align
-    track_offset = track_size * 2 + kmem_cache.inuse
+    if kmem_cache.offset > 0:
+        offset = kmem_cache.offset + getSizeOf("long")
+    else:
+        offset = kmem_cache.inuse
 
     for idx in range(0, total_slab):
-        track_addr = addr + offset + track_offset * idx - 0x8
+        track_addr = addr + kmem_cache.size * idx + offset
         read_a_track(options, kmem_cache, track_addr)
 
 
 def show_partial_alloc_track(options, kmem_cache, track_size, slab_addr):
     lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
+
+    if kmem_cache.offset > 0:
+        offset = kmem_cache.offset + getSizeOf("long")
+    else:
+        offset = kmem_cache.inuse
+
     for line in lines:
         line = line.strip()
         if not line.startswith("["):
             continue
         line = line[1:-1]
-        track_addr = int(line, 16) + kmem_cache.object_size
+        track_addr = int(line, 16) + offset
         read_a_track(options, kmem_cache, track_addr)
 
 
@@ -1009,7 +1017,7 @@ def show_slub_debug_user(options):
 
         if full_mode:
             show_alloc_track(options, kmem_cache, track_size,
-                             int(words[1], 16), int(words[4]))
+                             int(words[1], 16), int(words[0], 16))
         elif partial_mode:
             show_partial_alloc_track(options, kmem_cache, track_size, int(words[0], 16))
 
