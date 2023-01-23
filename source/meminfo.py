@@ -929,11 +929,17 @@ SLAB_STORE_USER=0x10000
 alloc_func_list = {}
 alloc_count = 0
 
-def read_a_track(options, kmem_cache, track_addr):
+def read_a_track(options, kmem_cache, obj_addr):
     global alloc_func_list
     global alloc_count
 
+    if kmem_cache.offset > 0:
+        offset = kmem_cache.offset + getSizeOf("long")
+    else:
+        offset = kmem_cache.inuse
+
     alloc_count = alloc_count + 1
+    track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
     if track.addr not in alloc_func_list:
         alloc_func_list[track.addr] = 1
@@ -948,31 +954,21 @@ def show_alloc_track(options, kmem_cache, track_size, addr, slab_addr):
     page = readSU("struct page", slab_addr)
     total_slab = page.objects & 0xff # Make sure it only uses a byte
 
-    if kmem_cache.offset > 0:
-        offset = kmem_cache.offset + getSizeOf("long")
-    else:
-        offset = kmem_cache.inuse
-
     for idx in range(0, total_slab):
-        track_addr = addr + kmem_cache.size * idx + offset
-        read_a_track(options, kmem_cache, track_addr)
+        obj_addr = addr + kmem_cache.size * idx
+        read_a_track(options, kmem_cache, obj_addr)
 
 
 def show_partial_alloc_track(options, kmem_cache, track_size, slab_addr):
     lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
-
-    if kmem_cache.offset > 0:
-        offset = kmem_cache.offset + getSizeOf("long")
-    else:
-        offset = kmem_cache.inuse
 
     for line in lines:
         line = line.strip()
         if not line.startswith("["):
             continue
         line = line[1:-1]
-        track_addr = int(line, 16) + offset
-        read_a_track(options, kmem_cache, track_addr)
+        obj_addr = int(line, 16)
+        read_a_track(options, kmem_cache, obj_addr)
 
 
 def show_slub_debug_user(options):
