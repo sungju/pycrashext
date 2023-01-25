@@ -1019,7 +1019,8 @@ def show_slub_debug_user(options):
 
 
     sorted_alloc_func_list = sorted(alloc_func_list.items(),
-                          key=operator.itemgetter(1), reverse=False)
+                          key=operator.itemgetter(1), reverse=True)
+    print_count = 0
     for addr, count in sorted_alloc_func_list:
         sym_name = exec_crash_command("sym 0x%x" % (addr))
         words = sym_name.split()
@@ -1027,6 +1028,14 @@ def show_slub_debug_user(options):
             sym_name = sym_name[:sym_name.find(words[3])]
         sym_name = sym_name.strip()
         print("%10d : %s" % (count, sym_name))
+        print_count = print_count + 1
+        if not options.all and print_count > 9:
+            if len(sorted_alloc_func_list) > 10:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_alloc_func_list) - 10,
+                        " items > ..."))
+            break
 
     print("\nTotal allocated slab count = %d" % (alloc_count))
 
