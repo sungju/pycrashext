@@ -1066,6 +1066,8 @@ def show_slub_debug_user(options):
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
     for addr, count in sorted_alloc_func_list:
+        if addr == 0:
+            continue
         sym_name = exec_crash_command("sym 0x%x" % (addr))
         words = sym_name.split()
         if len(words) == 5:
