@@ -925,6 +925,7 @@ def show_tlb_csd_list(options):
 
 
 SLAB_STORE_USER=0x10000
+SLAB_RED_ZONE=0x00000400
 
 alloc_func_list = {}
 alloc_count = 0
@@ -938,6 +939,10 @@ def read_a_track(options, kmem_cache, obj_addr):
     else:
         offset = kmem_cache.inuse
 
+    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+        offset = offset + kmem_cache.red_left_pad
+        offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
+
     alloc_count = alloc_count + 1
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
@@ -945,6 +950,36 @@ def read_a_track(options, kmem_cache, obj_addr):
         alloc_func_list[track.addr] = 1
 
     alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
+
+    if alloc_count == 1:
+        g_line = "%6s" % "+"
+        t_line = "%6s" % "|"
+        d_line = "%6s" % "|"
+        if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+            t_line = t_line + ("%6s" % "RED") + "|"
+            g_line = g_line + "-" * 6 + "+"
+            d_line = d_line + ("%6d" % kmem_cache.red_left_pad) + "|"
+
+        t_line = t_line + ("%8s" % "OBJ Size") + "|"
+        g_line = g_line + "-" * 8 + "+"
+        d_line = d_line + ("%8d" % kmem_cache.object_size) + "|"
+
+        if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+            t_line = t_line + ("%6s" % "RED") + "|"
+            g_line = g_line + "-" * 6 + "+"
+            d_line = d_line + ("%6d" % kmem_cache.inuse - kmem_cache.object_size) + "|"
+
+        t_line = t_line + ("%8s" % "track at") + "|"
+        g_line = g_line + "-" * 8 + "+"
+        d_line = d_line + ("%8d" % offset) + "|"
+
+        print("%6s%s" % ("", "SLAB Layout"))
+        print(g_line)
+        print(t_line)
+        print(g_line)
+        print(d_line)
+        print(g_line)
+        print("")
 
     if options.details:
         print(exec_crash_command("rd 0x%x -S 16" % track_addr))
