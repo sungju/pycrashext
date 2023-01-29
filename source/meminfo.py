@@ -930,18 +930,9 @@ SLAB_RED_ZONE=0x00000400
 alloc_func_list = {}
 alloc_count = 0
 
-def read_a_track(options, kmem_cache, obj_addr):
+def read_a_track(options, kmem_cache, obj_addr, offset):
     global alloc_func_list
     global alloc_count
-
-    if kmem_cache.offset > 0:
-        offset = kmem_cache.offset + getSizeOf("long")
-    else:
-        offset = kmem_cache.inuse
-
-    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
-        offset = offset + kmem_cache.red_left_pad
-        offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
 
     alloc_count = alloc_count + 1
     track_addr = obj_addr + offset
@@ -951,50 +942,57 @@ def read_a_track(options, kmem_cache, obj_addr):
 
     alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
 
-    if alloc_count == 1:
-        g_line = "%6s" % "+"
-        t_line = "%6s" % "|"
-        d_line = "%6s" % "|"
-        if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
-            t_line = t_line + ("%6s" % "RED") + "|"
-            g_line = g_line + "-" * 6 + "+"
-            d_line = d_line + ("%6d" % kmem_cache.red_left_pad) + "|"
-
-        t_line = t_line + ("%8s" % "OBJ Size") + "|"
-        g_line = g_line + "-" * 8 + "+"
-        d_line = d_line + ("%8d" % kmem_cache.object_size) + "|"
-
-        if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
-            t_line = t_line + ("%6s" % "RED") + "|"
-            g_line = g_line + "-" * 6 + "+"
-            d_line = d_line + ("%6d" % kmem_cache.inuse - kmem_cache.object_size) + "|"
-
-        t_line = t_line + ("%8s" % "track at") + "|"
-        g_line = g_line + "-" * 8 + "+"
-        d_line = d_line + ("%8d" % offset) + "|"
-
-        print("%6s%s" % ("", "SLAB Layout"))
-        print(g_line)
-        print(t_line)
-        print(g_line)
-        print(d_line)
-        print(g_line)
-        print("")
-
     if options.details:
         print(exec_crash_command("rd 0x%x -S 16" % track_addr))
 
 
-def show_alloc_track(options, kmem_cache, track_size, addr, slab_addr):
+def print_slab_layout(kmem_cache, offset):
+    red_str = crashcolor.get_color(crashcolor.LIGHTRED)
+    green_str = crashcolor.get_color(crashcolor.GREEN)
+    blue_str = crashcolor.get_color(crashcolor.BLUE)
+    reset_str = crashcolor.get_color(crashcolor.RESET)
+    g_line = "%6s" % "+"
+    t_line = "%6s" % "|"
+    d_line = "%6s" % "|"
+    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+        t_line = t_line + red_str + ("%6s" % "RED") + reset_str + "|"
+        g_line = g_line + "-" * 6 + "+"
+        d_line = d_line + red_str + ("%6d" % kmem_cache.red_left_pad) + reset_str + "|"
+
+    t_line = t_line + green_str + ("%8s" % "OBJ Size") + reset_str + "|"
+    g_line = g_line + "-" * 8 + "+"
+    d_line = d_line + green_str + ("%8d" % kmem_cache.object_size) + reset_str + "|"
+
+    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+        t_line = t_line + red_str + ("%6s" % "RED") + reset_str + "|"
+        g_line = g_line + "-" * 6 + "+"
+        d_line = d_line + red_str + ("%6d" % (kmem_cache.inuse - kmem_cache.object_size)) + reset_str + "|"
+
+    t_line = t_line + blue_str + ("%8s" % "track at") + reset_str + "|"
+    g_line = g_line + "-" * 8 + "+"
+    d_line = d_line + blue_str + ("%8d" % offset) + reset_str + "|"
+
+    print("%4s" % "", end="")
+    print(kmem_cache)
+    print("%6s%s" % ("", "SLAB Layout"))
+    print(g_line)
+    print(t_line)
+    print(g_line)
+    print(d_line)
+    print(g_line)
+    print("")
+
+
+def show_alloc_track(options, kmem_cache, addr, slab_addr, offset):
     page = readSU("struct page", slab_addr)
     total_slab = page.objects & 0xff # Make sure it only uses a byte
 
     for idx in range(0, total_slab):
         obj_addr = addr + kmem_cache.size * idx
-        read_a_track(options, kmem_cache, obj_addr)
+        read_a_track(options, kmem_cache, obj_addr, offset)
 
 
-def show_partial_alloc_track(options, kmem_cache, track_size, slab_addr):
+def show_partial_alloc_track(options, kmem_cache, slab_addr, offset):
     lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
 
     for line in lines:
@@ -1003,7 +1001,7 @@ def show_partial_alloc_track(options, kmem_cache, track_size, slab_addr):
             continue
         line = line[1:-1]
         obj_addr = int(line, 16)
-        read_a_track(options, kmem_cache, obj_addr)
+        read_a_track(options, kmem_cache, obj_addr, offset)
 
 
 def show_slub_debug_user(options):
@@ -1019,11 +1017,20 @@ def show_slub_debug_user(options):
         print("Please use 'slub_deubg=U' to collect alloc tracking")
         return
 
-    track_size = struct_size("struct track")
     lines = exec_crash_command("kmem -S %s" % options.user_alloc).splitlines()
     full_mode = False
     partial_mode = False
     alloc_count = 0
+
+    if kmem_cache.offset >= kmem_cache.object_size:
+        offset = kmem_cache.offset + getSizeOf("long")
+    else:
+        offset = kmem_cache.inuse
+
+    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+        offset = offset + kmem_cache.red_left_pad
+        offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
+
     for line in lines:
         line = line.strip()
         if line.startswith("NODE") or line.startswith("KMEM_CACHE_NODE"):
@@ -1047,12 +1054,14 @@ def show_slub_debug_user(options):
             continue
 
         if full_mode:
-            show_alloc_track(options, kmem_cache, track_size,
-                             int(words[1], 16), int(words[0], 16))
+            show_alloc_track(options, kmem_cache, int(words[1], 16),
+                    int(words[0], 16), offset)
         elif partial_mode:
-            show_partial_alloc_track(options, kmem_cache, track_size, int(words[0], 16))
+            show_partial_alloc_track(options, kmem_cache,
+                    int(words[0], 16), offset)
 
 
+    print_slab_layout(kmem_cache, offset)
     sorted_alloc_func_list = sorted(alloc_func_list.items(),
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
