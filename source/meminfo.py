@@ -968,9 +968,10 @@ def print_slab_layout(kmem_cache, offset):
         g_line = g_line + "-" * 6 + "+"
         d_line = d_line + red_str + ("%6d" % (kmem_cache.inuse - kmem_cache.object_size)) + reset_str + "|"
 
-    t_line = t_line + blue_str + ("%8s" % "track at") + reset_str + "|"
-    g_line = g_line + "-" * 8 + "+"
-    d_line = d_line + blue_str + ("%8d" % offset) + reset_str + "|"
+    if ((kmem_cache.flags & SLAB_STORE_USER) == SLAB_STORE_USER):
+        t_line = t_line + blue_str + ("%8s" % "track at") + reset_str + "|"
+        g_line = g_line + "-" * 8 + "+"
+        d_line = d_line + blue_str + ("%8d" % offset) + reset_str + "|"
 
     print("%4s" % "", end="")
     print(kmem_cache)
@@ -1013,14 +1014,6 @@ def show_slub_debug_user(options):
         return
     words = lines.splitlines()[1].split()
     kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
-    if ((kmem_cache.flags & SLAB_STORE_USER) != SLAB_STORE_USER):
-        print("Please use 'slub_deubg=U' to collect alloc tracking")
-        return
-
-    lines = exec_crash_command("kmem -S %s" % options.user_alloc).splitlines()
-    full_mode = False
-    partial_mode = False
-    alloc_count = 0
 
     if kmem_cache.offset >= kmem_cache.object_size:
         offset = kmem_cache.offset + getSizeOf("long")
@@ -1030,6 +1023,17 @@ def show_slub_debug_user(options):
     if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
         offset = offset + kmem_cache.red_left_pad
         offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
+
+    print_slab_layout(kmem_cache, offset)
+
+    if ((kmem_cache.flags & SLAB_STORE_USER) != SLAB_STORE_USER):
+        print("Please use 'slub_deubg=U' to collect alloc tracking")
+        return
+
+    lines = exec_crash_command("kmem -S %s" % options.user_alloc).splitlines()
+    full_mode = False
+    partial_mode = False
+    alloc_count = 0
 
     for line in lines:
         line = line.strip()
@@ -1061,7 +1065,6 @@ def show_slub_debug_user(options):
                     int(words[0], 16), offset)
 
 
-    print_slab_layout(kmem_cache, offset)
     sorted_alloc_func_list = sorted(alloc_func_list.items(),
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
