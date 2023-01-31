@@ -1068,6 +1068,8 @@ def show_slub_debug_user(options):
     sorted_alloc_func_list = sorted(alloc_func_list.items(),
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
+    if alloc_count > 0:
+        print("%10s   %s" % ("COUNT", "FUNCTION"))
     for addr, count in sorted_alloc_func_list:
         if addr == 0:
             continue

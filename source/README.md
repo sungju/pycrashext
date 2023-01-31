@@ -897,24 +897,33 @@ Usage: meminfo.py [options]
 
 Options:
   -h, --help            show this help message and exit
-  -u, --memusage        Show memory usages by tasks
-  -n, --nogroup         Show data in individual tasks
   -a, --all             Show all the output
   -b, --budyinfo        Show /proc/buddyinfo like output
+  -d, --details         Show detailed output
+  -e ERROR_CODE, --error=ERROR_CODE
+                        Interpret page_fault error code
+  -f TLB_LIST, --tlb=TLB_LIST
+                        Shows tlb list (csd). example) meminfo -f
+                        0xffffade6b68037e0 -d
+  -F PTE_FLAGS, --pte_flags=PTE_FLAGS
+                        Shows the meaning of pte flags
+  -g GFP_MASK, --gfp_mask=GFP_MASK
+                        Interpret gfp_mask value
+  -i, --meminfo         Show /proc/meminfo-like output
+  -m, --numa            Show NUMA info
+  -n, --nogroup         Show data in individual tasks
+  -p PERCPU, --percpu=PERCPU
+                        Convert percpu address into virtual address
   -s, --slabtop         Show slabtop-like output
   -S SLABDETAIL, --slabdetail=SLABDETAIL
                         Show details of a slab
-  -i, --meminfo         Show /proc/meminfo-like output
-  -p PERCPU, --percpu=PERCPU
-                        Convert percpu address into virtual address
   -t PERCPU_TYPE, --type=PERCPU_TYPE
-                        Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int
-  -d, --details         Show detailed output
+                        Specify percpu type : u8, u16, u32, u64, s8, s16, s32,
+                        s64, int
+  -u, --memusage        Show memory usages by tasks
+  -U USER_ALLOC, --user_alloc=USER_ALLOC
+                        Show slub_debug=U usage
   -v, --vm              Show 'vm' output with more details
-  -e ERROR_CODE, --error=ERROR_CODE
-                        Interpret page_fault error code
-  -m, --numa            Show NUMA info
-
 
 crash> meminfo --memusage
 ======================================================================
@@ -948,6 +957,22 @@ kmem_cache         NAME                                TOTAL OBJSIZE
 0xffff88102f870bc0 task_struct                         5824K    2672
 0xffff88102f850b40 anon_vma_chain                      5652K      48
 ====================================================================
+
+crash> meminfo -U anon_vma
+    <struct kmem_cache 0xffff8da6bfc0a200>
+      SLAB Layout
+     +--------+--------+
+     |OBJ Size|track at|
+     +--------+--------+
+     |      72|      80|
+     +--------+--------+
+
+     COUNT   FUNCTION
+      3355 : ffffffff82400d45 (t) anon_vma_alloc+0x15
+       849 : ffffffff82403309 (T) anon_vma_fork+0x69
+
+Total allocated slab count = 4202
+
 
 crash> meminfo --meminfo
 MemTotal:             32394624.0 kB
