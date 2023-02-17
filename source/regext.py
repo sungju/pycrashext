@@ -311,3 +311,12 @@ import crashcolor
 crashcolor.set_color(crashcolor.BLUE)
 #print("\n\tWritten by Daniel Kwon (dkwon@redhat.com)")
 crashcolor.set_color(crashcolor.RESET)
+
+
+help = '''
+Show locking related information
+'''
+
+rprog("lockinfo", "Lock related information",
+      "-h   - list available options",
+      help)
