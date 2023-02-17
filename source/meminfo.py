@@ -975,7 +975,8 @@ def print_slab_layout(kmem_cache, offset):
 
     print("%4s" % "", end="")
     print(kmem_cache)
-    print("%6s%s" % ("", "SLAB Layout"))
+    print("%6s%s" % ("", "SLAB Layout for " + blue_str +
+                       kmem_cache.name + reset_str))
     print(g_line)
     print(t_line)
     print(g_line)
@@ -1003,6 +1004,21 @@ def show_partial_alloc_track(options, kmem_cache, slab_addr, offset):
         line = line[1:-1]
         obj_addr = int(line, 16)
         read_a_track(options, kmem_cache, obj_addr, offset)
+
+
+def show_slub_debug_user_all(options):
+    lines = exec_crash_command("kmem -s").splitlines()
+    if len(lines) < 2:
+        return
+    for line in lines:
+        words = line.split()
+        if len(words) < 7:
+            continue
+        if words[0] == "CACHE":
+            continue
+
+        options.user_alloc = words[6]
+        show_slub_debug_user(options)
 
 
 def show_slub_debug_user(options):
@@ -1248,7 +1264,10 @@ def meminfo():
         sys.exit(0)
 
     if (o.user_alloc != ""):
-        show_slub_debug_user(o)
+        if (o.user_alloc == "*"):
+            show_slub_debug_user_all(o)
+        else:
+            show_slub_debug_user(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
