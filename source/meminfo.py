@@ -1019,6 +1019,8 @@ def show_slub_debug_user_all(options):
 
         options.user_alloc = words[6]
         show_slub_debug_user(options)
+        print("-=" * 20)
+        print("")
 
 
 def show_slub_debug_user(options):
