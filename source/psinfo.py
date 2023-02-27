@@ -530,7 +530,10 @@ def do_searchstack(options, bt_flag):
     for t in tt.allThreads():
         if options.task_name != "" and options.task_name not in t.comm:
             continue
-        stackdata = exec_crash_command("bt -%s %d" % (bt_flag, t.pid))
+        try:
+            stackdata = exec_crash_command("bt -%s %d" % (bt_flag, t.pid))
+        except:
+            continue
         if search_one_task(stackdata, include_list, exclude_list) == True:
             if options.nodetails == True:
                 print("%s" % exec_crash_command("bt %d" % (t.pid)))
