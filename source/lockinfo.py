@@ -128,9 +128,9 @@ qnodes_details = {}
 
 def mcs_node_color(mcs_node):
     if mcs_node.locked == 0:
-        crashcolor.set_color(crashcolor.LIGHTGRAY)
+        crashcolor.set_color(crashcolor.LIGHTBLUE)
     elif mcs_node.count == 0:
-        crashcolor.set_color(crashcolor.LIGHTYELLOW)
+        crashcolor.set_color(crashcolor.LIGHTGREEN)
     else:
         crashcolor.set_color(crashcolor.RED)
 
