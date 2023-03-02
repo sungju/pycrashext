@@ -320,3 +320,12 @@ Show locking related information
 rprog("lockinfo", "Lock related information",
       "-h   - list available options",
       help)
+
+
+help = '''
+Show caseno when runs by retrace server
+'''
+
+rprog("caseinfo", "Show case no",
+      "-h   - list available options",
+      help)
