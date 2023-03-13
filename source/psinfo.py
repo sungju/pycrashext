@@ -581,6 +581,20 @@ def show_task_details(options):
             print(fpu.state.fxsave)
 
 
+def show_realtime(options):
+    reset_color = crashcolor.get_color(crashcolor.RESET)
+    red_color = crashcolor.get_color(crashcolor.RED)
+    blue_color = crashcolor.get_color(crashcolor.BLUE)
+    if symbol_exists("sysctl_sched_rt_runtime"):
+        sysctl_sched_rt_runtime = readSymbol("sysctl_sched_rt_runtime")
+        if sysctl_sched_rt_runtime == -1:
+            print(red_color, end="")
+        print("kernel.sched_rt_runtime_us = %d" % (sysctl_sched_rt_runtime))
+        if sysctl_sched_rt_runtime == -1:
+            print(blue_color + "\t-1 for sched_rt_runtime_us may cause "
+                  "real-time tasks use up\n\t100% of CPU times which causes"
+                  " CPU starvation for normal tasks" + reset_color)
+
 
 def psinfo():
     op = OptionParser()
@@ -608,6 +622,9 @@ def psinfo():
     op.add_option("-S", "--Searchstack", dest="Searchstack", default=0,
                   action="store_true",
                   help="Search each task stack to find value specified in include with 'bt -F'")
+    op.add_option("-r", "--realtime", dest="realtime", default=0,
+                  action="store_true",
+                  help="Shows realtime related information")
     op.add_option("-n", "--nodetails", dest="nodetails", default=0,
                   action="store_true",
                   help="Shows no stack contents")
@@ -657,6 +674,10 @@ def psinfo():
 
     if (o.taskaddr != ""):
         show_task_details(o)
+        sys.exit(0)
+
+    if (o.realtime):
+        show_realtime(o)
         sys.exit(0)
 
     print(get_ps_ef())
