@@ -59,10 +59,14 @@ def show_rt_details(options):
         sysctl_sched_rt_runtime = readSymbol("sysctl_sched_rt_runtime")
         if sysctl_sched_rt_runtime == -1:
             print(red_color, end="")
-        print("kernel.sched_rt_runtime_us = %d" % (sysctl_sched_rt_runtime))
+        print("kernel.sched_rt_runtime_us = %d%s" %
+              (sysctl_sched_rt_runtime, reset_color))
         if sysctl_sched_rt_period > 0:
-            print("\tRT CPU usage allowance = %d%%" %
-                  ((sysctl_sched_rt_runtime / sysctl_sched_rt_period) * 100))
+            usage_percent = (sysctl_sched_rt_runtime / sysctl_sched_rt_period) * 100
+            if usage_percent >= 98:
+                print(red_color, end="")
+            print("\tRT CPU usage allowance = %d%%%s" %
+                  (usage_percent, reset_color))
 
         if sysctl_sched_rt_runtime == -1:
             print(blue_color + "\t-1 for sched_rt_runtime_us may cause "
