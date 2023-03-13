@@ -45,15 +45,29 @@ def show_sched_features(options):
                               disable_str))
         crashcolor.set_color(crashcolor.RESET)
 
-
 def show_rt_details(options):
-    sysctl_sched_rt_runtime = readSymbol("sysctl_sched_rt_runtime")
-    sysctl_sched_rt_period = readSymbol("sysctl_sched_rt_period")
-    print("sysctl_sched_rt_runtime = %d (%.2f s)" % (sysctl_sched_rt_runtime,
-                                                  sysctl_sched_rt_runtime/1000000))
-    print("sysctl_sched_rt_period = %d (%.2f s)" % (sysctl_sched_rt_period,
-                                                 sysctl_sched_rt_period/1000000))
+    reset_color = crashcolor.get_color(crashcolor.RESET)
+    red_color = crashcolor.get_color(crashcolor.RED)
+    blue_color = crashcolor.get_color(crashcolor.BLUE)
+    if symbol_exists("sysctl_sched_rt_period"):
+        sysctl_sched_rt_period = readSymbol("sysctl_sched_rt_period")
+        print("kernel.sched_rt_period_us = %d" % (sysctl_sched_rt_period))
+    else:
+        sysctl_sched_rt_period = 0
 
+    if symbol_exists("sysctl_sched_rt_runtime"):
+        sysctl_sched_rt_runtime = readSymbol("sysctl_sched_rt_runtime")
+        if sysctl_sched_rt_runtime == -1:
+            print(red_color, end="")
+        print("kernel.sched_rt_runtime_us = %d" % (sysctl_sched_rt_runtime))
+        if sysctl_sched_rt_period > 0:
+            print("\tRT CPU usage allowance = %d%%" %
+                  ((sysctl_sched_rt_runtime / sysctl_sched_rt_period) * 100))
+
+        if sysctl_sched_rt_runtime == -1:
+            print(blue_color + "\t-1 for sched_rt_runtime_us may cause "
+                  "real-time tasks use up\n\t100% of CPU times which causes"
+                  " CPU starvation for normal tasks" + reset_color)
 
 def schedinfo():
     op = OptionParser()
