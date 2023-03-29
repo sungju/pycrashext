@@ -690,10 +690,10 @@ def show_slabtop(options):
     if (options.all):
         min_number = len(sorted_slabtop) - 1
 
-    print("=" * 68)
-    print("%-18s %-29s %11s %7s" %
+    print("=" * 70)
+    print("%-18s %-29s %12s %8s" %
           ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
-    print("=" * 68)
+    print("=" * 70)
     for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
         kmem_cache = readSU("struct kmem_cache",
                             int(sorted_slabtop[i][0], 16))
@@ -703,13 +703,15 @@ def show_slabtop(options):
         elif (member_offset('struct kmem_cache', 'object_size') >= 0):
             obj_size = kmem_cache.object_size
 
-        print("0x%16s %-29s %9s K %7d" %
+        print("0x%16s %-29s %12s %8d" %
                 (sorted_slabtop[i][0],
                  kmem_cache.name,
-                 sorted_slabtop[i][1],
+                 get_size_str(int(sorted_slabtop[i][1]) * 1024, True),
                  obj_size))
 
-    print("=" * 68)
+        crashcolor.set_color(crashcolor.RESET)
+
+    print("=" * 70)
 
 
 def show_slabdetail(options):
