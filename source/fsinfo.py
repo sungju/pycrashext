@@ -14,6 +14,24 @@ import re
 import crashcolor
 
 
+def get_page_shift():
+    resultline = exec_crash_command("ptob 1")
+    if len(resultline) == 0:
+        return 0
+
+    words = resultline.split()
+    if len(words) < 2:
+        return 0
+
+    value = int(words[1], 16)
+    idx = 0
+    while (value > 0):
+        value = value >> 1
+        idx = idx + 1
+
+    return idx - 1
+
+
 def dentry_to_filename (dentry) :
     if (dentry == 0):
         return "<>"
@@ -951,50 +969,98 @@ def show_task_info(options):
     show_file_details(options)
 
 
+PAGE_SIZE=0
+_PAGE_FILE = 0x40
+
+
+def init_swap_data():
+    global PAGE_SIZE
+    global _PAGE_FILE
+
+    PAGE_SIZE = 1 << get_page_shift()
+    arch = sys_info.machine
+    if (arch in ("x86_64", "i386", "i686", "athlon")):
+        _PAGE_FILE = 0x40
+    if (sys_info.machine.startswith("arm")):
+        _PAGE_FILE = (1 << 2)
+    if (arch in ("aarch64")):
+        _PAGE_FILE = (1 << 2)
+    if (sys_info.machine.startswith("ppc")):
+        pass
+    if (sys_info.machine.startswith("s390")):
+        _PAGE_FILE = 0x601
+
+
+MM_SWAPENTS = 2
+
+def show_task_swap_usage(task, options):
+    swap_usage = 0
+    mm_struct = task.mm
+    if mm_struct == 0:
+        return
+    swap_usage = long(mm_struct.rss_stat.count[MM_SWAPENTS])
+    if swap_usage > 0:
+        print("%10d %15d %s" % (task.pid, swap_usage, task.comm))
+
+
+def show_swap_usage(options):
+    init_swap_data()
+    init_task = readSymbol("init_task")
+    print("%10s %15s %s" % ("PID", "SWAP", "COMM"))
+    for task in readSUListFromHead(init_task.tasks,
+                                   "tasks",
+                                   "struct task_struct",
+                                   maxel=1000000):
+        show_task_swap_usage(task, options)
+
+
 def fsinfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show detailed information")
-    op.add_option("-f", "--file", dest="file", default="",
-                  action="store",
-                  help="Show detailed file information for 'struct file' address (hex)")
-    op.add_option("-i", "--inode", dest="inode", default="",
-                  action="store",
-                  help="Show detailed inode information for 'struct inode' address (hex)")
-    op.add_option("-s", "--slab", dest="show_slab", default=0,
-                  action="store_true",
-                  help="Show all 'dentry' details in slab")
     op.add_option("-c", "--caches", dest="show_caches", default=0,
                   action="store_true",
                   help="Show dentry/inodes caches")
     op.add_option("-C", "--CACHED", dest="show_cached_details", default=0,
                   action="store_true",
                   help="Show CACHED details")
-    op.add_option("-r", "--page_caches", dest="show_page_caches", default=0,
-                  action="store_true",
-                  help="Show page caches")
+    op.add_option("-f", "--file", dest="file", default="",
+                  action="store",
+                  help="Show detailed file information for 'struct file' address (hex)")
     op.add_option("--findpidbyfile", dest="file_addr_for_pid", default="",
                   action="store",
                   help="Find PID from a /proc file address (hex)")
     op.add_option("--findpidbydentry", dest="dentry_addr_for_pid",
                   default="", action="store",
                   help="Find PID from a /proc dentry address (hex)")
-    op.add_option("-p", "--dumpe2fs", dest="dumpe2fs", default="",
+    op.add_option("-i", "--inode", dest="inode", default="",
                   action="store",
-                  help="Shows dumpe2fs like information")
+                  help="Show detailed inode information for 'struct inode' address (hex)")
     op.add_option("-n", "--fsnotify", dest="fsnotify_group", default="",
                   action="store",
                   help="Show fsnotify details for fsnotify_group")
     op.add_option("--negdents", dest="degative_dentries", default=0,
                   action="store_true",
                   help="Show negative dentries")
-    op.add_option("-t", "--task", dest="task_info", default="",
-                  action="store",
-                  help="Show task related information")
+    op.add_option("-r", "--page_caches", dest="show_page_caches", default=0,
+                  action="store_true",
+                  help="Show page caches")
+    op.add_option("-s", "--slab", dest="show_slab", default=0,
+                  action="store_true",
+                  help="Show all 'dentry' details in slab")
     op.add_option("--show_open_file_size", dest="show_open_file_size", default=0,
                   action="store_true",
                   help="Show file size of each open files")
+    op.add_option("-S", "--swap", dest="show_swap", default=0,
+                  action="store_true",
+                  help="Show all 'dentry' details in slab")
+    op.add_option("-t", "--task", dest="task_info", default="",
+                  action="store",
+                  help="Show task related information")
+    op.add_option("-p", "--dumpe2fs", dest="dumpe2fs", default="",
+                  action="store",
+                  help="Shows dumpe2fs like information")
 
     (o, args) = op.parse_args()
 
@@ -1042,6 +1108,10 @@ def fsinfo():
 
     if (o.show_open_file_size):
         show_open_file_size(o)
+        sys.exit(0)
+
+    if (o.show_swap):
+        show_swap_usage(o)
         sys.exit(0)
 
 
