@@ -61,7 +61,7 @@ def show_rt_details(options):
             print(red_color, end="")
         print("kernel.sched_rt_runtime_us = %d%s" %
               (sysctl_sched_rt_runtime, reset_color))
-        if sysctl_sched_rt_period > 0:
+        if sysctl_sched_rt_period > 0 and sysctl_sched_rt_runtime > 0:
             usage_percent = (sysctl_sched_rt_runtime / sysctl_sched_rt_period) * 100
             if usage_percent >= 98:
                 print(red_color, end="")
