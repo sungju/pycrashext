@@ -73,6 +73,40 @@ def show_rt_details(options):
                   "real-time tasks use up\n\t100% of CPU times which causes"
                   " CPU starvation for normal tasks" + reset_color)
 
+
+def show_worker_pool(options):
+    bold_str = crashcolor.get_color(crashcolor.BOLD)
+    blue_str = crashcolor.get_color(crashcolor.BLUE)
+    red_str = crashcolor.get_color(crashcolor.RED)
+    reset_str = crashcolor.get_color(crashcolor.RESET)
+
+    worker_pool = readSU("struct worker_pool", int(options.worker_pool, 16))
+    print(worker_pool)
+    print("%sCPU : %d%s" % (bold_str, worker_pool.cpu, reset_str))
+    print("%sWork list%s" % (blue_str, reset_str))
+    for worker in readSUListFromHead(worker_pool.worklist,
+                                    'entry',
+                                    'struct worker'):
+        print("\t%s" % (worker))
+        if worker.current_work != 0:
+            print("\tcurrent_work = %s%s%s" %
+                  (red_str, addr2sym(worker.current_work), reset_str))
+
+    print("%sIdle list%s" % (blue_str, reset_str))
+    for worker in readSUListFromHead(worker_pool.idle_list,
+                                    'entry',
+                                    'struct worker'):
+        print("\t%s" % (worker))
+        if worker.current_work != 0:
+            print("\tcurrent_work = %s%s%s" %
+                  (red_str, addr2sym(worker.current_work), reset_str))
+        try:
+            if worker.task != 0:
+                print("\ttask = %s%d 0x%x %s%s" %
+                      (red_str, worker.task.pid, worker.task, worker.task.comm, reset_str))
+        except:
+            pass
+
 def schedinfo():
     op = OptionParser()
     op.add_option("-c", "--classes", dest="sched_classes", default=0,
@@ -87,6 +121,9 @@ def schedinfo():
     op.add_option("-r", "--rt", dest="rt_details", default=0,
                   action="store_true",
                   help="Show some RT related values")
+    op.add_option("-w", "--worker_pool", dest="worker_pool", default="",
+                  action="store",
+                  help="Show worker pool information")
 
     (o, args) = op.parse_args()
 
@@ -98,6 +135,9 @@ def schedinfo():
 
     if (o.rt_details):
         show_rt_details(o)
+
+    if (o.worker_pool):
+        show_worker_pool(o)
 
 
 if ( __name__ == '__main__'):
