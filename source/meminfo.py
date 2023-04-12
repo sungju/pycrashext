@@ -1089,7 +1089,7 @@ def show_slub_debug_user(options):
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
     if alloc_count > 0:
-        print("%10s   %s" % ("COUNT", "FUNCTION"))
+        print("%10s %10s : %s" % ("OBJ_COUNT", "TOTAL_SIZE", "FUNCTION"))
     for addr, count in sorted_alloc_func_list:
         if addr == 0:
             continue
@@ -1098,7 +1098,9 @@ def show_slub_debug_user(options):
         if len(words) == 5:
             sym_name = sym_name[:sym_name.find(words[3])]
         sym_name = sym_name.strip()
-        print("%10d : %s" % (count, sym_name))
+        print("%10d (%8s) : %s" %
+              (count, get_size_str(count * kmem_cache.object_size),
+               sym_name))
         print_count = print_count + 1
         if not options.all and print_count > 9:
             if len(sorted_alloc_func_list) > 10:
@@ -1108,7 +1110,14 @@ def show_slub_debug_user(options):
                         " items > ..."))
             break
 
-    print("\nTotal allocated slab count = %d" % (alloc_count))
+    print("")
+    print("Total allocated object count = %d" % (alloc_count))
+    print("      allocated object size  = %s" %
+          (get_size_str(alloc_count * kmem_cache.object_size, True)))
+    print("\n\t", end="")
+    crashcolor.set_color(crashcolor.LIGHTGRAY + crashcolor.UNDERLINE)
+    print("Caution: This size doesn't include data structure and padding, etc")
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def show_pte_flags(options):
