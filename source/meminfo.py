@@ -638,7 +638,7 @@ def show_tasks_memusage(options):
         if (len(result_line) < 9):
             continue
         if options.all:
-            pname = "%s (%s)" % (result_line[8], result_line[1])
+            pname = "%s (%s)" % (result_line[8], result_line[0])
         else:
             pname = result_line[8]
         rss = result_line[7]
