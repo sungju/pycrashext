@@ -247,7 +247,7 @@ def show_inode_details(options):
                 dev_name = bdi.name
             except:
                 dev_name = bdi.dev_name
-            if dev_name != "":
+            if dev_name != "" and bdi.dev != 0:
                 dev_kobj_name = bdi.dev.kobj.name
             else:
                 dev_kobj_name = ""
