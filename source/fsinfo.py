@@ -546,7 +546,8 @@ def show_pagecache_sb(sb, options):
         if addr2sym(sb.s_type) == "xfs_fs_type":
             for wb_node in readSUListFromHead(sb.s_inodes_wb,
                                             "next",
-                                            "struct list_head"):
+                                            "struct list_head",
+                                            maxel=5000000):
                 offset = member_offset("struct xfs_inode", "i_wblist")
                 xfs_inode = readSU("struct xfs_inode", wb_node - offset)
                 count = count + xfs_inode.i_vnode.i_mapping.nrpages
@@ -556,7 +557,7 @@ def show_pagecache_sb(sb, options):
     for inode in readSUListFromHead(sb.s_inodes,
                                     "i_sb_list",
                                     "struct inode",
-                                   maxel=10000000):
+                                   maxel=50000000):
         mapping = inode.i_mapping
         if mapping.nrpages == 0 or (inode.i_state & I_SKIP_STATE) != 0:
             continue
@@ -1010,7 +1011,7 @@ def show_swap_usage(options):
     for task in readSUListFromHead(init_task.tasks,
                                    "tasks",
                                    "struct task_struct",
-                                   maxel=1000000):
+                                   maxel=5000000):
         show_task_swap_usage(task, options)
 
 
