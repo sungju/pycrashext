@@ -1,0 +1,178 @@
+{
+	"commands" : [
+		{
+			"command" : "devinfo",
+			"desc"    : "Device information",
+			"options" : "-h   - list available options",
+			"help"    : "Show device related information"
+		},
+		{
+			"command" : "vminfo",
+			"desc"    : "virtual machine information",
+			"options" : "-h   - list available options",
+			"help"    : "virtual machine related information"
+		},
+		{
+			"command" : "lockup",
+			"desc"    : "LOCKUP check",
+			"options" : "-h   - list available options",
+			"help"    : "CPU lock check\n\n -r       - Show longest holder at top\n --tasks  - Show tasks in each runqueue"
+		},
+		{
+			"command" : "revs",
+			"desc"    : "Reverse engineering helper",
+			"options" : "-h   - list available options",
+			"help"    : "Helper function for reverse engineering\n\n --regs  - register details\n --asm <instruction> - details about an instruction"
+		},
+		{
+			"command" : "cginfo",
+			"desc"    : "cgroup information",
+			"options" : "-h   - list available options",
+			"help"    : "cgroup information\n\n --tglist    - task group list with details\n --tree      - hierarchial display of cgroups"
+		},
+		{
+			"command" : "schedinfo",
+			"desc"    : "scheduling information",
+			"options" : "-h   - list available options",
+			"help"    : "scheduling information\n\n --classes    - Show scheduling classes\n --details    - Show details"
+		},
+		{
+			"command" : "epstree",
+			"desc"    : "Print process list in tree format",
+			"options" : "-h   - list available options",
+			"help"    : "Print process list in tree format.\n\n -p          - Print process ID\n-g          - Print number of threads\n-s          - Print task state\n-t          - Print a specific task and its children"
+		},
+		{
+			"command" : "emodinfo",
+			"desc"    : "Module related information",
+			"options" : "-h   - list available options",
+			"help"    : "Module related information.\n\n--disasm <module name>    - Disassemble functions in a module\n--details <module name>   - Show details"
+		},
+		{
+			"command" : "ipmi",
+			"desc"    : "ipmi related information",
+			"options" : "-h   - list available options",
+			"help"    : "ipmi related information.\n\n--smi_list      - Show smi_info list\n--details       - Show additional information"
+		},
+		{
+			"command" : "bh",
+			"desc"    : "Bottom Half information",
+			"options" : "-h   - list available options",
+			"help"    : "Showing softirq and tasklet details."
+		},
+		{
+			"command" : "fsinfo",
+			"desc"    : "Filesystem information",
+			"options" : "-h   - list available options",
+			"help"    : "filesystem related information."
+		},
+		{
+			"command" : "cpuinfo",
+			"desc"    : "CPU information",
+			"options" : "-h   - list available options",
+			"help"    : "CPU related information."
+		},
+		{
+			"command" : "netinfo",
+			"desc"    : "Network information",
+			"options" : "-h   - list available options",
+			"help"    : "networking related information."
+		},
+		{
+			"command" : "meminfo",
+			"desc"    : "Memory information",
+			"options" : "-h   - list available options",
+			"help"    : "memory related information"
+		},
+		{
+			"command" : "timeinfo",
+			"desc"    : "Time information",
+			"options" : "-h   - list available options",
+			"help"    : "time related information"
+		},
+		{
+			"command" : "edis",
+			"desc"    : "Enhanced disasm",
+			"options" : "-h   - list available options",
+			"help"    : "enhanced disasm command related information"
+		},
+		{
+			"command" : "syscallinfo",
+			"desc"    : "System call table checking",
+			"options" : "-h   - list available options",
+			"help"    : "system call table checking"
+		},
+		{
+			"command" : "autocheck",
+			"desc"    : "Diagnose some known issues",
+			"options" : "-h   - list available options",
+			"help"    : "Diagnose some known issues automatically"
+		},
+		{
+			"command" : "insights",
+			"desc"    : "Run insights with the currently available data",
+			"options" : "-h   - list available options",
+			"help"    : "Checking the data through insights"
+		},
+		{
+			"command" : "psinfo",
+			"desc"    : "process related information",
+			"options" : "-h   - list available options",
+			"help"    : "Show process information"
+		},
+		{
+			"command" : "seinfo",
+			"desc"    : "SELinux output",
+			"options" : "-h   - list available options",
+			"help"    : "Show selinux related information"
+		},
+		{
+			"command" : "hangcheck",
+			"desc"    : "hang task(s) heck",
+			"options" : "-h   - list available options",
+			"help"    : "Shows UN(D) state processes with details"
+		},
+		{
+			"command" : "auditinfo",
+			"desc"    : "audit information",
+			"options" : "-h   - list available options",
+			"help"    : "Shows audit information"
+		},
+		{
+			"command" : "traceinfo",
+			"desc"    : "trace information",
+			"options" : "-h   - list available options",
+			"help"    : "Shows tracing information"
+		},
+		{
+			"command" : "selinuxinfo",
+			"desc"    : "show selinux status",
+			"options" : "-h   - list available options",
+			"help"    : ""
+		},
+		{
+			"command" : "screen",
+			"desc"    : "handle screen",
+			"options" : "-h   - list available options",
+			"help"    : "Screen handling"
+		},
+		{
+			"command" : "ipcinfo",
+			"desc"    : "ipc information",
+			"options" : "-h   - list available options",
+			"help"    : "ipc information"
+		},
+		{
+			"command" : "lockinfo",
+			"desc"    : "Lock related information",
+			"options" : "-h   - list available options",
+			"help"    : "Show locking related information"
+		},
+		{
+			"command" : "caseinfo",
+			"desc"    : "Show case no",
+			"options" : "-h   - list available options",
+			"help"    : "Show caseno when runs by retrace server"
+		}
+	]
+}

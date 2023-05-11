@@ -89,6 +89,13 @@ def ipmi():
 
     (o, args) = op.parse_args()
 
+    try:
+        pa = readSymbol("smi_infos")
+        if pa == 0:
+            return
+    except:
+        return
+
     if (o.smi_list):
         show_smi_list(o.show_details)
 
