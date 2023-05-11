@@ -173,6 +173,6 @@
 			"desc"    : "Show case no",
 			"options" : "-h   - list available options",
 			"help"    : "Show caseno when runs by retrace server"
-		},
+		}
 	]
 }
