@@ -29,7 +29,8 @@ except Exception as e:
 
 def load_json_config():
     try:
-        with open("config.json", "r") as f:
+        config_file = os.path.dirname(sys.argv[0]) + "/config.json"
+        with open(config_file, "r") as f:
             data = json.load(f)
         commands = data['commands']
         for cmd in commands:
