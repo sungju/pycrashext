@@ -10,6 +10,7 @@ from LinuxDump import percpu
 import crashcolor
 
 import sys
+from datetime import datetime
 
 sysinfo = {}
 sys_str = ""
@@ -44,6 +45,22 @@ def show_case_info(options):
     except:
         pass
     print("Hostname: %s" % (green_str + sysinfo["NODENAME"] + reset_str))
+    crash_date=sysinfo["DATE"]
+    tz=crash_date.split()[-2]
+    crash_date = crash_date.replace(tz, "")
+    datetime_fmt = '%a %b %d %H:%M:%S %Y'
+    dt = datetime.strptime(crash_date, datetime_fmt)
+    date_ago = datetime.now() - dt
+    crash_date_color=reset_str
+    if date_ago.days < 7:
+        crash_date_color=green_str
+    elif date_ago.days < 30:
+        crash_date_color=blue_str
+    else:
+        crash_date_color=red_str
+
+    print(" Collected %s%d days%s ago. %s" % (crash_date_color, date_ago.days,
+                                            reset_str, sysinfo["DATE"]))
     print("=-" * 28)
     if options.sysinfo:
         print(sys_str)
