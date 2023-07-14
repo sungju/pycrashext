@@ -59,7 +59,7 @@ def show_case_info(options):
     elif date_ago.days < 30:
         crash_date_color=blue_str + underline_str
     else:
-        crash_date_color=red_str + blink_str
+        crash_date_color=red_str + underline_str + blink_str
 
     print(" Collected %s%d days%s ago. %s" % (crash_date_color, date_ago.days,
                                             reset_str, sysinfo["DATE"]))
