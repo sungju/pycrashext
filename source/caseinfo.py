@@ -61,8 +61,12 @@ def show_case_info(options):
     else:
         crash_date_color=red_str + underline_str + blink_str
 
-    print(" Collected %s%d days%s ago. %s" % (crash_date_color, date_ago.days,
-                                            reset_str, sysinfo["DATE"]))
+    print(" Collected %s%d days%s ago. %s%s%s" % (crash_date_color,
+                                                  date_ago.days,
+                                                  reset_str,
+                                                  underline_str,
+                                                  sysinfo["DATE"],
+                                                  reset_str))
     if options.sysinfo:
         print("=-" * 28)
         print(sys_str)
