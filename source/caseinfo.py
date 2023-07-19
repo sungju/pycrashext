@@ -63,9 +63,10 @@ def show_case_info(options):
 
     print(" Collected %s%d days%s ago. %s" % (crash_date_color, date_ago.days,
                                             reset_str, sysinfo["DATE"]))
-    print("=-" * 28)
     if options.sysinfo:
+        print("=-" * 28)
         print(sys_str)
+        print("%s" % readSymbol("saved_command_line"))
 
 
 def caseinfo():
