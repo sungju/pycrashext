@@ -48,18 +48,20 @@ def dentry_to_filename (dentry) :
 
 def get_vfsmount_from_sb(sb):
     if (sb == 0):
-        return -1
+        return None
 
     try:
         crashout_list = exec_crash_command("mount")
         for mount_line in crashout_list.splitlines():
             mount_details = mount_line.split()
             if (mount_details[1] == ("%x" % sb)):
-                return int(mount_details[0], 16)
+                mount = readSU("struct mount", int(mount_details[0], 16))
+                return mount.mnt
     except:
-        return -1
+        return None
 
-    return -1
+    return None 
+
 
 def get_mount_option(mnt_flags):
     return {
@@ -117,10 +119,9 @@ def all_filesystem_info(options):
         frozen_str = get_frozen_str(frozen)
         fs_state_list[frozen_str] = fs_state_list[frozen_str] + 1 if frozen_str in fs_state_list else 1
 
-        vfsmnt_addr = get_vfsmount_from_sb(sb)
+        vfsmnt = get_vfsmount_from_sb(sb)
         mnt_flags = 0
-        if (vfsmnt_addr != -1):
-            vfsmnt = readSU("struct vfsmount", vfsmnt_addr)
+        if (vfsmnt != None):
             mnt_flags = vfsmnt.mnt_flags
 
 
