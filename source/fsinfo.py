@@ -14,6 +14,31 @@ import re
 import crashcolor
 
 
+sysinfo = {}
+sys_str = ""
+ver_magic = 0
+VER_MAGIC_3_3 = 303 # version 3.3
+
+def get_system_info():
+    global sysinfo
+    global sys_str
+    global ver_magic
+
+    if (len(sysinfo) > 0):
+        return
+
+    sys_str = exec_crash_command("sys")
+    resultlines = sys_str.splitlines()
+    for line in resultlines:
+        words = line.split(":")
+        sysinfo[words[0].strip()] = line[len(words[0]) + 2:].strip()
+
+    release_array = sysinfo["RELEASE"].split(".")
+    ver_major = int(release_array[0])
+    ver_minor = int(release_array[1])
+    ver_magic = ver_major * 100 + ver_minor
+
+
 def get_page_shift():
     resultline = exec_crash_command("ptob 1")
     if len(resultline) == 0:
@@ -55,8 +80,11 @@ def get_vfsmount_from_sb(sb):
         for mount_line in crashout_list.splitlines():
             mount_details = mount_line.split()
             if (mount_details[1] == ("%x" % sb)):
-                mount = readSU("struct mount", int(mount_details[0], 16))
-                return mount.mnt
+                if (ver_magic >= VER_MAGIC_3_3): # 3.3 or higher
+                    mount = readSU("struct mount", int(mount_details[0], 16))
+                    return mount.mnt
+                else:
+                    return readSU("struct vfsmount", int(mount_details[0], 16))
     except:
         return None
 
@@ -105,6 +133,7 @@ def get_frozen_str(frozen_type):
 
 
 def all_filesystem_info(options):
+    get_system_info()
     fs_state_list = {} 
     super_blocks = sym2addr("super_blocks")
     for sb in readSUListFromHead(super_blocks,
