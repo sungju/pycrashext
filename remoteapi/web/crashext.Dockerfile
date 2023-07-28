@@ -1,15 +1,23 @@
 #
 # crash extension server docker image
 #
-# Written by Daniel Sungju Kwon
-# dkwon@redhat.com
+# Written by Sungju Kwon
+# sungju.kwon@gmail.com
 #
 FROM ubuntu:latest
-LABEL maintainer dkwon@redhat.com
-MAINTAINER dkwon@redhat.com
+LABEL maintainer sungju.kwon@gmail.com
+MAINTAINER sungju.kwon@gmail.com
 
-RUN apt-get update -y
-RUN apt-get install -y python3 python3-pip python3-dev build-essential git-core python3-venv python-six
+RUN apt-get update -y && apt-get install -y \
+	build-essential \
+	git-core \
+	python3 \
+	python3-dev \
+	python3-six \
+	python3-pip \
+	python3-venv \
+	&& rm -rf /var/lib/apt/lists/*
+
 COPY . /app
 WORKDIR /app
 ENTRYPOINT ["/app/entrypoint.sh"]
