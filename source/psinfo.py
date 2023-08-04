@@ -11,11 +11,20 @@ from LinuxDump import Tasks
 
 import sys
 import operator
+import signal
 
 import crashcolor
 import epstree
 import crashhelper
 from datetime import datetime, timedelta
+
+
+def ctrl_c_handler(signum, frame):
+    print("Interrupted")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, ctrl_c_handler)
 
 
 is_userdata_avail = False
@@ -534,6 +543,7 @@ def do_searchstack(options, bt_flag):
             stackdata = exec_crash_command("bt -%s %d" % (bt_flag, t.pid))
         except:
             continue
+
         if search_one_task(stackdata, include_list, exclude_list) == True:
             if options.nodetails == True:
                 print("%s" % exec_crash_command("bt %d" % (t.pid)))
