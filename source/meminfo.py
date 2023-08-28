@@ -604,25 +604,86 @@ def get_meminfo():
 def get_size_str(size, coloring = False):
     size_str = ""
     if size > (1024 * 1024 * 1024): # GiB
-        size_str = "%d GiB" % (size / (1024*1024*1024))
+        size_str = "%.1f GiB" % (size / (1024*1024*1024))
         if coloring == True:
             crashcolor.set_color(crashcolor.RED)
     elif size > (1024 * 1024): # MiB
-        size_str = "%d MiB" % (size / (1024*1024))
+        size_str = "%.1f MiB" % (size / (1024*1024))
         if coloring == True:
             crashcolor.set_color(crashcolor.MAGENTA)
     elif size > (1024): # KiB
-        size_str = "%d KiB" % (size / (1024))
+        size_str = "%.1f KiB" % (size / (1024))
         if coloring == True:
             crashcolor.set_color(crashcolor.GREEN)
     else:
-        size_str = "%d B" % (size)
+        size_str = "%.0f B" % (size)
 
     return size_str
+
+def get_pss_for_physical(paddr):
+#    print(paddr)
+    result_lines = []
+    try:
+        result_lines = exec_crash_command("kmem -p %s" % (paddr)).splitlines()
+        if len(result_lines) != 2:
+            return 0
+    except:
+#        print("kmem error on %s" % (paddr))
+        return 0
+
+    page_addr = result_lines[1].split()[0]
+    pss = 0.0
+    try:
+        page = readSU("struct page", int(page_addr, 16))
+#        print(page)
+        if member_offset("struct page", "_refcount") >= 0:
+            pss = 4096 / page._refcount.counter
+        else:
+            pss = 4096 / page._count.counter
+#            print(pss)
+    except:
+#        print("error on %s" % (page_addr))
+        pass
+
+    return pss
+
+
+def get_pss_for_task(task_addr):
+    task = readSU("struct task_struct", int(task_addr, 16))
+    if task.mm == 0:
+        return 0
+#    print(task)
+    rss = 0
+    idx = 0
+    result_lines = exec_crash_command("vm -p %s" % (task_addr)).splitlines()
+    total_lines = len(result_lines)
+    while True:
+        while idx < total_lines and not result_lines[idx].startswith("VIRTUAL"):
+            idx = idx + 1
+
+        idx = idx + 1
+        if idx >= total_lines:
+            break
+        while idx < total_lines:
+            line = result_lines[idx].split()
+            idx = idx + 1
+            if len(line) > 2 or len(line) == 0:
+                continue
+
+            if line[1] != 'PHYSICAL':
+                rss = rss + get_pss_for_physical(line[1])
+
+    if rss > 0:
+        rss = rss / 4096.0
+    return rss
 
 
 def show_tasks_memusage(options):
     mem_usage_dict = {}
+    if options.memusage_pss:
+        print("Experimental stage for Pss")
+        print("It will take quite sometime to gather Pss based memory usage")
+
     if (options.nogroup):
         crash_command = "ps"
     else:
@@ -637,16 +698,22 @@ def show_tasks_memusage(options):
         result_line = result_lines[i].split()
         if (len(result_line) < 9):
             continue
+        pid = result_line[0]
         if options.all:
-            pname = "%s (%s)" % (result_line[8], result_line[0])
+            pname = "%s (%s)" % (result_line[8], pid)
         else:
             pname = result_line[8]
-        rss = result_line[7]
-        total_rss = total_rss + int(rss)
+        rss = int(result_line[7])
+        if options.memusage_pss:
+            rss = get_pss_for_task(result_line[3])
+        total_rss = total_rss + rss
         if (pname in mem_usage_dict):
-            rss = mem_usage_dict[pname] + int(rss)
+            rss = mem_usage_dict[pname] + rss
 
-        mem_usage_dict[pname] = int(rss)
+        if rss != 0:
+            mem_usage_dict[pname] = rss
+#            print("%s %.2f" % (pname, mem_usage_dict[pname]))
+#            break
 
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
@@ -659,15 +726,15 @@ def show_tasks_memusage(options):
         min_number = len(sorted_usage) - 1
 
     for i in range(0, min(len(sorted_usage) - 1, min_number)):
-        print("%14s (%10s KiB)   %-s" %
-                (get_size_str(int(sorted_usage[i][1]) * 1024, True),
+        print("%14s (%10.2f KiB)   %-s" %
+                (get_size_str(sorted_usage[i][1] * 1024, True),
                  sorted_usage[i][1],
                  sorted_usage[i][0]))
         crashcolor.set_color(crashcolor.RESET)
 
     print("=" * 70)
     crashcolor.set_color(crashcolor.BLUE)
-    print("Total memory usage from user-space = %.2f GiB" %
+    print("Total memory usage from user-space = %.1f GiB" %
           (total_rss/1048576))
     crashcolor.set_color(crashcolor.RESET)
 
@@ -706,7 +773,7 @@ def show_slabtop(options):
         print("0x%16s %-29s %12s %8d" %
                 (sorted_slabtop[i][0],
                  kmem_cache.name,
-                 get_size_str(int(sorted_slabtop[i][1]) * 1024, True),
+                 get_size_str(sorted_slabtop[i][1] * 1024, True),
                  obj_size))
 
         crashcolor.set_color(crashcolor.RESET)
@@ -1219,6 +1286,9 @@ def meminfo():
     op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
                   help="Show memory usages by tasks")
+    op.add_option("-P", "--pss", dest="memusage_pss", default=0,
+                  action="store_true",
+                  help="Show memory usages(pss) by tasks")
     op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
                   action="store", type="string",
                   help="Show slub_debug=U usage")
