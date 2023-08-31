@@ -997,22 +997,32 @@ SLAB_STORE_USER=0x10000
 SLAB_RED_ZONE=0x00000400
 
 alloc_func_list = {}
+alloc_pid_list = {}
 alloc_count = 0
 
 def read_a_track(options, kmem_cache, obj_addr, offset):
     global alloc_func_list
+    global alloc_pid_list
     global alloc_count
 
     alloc_count = alloc_count + 1
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
-    if track.addr not in alloc_func_list:
-        alloc_func_list[track.addr] = 1
 
+    if track.addr not in alloc_func_list:
+        alloc_func_list[track.addr] = 0
     alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
 
     if options.details:
-        print(exec_crash_command("rd 0x%x -S 16" % track_addr))
+        if (track.addr, track.pid) not in alloc_pid_list:
+            alloc_pid_list[(track.addr, track.pid)] = 0
+        alloc_pid_list[(track.addr, track.pid)] =\
+                        alloc_pid_list[(track.addr, track.pid)] + 1
+
+        if options.all:
+            print("OBJ at 0x%x" % (obj_addr))
+            print("< struct track 0x%x >" % (track_addr))
+            print(exec_crash_command("rd 0x%x -S 16" % track_addr))
 
 
 def print_slab_layout(kmem_cache, offset):
@@ -1160,11 +1170,7 @@ def show_slub_debug_user(options):
     for addr, count in sorted_alloc_func_list:
         if addr == 0:
             continue
-        sym_name = exec_crash_command("sym 0x%x" % (addr))
-        words = sym_name.split()
-        if len(words) == 5:
-            sym_name = sym_name[:sym_name.find(words[3])]
-        sym_name = sym_name.strip()
+        sym_name = get_function_name(addr)
         print("%10d (%8s) : %s" %
               (count, get_size_str(count * kmem_cache.object_size),
                sym_name))
@@ -1185,6 +1191,41 @@ def show_slub_debug_user(options):
     crashcolor.set_color(crashcolor.LIGHTGRAY + crashcolor.UNDERLINE)
     print("Caution: This size doesn't include data structure and padding, etc")
     crashcolor.set_color(crashcolor.RESET)
+
+    if options.details:
+        show_alloc_pid_list(options)
+
+
+def get_function_name(addr):
+    if addr == 0:
+        return None
+    sym_name = exec_crash_command("sym 0x%x" % (addr))
+    words = sym_name.split()
+    if len(words) == 5:
+        sym_name = sym_name[:sym_name.find(words[3])]
+    sym_name = sym_name.strip()
+    return sym_name
+
+
+def show_alloc_pid_list(options):
+    global alloc_pid_list
+
+    sorted_alloc_pid_list = sorted(alloc_pid_list.items(),
+                          key=operator.itemgetter(1), reverse=True)
+    print_count = 0
+    if alloc_count > 0:
+        print("\nNotes: Below shows per-pid allocation counts")
+        print("%11s : %10s %s" % ("ALLOC_COUNT", "PID", "FUNCTION"))
+    for (func_addr, pid), count in sorted_alloc_pid_list:
+        print("%11d : %10d %s" % (count, pid, get_function_name(func_addr)))
+        print_count = print_count + 1
+        if not options.all and print_count > 9:
+            if len(sorted_alloc_pid_list) > 10:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_alloc_pid_list) - 10,
+                        " items > ..."))
+            break
 
 
 def show_pte_flags(options):
