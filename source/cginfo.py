@@ -904,48 +904,78 @@ def show_task_group(options):
     for task_group in readSUListFromHead(sym2addr('task_groups'),
                                          'list', 'struct task_group',
                                          maxel=1000000):
-        css = readSU('struct cgroup_subsys_state', task_group.css)
-        if (css == 0):
-            continue
-        if (css.cgroup == 0):
-            continue
-        cgroup = readSU('struct cgroup', css.cgroup)
-        if (cgroup == 0):
-            continue
-        count = count + 1
-        cgroup_name = ""
-        cgroup_counter = 0
-        if member_offset("struct cgroup", "dentry") > -1:
-            if (cgroup.dentry != 0):
-                cgroup_name = dentry_to_filename(cgroup.dentry)
-        elif member_offset("struct cgroup", "kn") > -1:
-            cgroup_name = cgroup.kn.name
-
-        cgroup_counter = cgroup_task_count(cgroup)
-        if cgroup_name == "":
-            cgroup_name = "<default>"
-
-        if cgroup_counter == 0:
-            crashcolor.set_color(crashcolor.RED)
-            empty_count = empty_count + 1
-        else:
-            crashcolor.set_color(crashcolor.RESET)
-
-        print ("task_group = 0x%x, cgroup = 0x%x, counter=%d\n\t(%s)" %
-                (task_group, cgroup, cgroup_counter, cgroup_name))
-        if options.show_detail:
-            cgroup_details(task_group, cgroup, 0)
-
-        if options.task_list:
-            cgroup_task_list(cgroup, 0)
-
-        crashcolor.set_color(crashcolor.RESET)
+        (tg_count, tg_empty_count) = show_task_group_detail(options, task_group)
+        count = count + tg_count
+        empty_count = empty_count + tg_empty_count
 
     print ("-" * 70)
     crashcolor.set_color(crashcolor.BLUE)
     print ("Total number of task_group(s) = %d, %d had 0 count" %
            (count, empty_count))
     crashcolor.set_color(crashcolor.RESET)
+
+
+def show_task_group_detail(options, task_group, indent=0):
+    count = 0
+    empty_count = 0
+
+    css = readSU('struct cgroup_subsys_state', task_group.css)
+    if (css == 0):
+        return (0, 0)
+    if (css.cgroup == 0):
+        return (0, 0)
+    cgroup = readSU('struct cgroup', css.cgroup)
+    if (cgroup == 0):
+        return (0, 0)
+    count = count + 1
+    cgroup_name = ""
+    cgroup_counter = 0
+    if member_offset("struct cgroup", "dentry") > -1:
+        if (cgroup.dentry != 0):
+            cgroup_name = dentry_to_filename(cgroup.dentry)
+    elif member_offset("struct cgroup", "kn") > -1:
+        cgroup_name = cgroup.kn.name
+
+    cgroup_counter = cgroup_task_count(cgroup)
+    if cgroup_name == "":
+        cgroup_name = "<default>"
+
+    if cgroup_counter == 0:
+        crashcolor.set_color(crashcolor.RED)
+        empty_count = empty_count + 1
+    else:
+        crashcolor.set_color(crashcolor.RESET)
+
+
+    ss_name = ""
+    try:
+        ss_name = exec_crash_command("sym %x" % (task_group.css.ss)).split()[-1]
+    except:
+        pass
+
+    indent_str = "\t" * indent
+    print ("%stask_group = 0x%x, cgroup = 0x%x, counter=%d\n" \
+           "%s (%s, %s), nr_dying_descendants=%d" % \
+            (indent_str, task_group, cgroup, cgroup_counter,\
+             indent_str, cgroup_name, ss_name, cgroup.nr_dying_descendants))
+    if options.show_detail:
+        cgroup_details(task_group, cgroup, 0)
+
+    if options.task_list:
+        cgroup_task_list(cgroup, 0)
+
+    crashcolor.set_color(crashcolor.RESET)
+    return (count, empty_count)
+
+
+def show_task_group_tree(options, task_group=None, indent=0):
+    if task_group == None:
+        task_group = readSU("struct task_group", int(options.taskgroup_tree, 16))
+    show_task_group_detail(options, task_group, indent)
+    for task_group in readSUListFromHead(task_group.children,
+                                         'siblings', 'struct task_group',
+                                         maxel=1000000):
+        show_task_group_tree(options, task_group, indent+1)
 
 
 total_count = 0
@@ -1055,6 +1085,10 @@ def cgroupinfo():
                   action="store_true",
                   help="task_group list")
 
+    op.add_option("-G", "--tgtree", dest="taskgroup_tree", default="",
+                  action="store", type="string",
+                  help="task_group tree")
+
     op.add_option("-t", "--tree", dest="cgroup_tree", default=0,
                   action="store_true",
                   help="hierarchial display of cgroups")
@@ -1098,6 +1132,10 @@ def cgroupinfo():
 
     if (o.taskgroup_list):
         show_task_group(o)
+        sys.exit(0)
+
+    if (o.taskgroup_tree != ""):
+        show_task_group_tree(o)
         sys.exit(0)
 
     # default is showing tree
