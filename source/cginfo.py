@@ -757,6 +757,7 @@ def get_percpu_count_str(percpu_ref):
 def show_cgroup_tree_entry(options, cgroup, idx):
     global empty_count
     global cgroup_count
+    global dead_count
 
     subsys_name_list = ""
     for subsys_addr in cgroup.subsys:
@@ -783,6 +784,8 @@ def show_cgroup_tree_entry(options, cgroup, idx):
 
     if member_offset("struct percpu_ref ", "percpu_count_ptr") >= 0:
         percpu_count_str = get_percpu_count_str(cgroup.self.refcnt)
+        if percpu_count_str.find("DEAD") >= 0:
+            dead_count = dead_count + 1
     else:
         percpu_count_str = "" # This needs to be changed later for percpu_ref.data implementation
 
@@ -814,9 +817,11 @@ def show_cgroup_tree_entry(options, cgroup, idx):
 def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     global empty_count
     global cgroup_count
+    global dead_count
 
     empty_count = 0
     cgroup_count = 0
+    dead_count = 0
 
     crashcolor.set_color(crashcolor.BLUE)
     crashcolor.set_color(crashcolor.RESET)
@@ -841,8 +846,8 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
 
     print ("-" * 70)
     crashcolor.set_color(crashcolor.BLUE)
-    print ("Total number of cgroup(s) = %d, %d had 0 count" %
-            (cgroup_count, empty_count))
+    print ("Total number of cgroup(s) = %d, %d had 0 count, %d cgroups in *_DEAD state" %
+            (cgroup_count, empty_count, dead_count))
     crashcolor.set_color(crashcolor.RESET)
 
 
