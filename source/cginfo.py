@@ -685,6 +685,132 @@ def show_cgroup_tree_from_rootnode(rootnode, options):
     crashcolor.set_color(crashcolor.RESET)
 
 
+def show_cgroup_sub_tree(options):
+    try:
+        cgroup = readSU("struct cgroup", int(options.cgroup_addr, 16))
+        show_cgroup_tree_entry(options, cgroup, 0)
+    except Exception as e:
+        print(e)
+
+def get_atomic_count(count):
+    counter = count.counter
+    return counter
+
+
+def get_atomic_count_str(count, size=64):
+    counter = get_atomic_count(count)
+    if counter < 0:
+        if size == 64:
+            return "0x%x" % (counter & 0xffffffffffffffff)
+        elif size == 32:
+            return "0x%x" % (counter & 0xffffffff)
+        else:
+            return "0x%x" % (counter)
+
+
+    return "%d" % counter
+
+
+CSS_NO_REF = (1 << 0)
+CSS_ONLINE = (1 << 1)
+CSS_RELEASED = (1 << 2)
+CSS_VISIBLE = (1 << 3)
+CSS_DYING = (1 << 4)
+
+def get_css_flags_str(css):
+    str = ""
+    if css.flags & CSS_NO_REF:
+        str = str + "CSS_NO_REF "
+    if css.flags & CSS_ONLINE:
+        str = str + "CSS_ONLINE "
+    if css.flags & CSS_RELEASED:
+        str = str + "CSS_RELEASED "
+    if css.flags & CSS_VISIBLE:
+        str = str + "CSS_VISIBLE "
+    if css.flags & CSS_DYING:
+        str = str + "CSS_DYING "
+
+    return str.strip()
+
+
+__PERCPU_REF_ATOMIC = 1 << 0
+__PERCPU_REF_DEAD = 1 << 1
+__PERCPU_REF_ATOMIC_DEAD = __PERCPU_REF_ATOMIC | __PERCPU_REF_DEAD
+__PERCPU_REF_FLAG_BITS = 2
+
+def get_percpu_count_str(percpu_ref):
+#    count = percpu_ref.percpu_count_ptr & ~__PERCPU_REF_ATOMIC_DEAD
+#    if count == 0:
+#        return ""
+#    else:
+#        return "__PERCPU_REF_ATOMIC_DEAD"
+    if percpu_ref.percpu_count_ptr & __PERCPU_REF_ATOMIC_DEAD:
+        return "__PERCPU_REF_ATOMIC_DEAD"
+    elif percpu_ref.percpu_count_ptr & __PERCPU_REF_ATOMIC:
+        return "__PERCPU_REF_ATOMIC"
+    elif percpu_ref.percpu_count_ptr & __PERCPU_REF_DEAD:
+        return "__PERCPU_REF_DEAD"
+    else:
+        return ""
+
+
+def show_cgroup_tree_entry(options, cgroup, idx):
+    global empty_count
+    global cgroup_count
+
+    subsys_name_list = ""
+    for subsys_addr in cgroup.subsys:
+        if subsys_addr == 0:
+            continue
+        subsys = readSU("struct cgroup_subsys_state", subsys_addr)
+        subsys_name_list = subsys_name_list + get_subsys_name(subsys)
+
+    cgroup_count = cgroup_count + 1
+    cgroup_counter = cgroup_task_count(cgroup)
+    if cgroup_counter == 0:
+        empty_count = empty_count + 1
+        crashcolor.set_color(crashcolor.RED)
+    else:
+        crashcolor.set_color(crashcolor.RESET)
+
+    refcount = get_atomic_count_str(cgroup.self.refcnt.count)
+    flags_str = get_css_flags_str(cgroup.self)
+
+    if member_offset("struct cgroup", "nr_dying_descendants") >= 0:
+        nr_dying_str = "  nr_dying_descendants = %d," % cgroup.nr_dying_descendants
+    else:
+        nr_dying_str = ""
+
+    if member_offset("struct percpu_ref ", "percpu_count_ptr") >= 0:
+        percpu_count_str = get_percpu_count_str(cgroup.self.refcnt)
+    else:
+        percpu_count_str = "" # This needs to be changed later for percpu_ref.data implementation
+
+
+    print("%s* %s %s %s %s" % \
+          ("\t" * idx, get_cgroup_name(cgroup), cgroup, subsys_name_list,flags_str))
+    print("%s%s refcnt.count = %s %s" % \
+            ("\t" * idx, nr_dying_str, refcount, percpu_count_str))
+    crashcolor.set_color(crashcolor.RESET)
+    if options.show_detail:
+        print_cgroup_details(idx, cgroup)
+
+    try:
+        idx = idx + 1
+        first = cgroup.self.children
+        for css in readSUListFromHead(first,
+                                     'sibling',
+                                     'struct cgroup_subsys_state',
+                                     inchead = False):
+            cg = readSU("struct cgroup", css)
+            if cg == cgroup:
+                continue
+            show_cgroup_tree_entry(options, cg, idx)
+    except Exception as e:
+        print(e)
+    return
+
+
 def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     global empty_count
     global cgroup_count
@@ -693,8 +819,15 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
     cgroup_count = 0
 
     crashcolor.set_color(crashcolor.BLUE)
-    print ("** cgroup tree **")
     crashcolor.set_color(crashcolor.RESET)
+    if options.cgroup_addr:
+        print ("** cgroup sub-tree for %s **" % options.cgroup_addr)
+        show_cgroup_sub_tree(options)
+        return
+    else:
+        print ("** cgroup tree **")
+        cgroup_root_list = cgroup_roots
+
     for cgroup_root in readSUListFromHead(cgroup_roots,
                                           'root_list',
                                           'struct cgroup_root',
@@ -702,7 +835,8 @@ def show_cgroup_tree_from_cgroup_roots(cgroup_roots, options):
         top_cgroup = cgroup_root.cgrp
         curlimit = sys.getrecursionlimit()
         sys.setrecursionlimit(1000)
-        print_cgroup_entry(top_cgroup, top_cgroup, 0, options)
+        show_cgroup_tree_entry(options, top_cgroup, 0)
+        #print_cgroup_entry(top_cgroup, top_cgroup, 0, options)
         sys.setrecursionlimit(curlimit)
 
     print ("-" * 70)
@@ -734,7 +868,7 @@ def get_page_shift():
 
 def print_task_list(idx, cur_cgroup):
     offset = member_offset("struct task_struct", "cg_list")
-    print("%stasks = " % ("  " * idx + "   "), end="")
+    print("%s  - tasks = <" % ("\t" * idx + " "), end="")
 
     if member_offset("struct cgroup", "css_sets") >= 0:
         list_start = cur_cgroup.css_sets
@@ -749,7 +883,8 @@ def print_task_list(idx, cur_cgroup):
 
     for cg_link in readSUListFromHead(list_start,
                                       entry_name,
-                                      struct_name):
+                                      struct_name,
+                                      maxel=1000000):
 
         if struct_name == "struct cg_cgroup_link":
             cg_link_cg = cg_link.cg
@@ -761,10 +896,11 @@ def print_task_list(idx, cur_cgroup):
         if cg_link_cg == 0:
             continue
         for task in readSUListFromHead(cg_link_cg.tasks,
-                                             "cg_list",
-                                             "struct task_struct"):
+                                       "cg_list",
+                                       "struct task_struct",
+                                       maxel=1000000):
             print("%d(%s) " % (task.pid, task.comm), end="")
-    print("")
+    print(">")
 
 
 def print_mem_cgroup_details(idx, cur_cgroup_subsys_state, cur_cgroup):
@@ -783,6 +919,16 @@ def print_mem_cgroup_details(idx, cur_cgroup_subsys_state, cur_cgroup):
           (idx_str, usage_in_bytes))
 
 
+def print_cset_links(idx, cgroup):
+    for cgrp_cset_link in readSUListFromHead(cgroup.cset_links,
+                                             'cset_link', "struct cgrp_cset_link",
+                                        maxel=1000000):
+        cset = cgrp_cset_link.cset
+        refcount = get_atomic_count_str(cset.refcount.refs, 32)
+        print("%s   - %s %s %s" % ("\t"*idx, cgrp_cset_link, cset, refcount))
+    pass
+
+
 def print_cgroup_details(idx, cur_cgroup):
     for i in range(0, len(cur_cgroup.subsys)):
         if cur_cgroup.subsys[i] != 0:
@@ -790,11 +936,38 @@ def print_cgroup_details(idx, cur_cgroup):
             if cgroup_subsys_id_list[i] == "mem_cgroup_subsys_id":
                 print_mem_cgroup_details(idx, cur_cgroup.subsys[i], cur_cgroup)
 
+    print_cset_links(idx, cur_cgroup)
     print_task_list(idx, cur_cgroup)
 
 
 def list_empty(list_head):
     return list_head.next == list_head.prev
+
+
+def get_cgroup_name(cgroup):
+    cgroup_name = ""
+    if member_offset("struct cgroup", "dentry") > -1:
+        if (cgroup.dentry != 0):
+            cgroup_name = dentry_to_filename(cgroup.dentry)
+    elif member_offset("struct cgroup", "kn") > -1:
+        cgroup_name = cgroup.kn.name
+
+    if cgroup_name == "":
+        cgroup_name = "/"
+
+    return cgroup_name
+
+
+def get_subsys_name(subsys):
+    if (member_offset("struct cgroup_subsys_state", "ss") >= 0):
+        if subsys.ss:
+            subsys_name = addr2sym(subsys.ss)
+        else:
+            subsys_name = ""
+    else:
+        subsys_name =""
+
+    return subsys_name
 
 
 def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
@@ -818,15 +991,8 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         cgroup = subsys.cgroup
         cgroup_name = ""
         cgroup_counter = 0
-        if member_offset("struct cgroup", "dentry") > -1:
-            if (cgroup.dentry != 0):
-                cgroup_name = dentry_to_filename(cgroup.dentry)
-        elif member_offset("struct cgroup", "kn") > -1:
-            cgroup_name = cgroup.kn.name
-
+        cgroup_name = get_cgroup_name(cgroup)
         cgroup_counter = cgroup_task_count(cgroup)
-        if cgroup_name == "":
-            cgroup_name = "<default>"
 
         if cgroup_counter == 0:
             crashcolor.set_color(crashcolor.RED)
@@ -834,10 +1000,7 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
         else:
             crashcolor.set_color(crashcolor.RESET)
 
-        if (member_offset("struct cgroup_subsys_state", "ss") >= 0):
-            subsys_name = addr2sym(subsys.ss)
-        else:
-            subsys_name =""
+        subsys_name = get_subsys_name(subsys)
 
         show_entry = True
         if (options.filter_cgroup_name != "" and
@@ -899,14 +1062,18 @@ def print_cgroup_entry(top_cgroup, cur_cgroup, idx, options):
 def show_task_group(options):
     global empty_count
 
-    count = 0
-    empty_count = 0
-    for task_group in readSUListFromHead(sym2addr('task_groups'),
-                                         'list', 'struct task_group',
-                                         maxel=1000000):
-        (tg_count, tg_empty_count) = show_task_group_detail(options, task_group)
-        count = count + tg_count
-        empty_count = empty_count + tg_empty_count
+    try:
+        root_task_group = readSymbol("root_task_group")
+        (count, empty_count) = show_task_group_tree(options, root_task_group)
+    except: # if root_task_group does not work
+        count = 0
+        empty_count = 0
+        for task_group in readSUListFromHead(sym2addr('task_groups'),
+                                             'list', 'struct task_group',
+                                             maxel=1000000):
+            (tg_count, tg_empty_count) = show_task_group_detail(options, task_group)
+            count = count + tg_count
+            empty_count = empty_count + tg_empty_count
 
     print ("-" * 70)
     crashcolor.set_color(crashcolor.BLUE)
@@ -953,11 +1120,17 @@ def show_task_group_detail(options, task_group, indent=0):
     except:
         pass
 
+    if member_offset("struct cgroup", "nr_dying_descendants") >= 0:
+        nr_dying_str = ", nr_dying_descendants = %d" % cgroup.nr_dying_descendants
+    else:
+        nr_dying_str = ""
+
+
     indent_str = "\t" * indent
     print ("%stask_group = 0x%x, cgroup = 0x%x, counter=%d\n" \
-           "%s (%s, %s), nr_dying_descendants=%d" % \
+           "%s (%s, %s)%s" % \
             (indent_str, task_group, cgroup, cgroup_counter,\
-             indent_str, cgroup_name, ss_name, cgroup.nr_dying_descendants))
+             indent_str, cgroup_name, ss_name, nr_dying_str))
     if options.show_detail:
         cgroup_details(task_group, cgroup, 0)
 
@@ -971,12 +1144,15 @@ def show_task_group_detail(options, task_group, indent=0):
 def show_task_group_tree(options, task_group=None, indent=0):
     if task_group == None:
         task_group = readSU("struct task_group", int(options.taskgroup_tree, 16))
-    show_task_group_detail(options, task_group, indent)
+    (count, empty_count) = show_task_group_detail(options, task_group, indent)
     for task_group in readSUListFromHead(task_group.children,
                                          'siblings', 'struct task_group',
                                          maxel=1000000):
-        show_task_group_tree(options, task_group, indent+1)
+        (tg_count, tg_empty_count) = show_task_group_tree(options, task_group, indent+1)
+        count = count + tg_count
+        empty_count = empty_count + tg_empty_count
 
+    return (count, empty_count)
 
 total_count = 0
 
