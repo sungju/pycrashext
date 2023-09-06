@@ -790,10 +790,17 @@ def show_cgroup_tree_entry(options, cgroup, idx):
         percpu_count_str = "" # This needs to be changed later for percpu_ref.data implementation
 
 
+    pids_max = ""
+    events_limit = ""
+#    if member_offset("struct pids_cgroup", "css") >= 0:
+#        pids_cgroup = readSU("struct pids_cgroup", cgroup.self)
+#        pids_max = ", pids.max = %s" % (get_atomic_count_str(pids_cgroup.limit))
+#        events_limit = ", fork failed count = %s" % (get_atomic_count_str(pids_cgroup.events_limit))
+
     print("%s* %s %s %s %s" % \
           ("\t" * idx, get_cgroup_name(cgroup), cgroup, subsys_name_list,flags_str))
-    print("%s%s refcnt.count = %s %s" % \
-            ("\t" * idx, nr_dying_str, refcount, percpu_count_str))
+    print("%s%s refcnt.count = %s %s%s%s" % \
+            ("\t" * idx, nr_dying_str, refcount, percpu_count_str, pids_max, events_limit))
     crashcolor.set_color(crashcolor.RESET)
     if options.show_detail:
         print_cgroup_details(idx, cgroup)
