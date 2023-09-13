@@ -374,8 +374,6 @@ def show_memory_value(kn, cgroup, cftype, ss, css):
     crashcolor.set_color(crashcolor.RESET)
 
 
-CGRP_FROZEN = 3
-
 def cgroup_is_populated(cgroup):
     popcnt = cgroup.nr_populated_csets + \
             cgroup.nr_populated_domain_children +\
@@ -718,6 +716,8 @@ CSS_VISIBLE = (1 << 3)
 CSS_DYING = (1 << 4)
 
 def get_css_flags_str(css):
+    if css == 0:
+        return ""
     str = ""
     if css.flags & CSS_NO_REF:
         str = str + "CSS_NO_REF "
@@ -754,6 +754,32 @@ def get_percpu_count_str(percpu_ref):
         return ""
 
 
+CGRP_NOTIFY_ON_RELEASE = 1 << 0
+CGRP_CPUSET_CLONE_CHILDREN = 1 << 1
+CGRP_FREEZE = 1 << 2
+CGRP_FROZEN = 1 << 3
+
+def get_cgrp_flags_str(cgroup):
+    result_str = ""
+    if cgroup.flags & CGRP_NOTIFY_ON_RELEASE:
+        result_str = result_str + "CGRP_NOTIFY_ON_RELEASE "
+    if cgroup.flags & CGRP_CPUSET_CLONE_CHILDREN:
+        result_str = result_str + "CGRP_CPUSET_CLONE_CHILDREN "
+    if cgroup.flags & CGRP_FREEZE:
+        result_str = result_str + "CGRP_FREEZE "
+    if cgroup.flags & CGRP_FROZEN:
+        result_str = result_str + "CGRP_FROZEN "
+
+    return result_str.strip()
+
+
+def get_subsys_str(subsys_addr):
+    if subsys_addr == 0:
+        return ""
+    subsys = readSU("struct cgroup_subsys_state", subsys_addr)
+    return get_subsys_name(subsys)
+
+
 def show_cgroup_tree_entry(options, cgroup, idx):
     global empty_count
     global cgroup_count
@@ -761,10 +787,8 @@ def show_cgroup_tree_entry(options, cgroup, idx):
 
     subsys_name_list = ""
     for subsys_addr in cgroup.subsys:
-        if subsys_addr == 0:
-            continue
-        subsys = readSU("struct cgroup_subsys_state", subsys_addr)
-        subsys_name_list = subsys_name_list + get_subsys_name(subsys)
+        subsys_name_list = subsys_name_list + get_subsys_str(subsys_addr) + " "
+    subsys_name_list = subsys_name_list.strip()
 
     cgroup_count = cgroup_count + 1
     cgroup_counter = cgroup_task_count(cgroup)
@@ -775,7 +799,8 @@ def show_cgroup_tree_entry(options, cgroup, idx):
         crashcolor.set_color(crashcolor.RESET)
 
     refcount = get_atomic_count_str(cgroup.self.refcnt.count)
-    flags_str = get_css_flags_str(cgroup.self)
+    flags_str = get_cgrp_flags_str(cgroup)
+    css_flags_str = get_css_flags_str(cgroup.self)
 
     if member_offset("struct cgroup", "nr_dying_descendants") >= 0:
         nr_dying_str = "  nr_dying_descendants = %d," % cgroup.nr_dying_descendants
@@ -799,8 +824,10 @@ def show_cgroup_tree_entry(options, cgroup, idx):
 
     print("%s* %s %s %s %s" % \
           ("\t" * idx, get_cgroup_name(cgroup), cgroup, subsys_name_list,flags_str))
-    print("%s%s refcnt.count = %s %s%s%s" % \
-            ("\t" * idx, nr_dying_str, refcount, percpu_count_str, pids_max, events_limit))
+    print("%s%s refcnt.count = %s %s%s%s %s" % \
+            ("\t" * idx, nr_dying_str, refcount, percpu_count_str, pids_max, events_limit,
+             css_flags_str))
+
     crashcolor.set_color(crashcolor.RESET)
     if options.show_detail:
         print_cgroup_details(idx, cgroup)
@@ -937,8 +964,13 @@ def print_cset_links(idx, cgroup):
                                         maxel=1000000):
         cset = cgrp_cset_link.cset
         refcount = get_atomic_count_str(cset.refcount.refs, 32)
-        print("%s   - %s %s %s" % ("\t"*idx, cgrp_cset_link, cset, refcount))
-    pass
+        print("%s   - %s %s" % ("\t"*idx, cgrp_cset_link, cset))
+        print("%s      cset.refcnt=%s,cset.dead=%d" % ("\t"*idx, refcount, cset.dead))
+''' Unnecessary as it is immutable since system boot
+        for subsys_addr in cset.subsys:
+            print("%s\t%s, %s" % ("\t"*idx, get_subsys_str(subsys_addr),
+                                 get_css_flags_str(subsys_addr)))
+'''
 
 
 def print_cgroup_details(idx, cur_cgroup):
