@@ -73,7 +73,8 @@ def balloon_info(options):
     except:
         pass
 
-    if hv_context != 0 and hv_context.synic_initialized == 1:
+    if hv_context != 0:
+        #and hv_context.synic_initialized == 1:
         hv_mem(options, hv_context)
         return
 
