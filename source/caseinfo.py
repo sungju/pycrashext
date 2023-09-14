@@ -70,8 +70,22 @@ def show_case_info(options):
     if options.sysinfo:
         print("=-" * 28)
         print(sys_str)
-        print("%s" % readSymbol("saved_command_line"))
+        cmd_line_addr = Addr(readSymbol("saved_command_line"))
+        print(read_string(cmd_line_addr))
+        #print("%s" % readSymbol("saved_command_line"))
 
+
+def read_string(addr, delimiter=0x0):
+    result = ""
+    idx = 0
+    while True:
+        one_byte = readU8(addr + idx)
+        idx = idx + 1
+        if one_byte == delimiter:
+            break
+        result = result + str(chr(one_byte))
+
+    return result
 
 def caseinfo():
     op = OptionParser()
