@@ -801,6 +801,7 @@ def show_cgroup_tree_entry(options, cgroup, idx):
     refcount = get_atomic_count_str(cgroup.self.refcnt.count)
     flags_str = get_cgrp_flags_str(cgroup)
     css_flags_str = get_css_flags_str(cgroup.self)
+    bpf_refcount = get_atomic_count_str(cgroup.bpf.refcnt.count)
 
     if member_offset("struct cgroup", "nr_dying_descendants") >= 0:
         nr_dying_str = "  nr_dying_descendants = %d," % cgroup.nr_dying_descendants
@@ -824,8 +825,8 @@ def show_cgroup_tree_entry(options, cgroup, idx):
 
     print("%s* %s %s %s %s" % \
           ("\t" * idx, get_cgroup_name(cgroup), cgroup, subsys_name_list,flags_str))
-    print("%s%s refcnt.count = %s %s%s%s %s" % \
-            ("\t" * idx, nr_dying_str, refcount, percpu_count_str, pids_max, events_limit,
+    print("%s%s refcnt.count = %s, bpf.refcnt.count = %s, %s%s%s %s" % \
+            ("\t" * idx, nr_dying_str, refcount, bpf_refcount, percpu_count_str, pids_max, events_limit,
              css_flags_str))
 
     crashcolor.set_color(crashcolor.RESET)
