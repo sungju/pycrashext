@@ -87,16 +87,26 @@ def show_network_protocols(options):
             print("\t%s = [%d, %d, %d]" % (name, min_val, default_val, max_val))
 
 
-def show_unix_sock(options, socket):
-    unix_sock = readSU("struct unix_sock", socket.sk)
+def show_unix_sock(options, sock):
+    unix_sock = readSU("struct unix_sock", sock)
     print("\tunix_sock.peer <struct unix_sock 0x%x>" % unix_sock.peer)
     print("\tunix_sock.addr", unix_sock.addr)
+    if unix_sock.addr != 0x0:
+        print("\t\taddr = '%s'" % (unix_sock.addr.name.sun_path))
 
 
-def show_inet_sock(options, socket):
-    inet_sock = readSU("struct inet_sock", socket.sk)
+def ip2str(ipnum):
+    return socket.inet_ntoa(struct.pack('!L', ipnum))
+
+
+def show_inet_sock(options, sock):
+    inet_sock = readSU("struct inet_sock", sock)
     print("sk_sndbuf = %d, sk_rcvbuf = %d" %
           (inet_sock.sk.sk_sndbuf, inet_sock.sk.sk_rcvbuf))
+    print("\tsrc addr = %s:%d" % (ip2str(sock.__sk_common.skc_rcv_saddr),
+                                sock.__sk_common.skc_num))
+    print("\tdst addr = %s:%d" % (ip2str(sock.__sk_common.skc_daddr),
+                                 sock.__sk_common.skc_dport))
 
 
 def show_socket_details(options):
@@ -109,9 +119,30 @@ def show_socket_details(options):
     print("state =", socket.state)
     ops_name = addr2sym(socket.ops)
     if ops_name == "unix_stream_ops":
-        show_unix_sock(options, socket)
+        show_unix_sock(options, socket.sk)
     elif ops_name == "inet_stream_ops":
-        show_inet_sock(options, socket)
+        show_inet_sock(options, socket.sk)
+
+
+AF_UNIX = 1
+AF_LOCAL = 1
+AF_INET = 2
+AF_INET6 = 10
+AF_NETLINK = 16
+
+def show_sock_details(options):
+    sock = readSU("struct sock", int(options.sock_addr, 16))
+    if sock == 0 or sock == None:
+        print("Not a valid sock address")
+        return
+
+    print(sock)
+    skc_family = sock.__sk_common.skc_family
+    if skc_family == AF_UNIX:
+        show_unix_sock(options, sock)
+    elif skc_family == AF_INET:
+        show_inet_sock(options, sock)
+
 
 
 def netinfo():
@@ -132,6 +163,11 @@ def netinfo():
                   action="store",
                   help="Show socket details")
 
+    op.add_option("-S", "--sock", dest="sock_addr", default="",
+                  action="store",
+                  help="Show struct sock details")
+
+
     (o, args) = op.parse_args()
 
     if (o.show_interface):
@@ -146,6 +182,10 @@ def netinfo():
 
     if (o.socket_addr != ""):
         show_socket_details(o)
+        sys.exit(0)
+
+    if (o.sock_addr != ""):
+        show_sock_details(o)
         sys.exit(0)
 
 
