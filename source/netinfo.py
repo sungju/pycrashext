@@ -87,12 +87,60 @@ def show_network_protocols(options):
             print("\t%s = [%d, %d, %d]" % (name, min_val, default_val, max_val))
 
 
+SHUTDOWN_MASK = 3
+RCV_SHUTDOWN = 1
+SEND_SHUTDOWN = 2
+
+
+def get_sk_shutdown_str(sk_shutdown):
+    shutdown_type = sk_shutdown & SHUTDOWN_MASK
+    if shutdown_type == RCV_SHUTDOWN:
+        return "RCV_SHUTDOWN"
+    elif shutdown_type == SEND_SHUTDOWN:
+        return "SEND_SHUTDOWN"
+    else:
+        return "NO SHUTDOWN"
+
+
+SOCK_ASYNC_NOSPACE = 1 << 0
+SOCK_ASYNC_WAITDATA = 1 << 1
+SOCK_NOSPACE = 1 << 2
+SOCK_PASSCRED = 1 << 3
+SOCK_PASSSEC = 1 << 4
+SOCK_EXTERNALLY_ALLOCATED = 1 << 5
+
+def get_sk_socket_flags(sk_socket_flags):
+    sk_socket_flags = sk_socket_flags & 0x3f
+    return {
+        SOCK_ASYNC_NOSPACE : "SOCK_ASYNC_NOSPACE",
+        SOCK_ASYNC_WAITDATA : "SOCK_ASYNC_WAITDATA",
+        SOCK_NOSPACE : "SOCK_NOSPACE",
+        SOCK_PASSCRED : "SOCK_PASSCRED",
+        SOCK_PASSSEC : "SOCK_PASSSEC",
+        SOCK_EXTERNALLY_ALLOCATED : "SOCK_EXTERNALLY_ALLOCATED",
+        0 : "NONE"
+    }[sk_socket_flags]
+
+
+def show_sock_status(sock):
+    print("\n< socket status >")
+    print("\tsk_socket->flags = %s" % get_sk_socket_flags(sock.sk_socket.flags))
+    print("\tsk_err = %d, sk_shutdown = %s" % \
+          (sock.sk_err, get_sk_shutdown_str(sock.sk_shutdown)))
+    print("\tsk_wmem_queued = %d" % (sock.sk_wmem_queued))
+    print("\tsk_sndbuf = %d, sk_rcvbuf = %d" %
+          (sock.sk_sndbuf, sock.sk_rcvbuf))
+
+
 def show_unix_sock(options, sock):
     unix_sock = readSU("struct unix_sock", sock)
+    print(unix_sock)
     print("\tunix_sock.peer <struct unix_sock 0x%x>" % unix_sock.peer)
     print("\tunix_sock.addr", unix_sock.addr)
     if unix_sock.addr != 0x0:
         print("\t\taddr = '%s'" % (unix_sock.addr.name.sun_path))
+
+    show_sock_status(sock)
 
 
 def ip2str(ipnum):
@@ -101,12 +149,13 @@ def ip2str(ipnum):
 
 def show_inet_sock(options, sock):
     inet_sock = readSU("struct inet_sock", sock)
-    print("sk_sndbuf = %d, sk_rcvbuf = %d" %
-          (inet_sock.sk.sk_sndbuf, inet_sock.sk.sk_rcvbuf))
+    print(inet_sock)
     print("\tsrc addr = %s:%d" % (ip2str(sock.__sk_common.skc_rcv_saddr),
                                 sock.__sk_common.skc_num))
     print("\tdst addr = %s:%d" % (ip2str(sock.__sk_common.skc_daddr),
                                  sock.__sk_common.skc_dport))
+
+    show_sock_status(sock)
 
 
 def show_socket_details(options):
@@ -115,13 +164,14 @@ def show_socket_details(options):
         print("Not a valid socket address")
         return
 
-    print(socket)
     print("state =", socket.state)
     ops_name = addr2sym(socket.ops)
     if ops_name == "unix_stream_ops":
         show_unix_sock(options, socket.sk)
     elif ops_name == "inet_stream_ops":
         show_inet_sock(options, socket.sk)
+    else:
+        print(socket)
 
 
 AF_UNIX = 1
@@ -136,13 +186,13 @@ def show_sock_details(options):
         print("Not a valid sock address")
         return
 
-    print(sock)
     skc_family = sock.__sk_common.skc_family
     if skc_family == AF_UNIX:
         show_unix_sock(options, sock)
     elif skc_family == AF_INET:
         show_inet_sock(options, sock)
-
+    else:
+        print(sock)
 
 
 def netinfo():

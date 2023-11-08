@@ -132,6 +132,16 @@ def get_frozen_str(frozen_type):
     }[frozen_type]
 
 
+MINORBITS = 20
+MINORMASK = ((1 << MINORBITS) - 1)
+
+def get_dev_no(super_block):
+    major = super_block.s_dev >> MINORBITS
+    minor = super_block.s_dev & MINORMASK
+
+    return major, minor
+
+
 def all_filesystem_info(options):
     get_system_info()
     fs_state_list = {} 
@@ -159,11 +169,14 @@ def all_filesystem_info(options):
         elif frozen_str == "SB_FREEZE_WRITE":
             crashcolor.set_color(crashcolor.LIGHTCYAN)
 
-        print ("SB: 0x%14x, frozen=%s, %s (%s) [%s], (%s)" %
+        dev_major, dev_minor = get_dev_no(sb)
+
+        print ("SB: 0x%14x, frozen=%s, %s (%s) [%s], (%s) on %d:%d" %
                (sb, frozen_str,
                dentry_to_filename(sb.s_root), sb.s_id,
                 sb.s_type.name,
-                get_mount_options(mnt_flags)))
+                get_mount_options(mnt_flags),
+               dev_major, dev_minor))
         crashcolor.set_color(crashcolor.RESET)
 
     print("")
