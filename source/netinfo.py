@@ -122,10 +122,46 @@ def get_sk_socket_flags(sk_socket_flags):
     }[sk_socket_flags]
 
 
+TCP_ESTABLISHED = 1
+TCP_SYN_SENT = 2
+TCP_SYN_RECV = 3
+TCP_FIN_WAIT1 = 4
+TCP_FIN_WAIT2 = 5
+TCP_TIME_WAIT = 6
+TCP_CLOSE = 7
+TCP_CLOSE_WAIT = 8
+TCP_LAST_ACK = 9
+TCP_LISTEN = 10
+TCP_CLOSING = 11
+TCP_NEW_SYN_RECV = 12
+TCP_MAX_STATES = 13
+
+def get_skc_state_str(skc_state):
+    if skc_state >= TCP_MAX_STATES:
+        skc_state = TCP_MAX_STATES
+    return {
+        TCP_ESTABLISHED : "TCP_ESTABLISHED",
+        TCP_SYN_SENT : "TCP_SYN_SENT",
+        TCP_SYN_RECV : "TCP_SYN_RECV",
+        TCP_FIN_WAIT1 : "TCP_FIN_WAIT1",
+        TCP_FIN_WAIT2 : "TCP_FIN_WAIT2",
+        TCP_TIME_WAIT : "TCP_TIME_WAIT",
+        TCP_CLOSE : "TCP_CLOSE",
+        TCP_CLOSE_WAIT : "TCP_CLOSE_WAIT",
+        TCP_LAST_ACK : "TCP_LAST_ACK",
+        TCP_LISTEN : "TCP_LISTEN",
+        TCP_CLOSING : "TCP_CLOSING",
+        TCP_NEW_SYN_RECV : "TCP_NEW_SYN_RECV",
+        TCP_MAX_STATES : "Invalid",
+        0 : "Invalid",
+    }[skc_state]
+
+
 def show_sock_status(sock):
     print("\n< socket status >")
     print("\t<struct socket 0x%x>" % (sock.sk_socket))
-    print("\tsk_socket->flags = %s" % get_sk_socket_flags(sock.sk_socket.flags))
+    print("\tsk_socket->flags = %s" % (get_sk_socket_flags(sock.sk_socket.flags)))
+    print("\tskc_state = %s" % (get_sk_state_str(sock.__sk_common.skc_state)))
     print("\tsk_err = %d, sk_shutdown = %s" % \
           (sock.sk_err, get_sk_shutdown_str(sock.sk_shutdown)))
     print("\tsk_wmem_queued = %d" % (sock.sk_wmem_queued))
@@ -159,6 +195,15 @@ def show_inet_sock(options, sock):
     show_sock_status(sock)
 
 
+def show_netlink_sock(options, sock):
+    offset = member_offset("struct netlink_sock", "sk")
+    netlink_sock = readSU("struct netlink_sock", sock - offset)
+    print(netlink_sock)
+    print("\tpeer_pid = %d" % (sock.sk_peer_pid))
+
+    show_sock_status(sock)
+
+
 def show_socket_details(options):
     socket = readSU("struct socket", int(options.socket_addr, 16))
     if socket == 0 or socket == None:
@@ -171,6 +216,8 @@ def show_socket_details(options):
         show_unix_sock(options, socket.sk)
     elif ops_name == "inet_stream_ops":
         show_inet_sock(options, socket.sk)
+    elif ops_name == "netlink_ops":
+        show_netlink_sock(options, socket.sk)
     else:
         print(socket)
 
@@ -192,6 +239,8 @@ def show_sock_details(options):
         show_unix_sock(options, sock)
     elif skc_family == AF_INET:
         show_inet_sock(options, sock)
+    elif skc_family == AF_NETLINK:
+        show_netlink_sock(options, sock)
     else:
         print(sock)
 
