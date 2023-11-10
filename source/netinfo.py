@@ -124,6 +124,7 @@ def get_sk_socket_flags(sk_socket_flags):
 
 def show_sock_status(sock):
     print("\n< socket status >")
+    print("\t<struct socket 0x%x>" % (sock.sk_socket))
     print("\tsk_socket->flags = %s" % get_sk_socket_flags(sock.sk_socket.flags))
     print("\tsk_err = %d, sk_shutdown = %s" % \
           (sock.sk_err, get_sk_shutdown_str(sock.sk_shutdown)))
