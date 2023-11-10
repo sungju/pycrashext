@@ -909,7 +909,12 @@ def show_vm_details(options, words):
                 continue
 
             page_data = readSU("struct page", page_addr)
-            if page_data._count.counter == 1:
+            if member_offset("struct page", "_refcount") >= 0:
+                counter = page_data._refcount.counter 
+            else:
+                counter = page_data._count.counter
+
+            if counter == 1:
                 private_mem_pages = private_mem_pages + 1
             else:
                 shared_mem_pages = shared_mem_pages + 1
@@ -917,11 +922,29 @@ def show_vm_details(options, words):
     return [private_mem_pages, shared_mem_pages]
 
 
-def show_vm(options):
+def show_all_vm(options):
+    all_tasks = exec_crash_command("ps -G").splitlines()
+    for task in all_tasks[1:]:
+        words = task.split()
+        pid = words[0]
+        if words[0] == '>':
+            pid = words[1]
+
+        if pid == '0':
+            continue
+        show_vm(options, int(pid))
+        print()
+
+
+def show_vm(options, pid):
     private_mem_pages = 0
     shared_mem_pages = 0
 
-    result_str = exec_crash_command("vm")
+    if pid == -1:
+        result_str = exec_crash_command("vm")
+    else:
+        result_str = exec_crash_command("vm %d" % (pid))
+
     result_lines = result_str.splitlines()
     total_lines = len(result_lines)
     if total_lines < 4: # For kernel tasks
@@ -1276,6 +1299,62 @@ def show_pte_flags(options):
             print("%20s : 0x%x" % (pte_flags_dict[val], val))
 
 
+MM_SWAPENTS = 2
+
+def get_swap_usage(options, task):
+    mm = task.mm
+    if mm == 0 or mm == None:
+        return 0
+    if member_offset("struct mm_struct", "rss_stat") < 0:
+        return 0 # Not available. May need to find another way.
+
+    swap_usage = mm.rss_stat.count[MM_SWAPENTS].counter
+    if swap_usage < 0:
+        swap_usage = mm.rss_stat.count[1].counter
+
+    return swap_usage
+
+
+def show_swap_usage(options):
+    all_tasks = exec_crash_command("ps -G").splitlines()
+    swap_usage_dict = {}
+    for task in all_tasks[1:]:
+        words = task.split()
+        pid = words[0]
+        task_addr = words[3]
+        if words[0] == '>':
+            pid = words[1]
+            task_addr = words[4]
+
+        if pid == '0':
+            continue
+
+        task_struct = readSU("struct task_struct", int(task_addr, 16))
+
+        swap_usage = get_swap_usage(options, task_struct)
+        if swap_usage > 0:
+            swap_usage_dict[task_struct] = swap_usage
+
+
+    sorted_usage = sorted(swap_usage_dict.items(),
+                          key=operator.itemgetter(1), reverse=True)
+
+    count = 0
+    print("%20s  %7s    %10s" % ("COMM", "PID", "SIZE"))
+    print("%s" % ("-" * 46))
+    total_usage = 0
+    for task, usage_kb in sorted_usage:
+        total_usage = total_usage + usage_kb
+        if (count > 10 and not options.all):
+            continue
+        print("%20s (%7d) : %10s KB" % (task.comm, task.pid, f'{usage_kb:,}'))
+        count = count + 1
+
+    print("%s" % ("=" * 46))
+    print("Total usage : %29s KB" % (f'{total_usage:,}'))
+    print("\nNotes. swaped out caches are not included")
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("-a", "--all", dest="all", default=0,
@@ -1336,6 +1415,9 @@ def meminfo():
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
+    op.add_option("-w", "--swap", dest="swapshow", default=0,
+                  action="store_true",
+                  help="Show swap usage")
 
 
     (o, args) = op.parse_args()
@@ -1367,7 +1449,10 @@ def meminfo():
 
 
     if (o.vmshow):
-        show_vm(o)
+        if o.all:
+            show_all_vm(o)
+        else:
+            show_vm(o, -1)
         sys.exit(0)
 
 
@@ -1392,6 +1477,11 @@ def meminfo():
             show_slub_debug_user_all(o)
         else:
             show_slub_debug_user(o)
+        sys.exit(0)
+
+
+    if (o.swapshow):
+        show_swap_usage(o)
         sys.exit(0)
 
     show_tasks_memusage(o)
