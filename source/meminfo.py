@@ -17,6 +17,29 @@ import crashcolor
 
 
 page_size = 4096
+page_shift = 12
+
+VM_HUGETLB = 0x00400000
+
+VM_WRITE = 0x00000002
+VM_SHARED = 0x00000008
+
+first_ksymbol = 0
+
+def check_global_symbols():
+    global first_ksymbol
+
+    try:
+        help_s_out = exec_crash_command("help -m")
+        lines = help_s_out.splitlines()
+        for line in lines:
+            words = line.split(":")
+            if words[0].strip() == "kvbase":
+                first_ksymbol = int(words[1].split()[0], 16)
+                return
+    except Exception as e:
+        pass
+
 
 def show_gfp_mask(options):
     gfp_mask = int(options.gfp_mask, 16)
@@ -1005,7 +1028,8 @@ def show_tlb_csd_list(options):
     csd_addr =int(options.tlb_list, 16)
     for csd in readSUListFromHead(csd_addr,
                                          "llist",
-                                         "struct __call_single_data"):
+                                         "struct __call_single_data",
+                                         maxel=1000000):
         func_str = addr2sym(csd.func)
         print("0x%x: func = 0x%x (%s), info = 0x%x, flags = 0x%x" %
               (csd, csd.func, func_str, csd.info, csd.flags))
@@ -1302,6 +1326,141 @@ def show_pte_flags(options):
 MM_SWAPENTS = 2
 
 def get_swap_usage(options, task):
+    if options.swap_full_show:
+        swap_usage = get_swap_from_vma(options, task)
+    else:
+        swap_usage = get_swap_from_mm(options, task)
+
+    return swap_usage
+
+
+def hstate_vma(vma):
+    inode = vma.vm_file.f_inode
+    hstate = inode.i_sb.s_fs_info.hstate
+    return hstate
+
+
+def huge_page_shift(h):
+    return h.order + page_shift
+
+
+def huge_page_order(h):
+    return h.order
+
+
+def vma_hugecache_offset(h, vma, address):
+    return ((address - vma.vm_start) >> huge_page_shift(h)) + \
+                (vma.vm_pgoff >> huge_page_order(h))
+
+
+def linear_hugepage_index(vma, address):
+    return vma_hugecache_offset(hstate(vma(vma), vma, address))
+
+
+def linear_page_index(vma, address):
+    if (vma.vm_flags & VM_HUGETLB) != 0:
+        return linear_hugepage_index(vma, address)
+
+    pgoff = (address - vma.vm_start) / page_size
+    pgoff = pgoff + vma.vm_pgoff
+    return pgoff
+
+
+swap_entry_dict = {}
+swap_task_dict = {}
+
+def get_shmem_partial_swap_usage(mapping, start, end, task):
+    global swap_entry_dict
+    global swap_task_dict
+
+    swapped = 0
+    if member_offset("struct address_space", "i_pages") >= 0:
+        SWAP_ENTRY_MASK = 0x1
+        xa_head = mapping.i_pages.xa_head
+        if xa_head == 0x0:
+            return 0
+
+        pages_list = exec_crash_command("tree -t xarray -N 0x%x" % \
+                                        (xa_head)).splitlines()
+    elif member_offset("struct address_space", "page_tree") >= 0:
+        SWAP_ENTRY_MASK = 0x2
+        pages_list = exec_crash_command(
+                        "tree -t radix -r address_space.page_tree 0x%x" % \
+                        (mapping)).splitlines()
+    else:
+        print("shmem_partial_swap_usage() is not available in this kernel")
+        return 0
+
+    for page_str in pages_list:
+        page_addr = int(page_str, 16)
+        if (page_addr & SWAP_ENTRY_MASK) == SWAP_ENTRY_MASK:
+            swapped = swapped + 1
+            task_list = []
+            swap_entry_count = 0
+            if (page_addr in swap_entry_dict):
+                swap_entry_count = swap_entry_dict[page_addr]
+                task_list = swap_task_dict[page_addr]
+
+            if (task not in task_list):
+                task_list.append(task)
+            swap_entry_dict[page_addr] = swap_entry_count + 1
+            swap_task_dict[page_addr] = task_list
+
+    return swapped * page_size
+
+
+shm_swap_task_dict = {}
+
+def get_shmem_swap_usage(vma, task):
+    global shm_swap_task_dict
+
+    inode = vma.vm_file.f_inode
+    shmi_offset = member_offset("struct shmem_inode_info", "vfs_inode")
+    info = readSU("struct shmem_inode_info", inode - shmi_offset)
+    mapping = inode.i_mapping
+
+    swapped = info.swapped
+    if swapped == 0:
+        return 0
+
+    if vma.vm_pgoff == 0 and (vma.vm_end - vma.vm_start >= inode.i_size):
+        # shmem task list to divide it later
+        task_list = []
+        if (info in shm_swap_task_dict):
+            task_list = shm_swap_task_dict[info]
+        task_list.append(task)
+        shm_swap_task_dict[info] = task_list
+
+        return swapped << page_shift
+
+    return get_shmem_partial_swap_usage(mapping,
+                                        linear_page_index(vma, vma.vm_start),
+                                        linear_page_index(vma, vma.vm_end),
+                                        task)
+
+
+def get_swap_from_vma(options, task):
+    if task.mm == 0 or task.mm.mmap == 0:
+        return 0
+
+    shmem_aops = readSymbol("shmem_aops")
+    swap_usage = 0
+    vma = task.mm.mmap
+    while vma != 0:
+        if vma.vm_file != 0 and vma.vm_file.f_mapping.a_ops == shmem_aops:
+            shmem_swapped = get_shmem_swap_usage(vma, task)
+            if (not shmem_swapped or (vma.vm_flags & VM_SHARED) or
+                not (vma.vm_flags & VM_WRITE)):
+                swap_usage = swap_usage + shmem_swapped
+            else:
+                pass
+
+        vma = vma.vm_next
+
+    return swap_usage
+
+
+def get_swap_from_mm(options, task):
     mm = task.mm
     if mm == 0 or mm == None:
         return 0
@@ -1312,10 +1471,15 @@ def get_swap_usage(options, task):
     if swap_usage < 0:
         swap_usage = mm.rss_stat.count[1].counter
 
-    return swap_usage
+    return swap_usage * page_size
 
 
 def show_swap_usage(options):
+    global swap_entry_dict
+    global shm_swap_task_dict
+
+    swap_entry_dict = {}
+    # check_global_symbols()
     all_tasks = exec_crash_command("ps -G").splitlines()
     swap_usage_dict = {}
     for task in all_tasks[1:]:
@@ -1336,6 +1500,74 @@ def show_swap_usage(options):
             swap_usage_dict[task_struct] = swap_usage
 
 
+    shmem_swaplist = readSymbol("shmem_swaplist")
+    task_struct = readSymbol("init_task")
+    task_struct.comm = "<SHMEM>"
+    for info in readSUListFromHead(shmem_swaplist, "swaplist",
+                                   "struct shmem_inode_info",
+                                   maxel=1000000):
+        swap_usage = info.swapped * page_size
+        if (task_struct in swap_usage_dict):
+            swap_usage = swap_usage_dict[task_struct] + swap_usage
+        swap_usage_dict[task_struct] = swap_usage
+
+
+    if len(swap_usage_dict) == 0:
+        print("No processes are using swap")
+        return
+
+    # divide swapped page by number of processes shared
+    sorted_swap_entry_list = sorted(swap_entry_dict.items(),
+                                    key=operator.itemgetter(0), reverse=False)
+    sorted_swap_entry_dict = {}
+    for key, value in sorted_swap_entry_list:
+        sorted_swap_entry_dict[key] = value
+
+    for swap_entry in sorted_swap_entry_dict:
+        task_list = swap_task_dict[swap_entry]
+        shared_count = len(task_list)
+        bytes_per_task = page_size / shared_count
+        remove_bytes_from_task = page_size - bytes_per_task
+
+        if options.details:
+            print("swap_entry = 0x%x : tasks = " % (swap_entry), end="")
+
+        for task in task_list:
+            if options.details:
+                print("%d " % (task.pid), end="")
+            if (task in swap_usage_dict):
+                swap_usage_dict[task] = swap_usage_dict[task] - remove_bytes_from_task
+            else:
+                print("Missing task 0x%x for entry 0x%x" % (
+                    task, swap_entry))
+
+        if options.details:
+            print()
+
+
+    # divide shm swapped memory by number of processes shared
+    for shminfo in shm_swap_task_dict:
+        task_list = shm_swap_task_dict[shminfo]
+        shared_count = len(task_list)
+        swapped_size = shminfo.swapped << page_shift
+        bytes_per_task = swapped_size / shared_count
+        remove_bytes_from_task = swapped_size - bytes_per_task
+
+        if options.details:
+            print(shminfo)
+            print("swapped %d bytes which was shared by %d tasks" % \
+                  (swapped_size, shared_count))
+            print("bytes_per_task = %d, remove_bytes_from_task = %d" % \
+                  (bytes_per_task, remove_bytes_from_task))
+
+        for task in task_list:
+            if (task in swap_usage_dict):
+                swap_usage_dict[task] = swap_usage_dict[task] - remove_bytes_from_task
+            else:
+                print("Missing task 0x%x for shminfo 0x%x" % (
+                    task, shminfo))
+
+
     sorted_usage = sorted(swap_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
 
@@ -1343,16 +1575,20 @@ def show_swap_usage(options):
     print("%20s  %7s    %10s" % ("COMM", "PID", "SIZE"))
     print("%s" % ("-" * 46))
     total_usage = 0
-    for task, usage_kb in sorted_usage:
-        total_usage = total_usage + usage_kb
+    for task, usage_bytes in sorted_usage:
+        total_usage = total_usage + usage_bytes
         if (count > 10 and not options.all):
             continue
-        print("%20s (%7d) : %10s KB" % (task.comm, task.pid, f'{usage_kb:,}'))
+        print("%20s (%7d) : %13s" % (task.comm,
+                                     task.pid,
+                                     get_size_str(usage_bytes)))
+#        print("%20s (%7d) : %10s KB" % (task.comm, task.pid, f'{usage_kb:,}'))
         count = count + 1
 
     print("%s" % ("=" * 46))
-    print("Total usage : %29s KB" % (f'{total_usage:,}'))
-    print("\nNotes. swaped out caches are not included")
+    print("Total usage : %32s" % (get_size_str(total_usage)))
+#    print("Total usage : %29s KB" % (f'{total_usage:,}'))
+    print("\nNotes. this value can be a bit different from the actual swapfile content.")
 
 
 def meminfo():
@@ -1418,6 +1654,9 @@ def meminfo():
     op.add_option("-w", "--swap", dest="swapshow", default=0,
                   action="store_true",
                   help="Show swap usage")
+    op.add_option("-W", "--swap_full", dest="swap_full_show", default=0,
+                  action="store_true",
+                  help="Show swap usage in detail")
 
 
     (o, args) = op.parse_args()
@@ -1480,7 +1719,7 @@ def meminfo():
         sys.exit(0)
 
 
-    if (o.swapshow):
+    if (o.swapshow or o.swap_full_show):
         show_swap_usage(o)
         sys.exit(0)
 
