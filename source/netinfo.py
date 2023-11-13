@@ -39,7 +39,7 @@ def show_network_interfaces(options):
         crashcolor.set_color(crashcolor.BLUE)
         print ("%s" % driver_module)
         crashcolor.set_color(crashcolor.RESET)
-        if (options.network_details):
+        if (options.details):
             print ("\tnetdev_ops = %s (0x%x)" %
                    (netdev_ops_str, netdev_ops))
 
@@ -161,12 +161,33 @@ def show_sock_status(sock):
     print("\n< socket status >")
     print("\t<struct socket 0x%x>" % (sock.sk_socket))
     print("\tsk_socket->flags = %s" % (get_sk_socket_flags(sock.sk_socket.flags)))
-    print("\tskc_state = %s" % (get_sk_state_str(sock.__sk_common.skc_state)))
+    print("\tskc_state = %s" % (get_skc_state_str(sock.__sk_common.skc_state)))
     print("\tsk_err = %d, sk_shutdown = %s" % \
           (sock.sk_err, get_sk_shutdown_str(sock.sk_shutdown)))
     print("\tsk_wmem_queued = %d" % (sock.sk_wmem_queued))
     print("\tsk_sndbuf = %d, sk_rcvbuf = %d" %
           (sock.sk_sndbuf, sock.sk_rcvbuf))
+
+
+def show_peer_sock_tasks(sock):
+    if sock == 0 or sock == None:
+        return
+
+    sock_addr = "%x" % (sock)
+    tt = Tasks.TaskTable()
+
+    print("\n\t<Tasks with this peer unix_sock>")
+    print("\t%s" % ("-" * 32))
+
+    for t in tt.allThreads():
+        try:
+            socklist = exec_crash_command("net -s %d" % (t.pid))
+        except:
+            continue
+
+        if socklist.find(sock_addr) >= 0:
+            print("\t%s (%d)" % (t.comm, t.pid))
+    pass
 
 
 def show_unix_sock(options, sock):
@@ -176,6 +197,10 @@ def show_unix_sock(options, sock):
     print("\tunix_sock.addr", unix_sock.addr)
     if unix_sock.addr != 0x0:
         print("\t\taddr = '%s'" % (unix_sock.addr.name.sun_path))
+
+    if options.details:
+        if unix_sock.peer != 0:
+            show_peer_sock_tasks(unix_sock.peer)
 
     show_sock_status(sock)
 
@@ -251,7 +276,7 @@ def netinfo():
                   action="store_true",
                   help="Show network interfaces")
 
-    op.add_option("-d", "--details", dest="network_details", default=0,
+    op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="Show network details")
 
