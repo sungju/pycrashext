@@ -1530,19 +1530,24 @@ def show_swap_usage(options):
         remove_bytes_from_task = page_size - bytes_per_task
 
         if options.details:
-            print("swap_entry = 0x%x : tasks = " % (swap_entry), end="")
+            print("swap_entry = 0x%x : tasks(count=%d) = " % \
+                  (swap_entry, len(task_list)), end="")
+
+        task_print = False
 
         for task in task_list:
             if options.details:
-                print("%d " % (task.pid), end="")
+                if task_print == False:
+                    print("%d " % (task.pid))
+                    task_print = True
             if (task in swap_usage_dict):
                 swap_usage_dict[task] = swap_usage_dict[task] - remove_bytes_from_task
             else:
                 print("Missing task 0x%x for entry 0x%x" % (
                     task, swap_entry))
 
-        if options.details:
-            print()
+    if options.details:
+        print()
 
 
     # divide shm swapped memory by number of processes shared
@@ -1566,6 +1571,9 @@ def show_swap_usage(options):
             else:
                 print("Missing task 0x%x for shminfo 0x%x" % (
                     task, shminfo))
+
+    if options.details:
+        print()
 
 
     sorted_usage = sorted(swap_usage_dict.items(),
