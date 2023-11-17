@@ -986,7 +986,7 @@ def print_cgroup_details(idx, cur_cgroup):
 
 
 def list_empty(list_head):
-    return list_head.next == list_head.prev
+    return list_head.next.next == list_head.next
 
 
 def get_cgroup_name(cgroup):

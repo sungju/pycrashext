@@ -142,6 +142,29 @@ def get_dev_no(super_block):
     return major, minor
 
 
+def list_empty(list):
+    return list.next.next == list.next
+
+
+def show_freeze_wait_tasks(options, sb):
+    show_wait_list(options, sb.s_writers.wait, "WAIT TASKS")
+    show_wait_list(options, sb.s_writers.wait_unfrozen, "WAIT_UNFROZEN TASKS")
+
+
+def show_wait_list(options, wait, wait_name):
+    if not list_empty(wait.task_list):
+        print("\t%s" % (wait_name))
+
+    for wait_queue in readSUListFromHead(wait.task_list,
+                                         "task_list",
+                                         "struct __wait_queue"):
+        task = readSU("struct task_struct", wait_queue.private)
+        print("\t%s (%d)" % (task.comm, task.pid))
+
+    if not list_empty(wait.task_list):
+        print()
+
+
 def all_filesystem_info(options):
     get_system_info()
     fs_state_list = {} 
@@ -177,6 +200,9 @@ def all_filesystem_info(options):
                 sb.s_type.name,
                 get_mount_options(mnt_flags),
                dev_major, dev_minor))
+
+        if options.show_details:
+            show_freeze_wait_tasks(options, sb)
         crashcolor.set_color(crashcolor.RESET)
 
     print("")

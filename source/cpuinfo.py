@@ -123,21 +123,36 @@ def show_tlb(options):
     for cpu, addr in enumerate(cpuinfo_addrs):
         tlb_state = readSU("struct tlb_state", addr)
         task = 0
-        if tlb_state.active_mm > 0:
-            active_mm = readSU("struct mm_struct", tlb_state.active_mm)
+        if member_offset("struct tlb_state", "active_mm") >= 0:
+            active_mm = tlb_state.active_mm
+        elif member_offset("struct tlb_state", "loaded_mm") >= 0:
+            active_mm = tlb_state.loaded_mm
+        else:
+            active_mm = 0
+
+        if active_mm != 0:
+            #active_mm = readSU("struct mm_struct", tlb_state.active_mm)
             task = active_mm.owner
 
-        if tlb_state.state == TLBSTATE_LAZY:
+        if member_offset("struct tlb_state", "state") >= 0:
+            is_lazy = tlb_state.state
+        elif member_offset("struct tlb_state", "is_lazy") >= 0:
+            is_lazy = TLBSTATE_LAZY if tlb_state.is_lazy else TLBSTATE_OK
+        else:
+            is_lazy = TLBSTATE_OK
+
+        if is_lazy == TLBSTATE_LAZY:
             crashcolor.set_color(crashcolor.BLUE)
-        elif tlb_state.state == TLBSTATE_OK:
+        else:
             crashcolor.set_color(crashcolor.LIGHTGREEN)
+
         if task != 0:
             task_name = task.comm
         else:
             task_name = ""
 
         print("CPU %3d : state = %d [%-13s], active_mm = 0x%x (%s)" %
-              (cpu, tlb_state.state, tlb_str(tlb_state.state), tlb_state.active_mm, task_name))
+              (cpu, is_lazy, tlb_str(is_lazy), active_mm, task_name))
         crashcolor.set_color(crashcolor.RESET)
 
 
