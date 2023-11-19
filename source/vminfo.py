@@ -14,6 +14,7 @@ import crashcolor
 def vmw_mem(options, balloon):
     print("VMware virtual machine")
     print("----------------------\n")
+    print("[ Memory ballooning ]")
     if options.show_details:
         baddr = sym2addr('balloon')
         balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
