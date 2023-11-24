@@ -11,6 +11,9 @@ import sys
 import crashcolor
 
 
+page_size = 4096
+
+
 def bytes_to_str(num_bytes):
     num_str = ""
     if num_bytes > (1024*1024*1024):
@@ -76,6 +79,21 @@ def show_shared_memory(options):
 
                 print("\tcreator = 0x%x (%s), shm_file = 0x%x" %
                       (creator, creator_comm, shmid_kernel.shm_file))
+
+                detail_lines = exec_crash_command("ipcs -M 0x%x" %\
+                                                 (shmid_kernel)).splitlines()
+                if len(detail_lines) < 3:
+                    continue
+
+                words = detail_lines[2].split()
+                if len(words) < 3:
+                    continue
+                pages = words[2].split('/')
+                print("\tALLOCATED TOTAL = %s, RSS = %s, SWAP = %s" % \
+                     (bytes_to_str(int(pages[0]) * page_size),
+                      bytes_to_str(int(pages[1]) * page_size),
+                      bytes_to_str(int(pages[2]) * page_size)))
+
 
         crashcolor.set_color(crashcolor.BLUE)
         print("\n\tTotal allocation = %s" % (bytes_to_str(total_bytes)))
