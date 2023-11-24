@@ -53,6 +53,9 @@ def show_shared_memory(options):
         shm_list_sorted = sorted(shm_list, key=getKey, reverse=False)
 
         total_bytes = 0
+        total_alloc_bytes = 0
+        total_rss_bytes = 0
+        total_swap_bytes = 0
         for shm_data in shm_list_sorted:
             alloc_bytes = shm_data["bytes"]
             total_bytes = total_bytes + alloc_bytes
@@ -89,14 +92,26 @@ def show_shared_memory(options):
                 if len(words) < 3:
                     continue
                 pages = words[2].split('/')
-                print("\tALLOCATED TOTAL = %s, RSS = %s, SWAP = %s" % \
-                     (bytes_to_str(int(pages[0]) * page_size),
-                      bytes_to_str(int(pages[1]) * page_size),
-                      bytes_to_str(int(pages[2]) * page_size)))
+                alloc_bytes = int(pages[0]) * page_size
+                rss_bytes = int(pages[1]) * page_size
+                swap_bytes = int(pages[2]) * page_size
+
+                total_alloc_bytes = total_alloc_bytes + alloc_bytes
+                total_rss_bytes = total_rss_bytes + rss_bytes
+                total_swap_bytes = total_swap_bytes + swap_bytes
+
+                print("\tALLOCATED = %s, RSS = %s, SWAP = %s" % \
+                     (bytes_to_str(alloc_bytes),
+                      bytes_to_str(rss_bytes),
+                      bytes_to_str(swap_bytes)))
 
 
         crashcolor.set_color(crashcolor.BLUE)
         print("\n\tTotal allocation = %s" % (bytes_to_str(total_bytes)))
+        if options.show_details:
+            print("\tTotal RSS = %s, SWAP = %s" %\
+                  (bytes_to_str(total_rss_bytes),
+                   bytes_to_str(total_swap_bytes)))
     except Exception as e:
         print(e)
         pass
