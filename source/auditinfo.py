@@ -420,10 +420,20 @@ def get_audit_pid():
     return audit_pid
 
 
+def get_task_from_pid(pid):
+    try:
+        task = readSU("struct task_struct", pid_to_task(pid))
+    except:
+        task = None
+
+    return task
+
+
 def show_audit_status(options):
     audit_enabled = readSymbol("audit_enabled")
     audit_failure = readSymbol("audit_failure")
     audit_pid = get_audit_pid()
+    audit_task = get_task_from_pid(audit_pid)
     rate_limit = readSymbol("audit_rate_limit")
     audit_backlog_limit = readSymbol("audit_backlog_limit")
     audit_lost = readSymbol("audit_lost").counter
@@ -438,7 +448,7 @@ def show_audit_status(options):
                           audit_enabled_str(audit_enabled)))
     print("%-17s %d (%s)" % ("failure", audit_failure,
                           audit_failure_str(audit_failure)))
-    print("%-17s %d" % ("pid", audit_pid))
+    print("%-17s %d (%s)" % ("pid", audit_pid, audit_task.comm))
     print("%-17s %d" % ("rate_limit", rate_limit))
     print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
     print("%-17s %d" % ("lost", audit_lost))
