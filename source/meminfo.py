@@ -748,13 +748,17 @@ def show_tasks_memusage(options):
     if (options.all):
         min_number = len(sorted_usage) - 1
 
-    for i in range(0, min(len(sorted_usage) - 1, min_number)):
+    print_count = min(len(sorted_usage) - 1, min_number)
+
+    for i in range(0, print_count):
         print("%14s (%10.2f KiB)   %-s" %
                 (get_size_str(sorted_usage[i][1] * 1024, True),
                  sorted_usage[i][1],
                  sorted_usage[i][0]))
         crashcolor.set_color(crashcolor.RESET)
 
+    if print_count < len(sorted_usage) - 1:
+        print("\t<...>")
     print("=" * 70)
     crashcolor.set_color(crashcolor.BLUE)
     print("Total memory usage from user-space = %.1f GiB" %
