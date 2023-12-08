@@ -412,6 +412,8 @@ def get_audit_pid():
 
     try:
         ac = readSymbol("auditd_conn")
+        pid = ac.pid
+        audit_pid = pid.numbers[0].nr
         # To complicate to find 'current'.
         # So, no implementation for now for RHEL8
     except:
