@@ -47,16 +47,19 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
                                                              ret_handler_name, mod_name))
             crashcolor.set_color(crashcolor.RESET)
         else:
-            jprobe = readSU("struct jprobe", kp)
-            if jprobe.entry != 0:
-                entry_handler_name = addr2sym(jprobe.entry)
-                mod_name = get_module_name(entry_handler_name)
-                if mod_name != "":
-                    crashcolor.set_color(crashcolor.LIGHTRED)
-                if entry_handler_name != None:
-                    print("\t\t%sjprobe.entry = 0x%x (%s)%s" % (tab_str, jprobe.entry,
-                                                          entry_handler_name, mod_name))
-                crashcolor.set_color(crashcolor.RESET)
+            try:
+                jprobe = readSU("struct jprobe", kp)
+                if jprobe.entry != 0:
+                    entry_handler_name = addr2sym(jprobe.entry)
+                    mod_name = get_module_name(entry_handler_name)
+                    if mod_name != "":
+                        crashcolor.set_color(crashcolor.LIGHTRED)
+                    if entry_handler_name != None:
+                        print("\t\t%sjprobe.entry = 0x%x (%s)%s" % (tab_str, jprobe.entry,
+                                                              entry_handler_name, mod_name))
+                    crashcolor.set_color(crashcolor.RESET)
+            except:
+                pass
 
 
 
@@ -72,7 +75,10 @@ def print_handler_handler(handler_type, kprobe):
         elif handler_type == "fault":
             print_handler("\t", handler_type, kp.fault_handler, kp)
         elif handler_type == "break":
-            print_handler("\t", handler_type, kp.break_handler, kp)
+            try:
+                print_handler("\t", handler_type, kp.break_handler, kp)
+            except:
+                pass
         else:
             print("WHAT????")
 
@@ -107,7 +113,10 @@ def show_ftrace_list(options):
             print_handler_handler("post", kprobe)
             print_handler("", "fault", kprobe.fault_handler, kprobe)
             print_handler_handler("fault", kprobe)
-            print_handler("", "break", kprobe.break_handler, kprobe)
+            try:
+                print_handler("", "break", kprobe.break_handler, kprobe)
+            except:
+                pass
             print_handler_handler("break", kprobe)
             if options.show_details:
                 try:
@@ -136,8 +145,15 @@ def show_ftrace_list(options):
 
     global_trace = readSymbol("global_trace")
     print("\n")
+    if member_offset("struct trace_array", "trace_buffer") >= 0:
+        trace_buffer = global_trace.trace_buffer
+    elif member_offset("struct trace_array", "array_buffer") >= 0:
+        trace_buffer = global_trace.array_buffer
+    else:
+        trace_buffer = None
+
     if (global_trace.buffer_disabled == 0 and
-        global_trace.trace_buffer.buffer.record_disabled.counter == 0):
+        trace_buffer.buffer.record_disabled.counter == 0):
         print("** ftrace Enabled (struct trace_array 0x%x)" % global_trace)
     else:
         print("** ftrace Disabled")
