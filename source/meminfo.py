@@ -1051,27 +1051,50 @@ alloc_func_list = {}
 alloc_pid_list = {}
 alloc_count = 0
 
-def read_a_track(options, kmem_cache, obj_addr, offset):
+free_func_list = {}
+free_pid_list = {}
+free_count = 0
+
+def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
     global alloc_pid_list
     global alloc_count
 
-    alloc_count = alloc_count + 1
+    global free_func_list
+    global free_pid_list
+    global free_count
+
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
 
-    if track.addr not in alloc_func_list:
-        alloc_func_list[track.addr] = 0
-    alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
+    if alloc_item:
+        alloc_count = alloc_count + 1
+        if track.addr not in alloc_func_list:
+            alloc_func_list[track.addr] = 0
+        alloc_func_list[track.addr] = alloc_func_list[track.addr] + 1
+    else:
+        free_count = free_count + 1
+        if track.addr not in free_func_list:
+            free_func_list[track.addr] = 0
+        free_func_list[track.addr] = free_func_list[track.addr] + 1
 
     if options.details:
-        if (track.addr, track.pid) not in alloc_pid_list:
-            alloc_pid_list[(track.addr, track.pid)] = 0
-        alloc_pid_list[(track.addr, track.pid)] =\
-                        alloc_pid_list[(track.addr, track.pid)] + 1
+        if alloc_item:
+            if (track.addr, track.pid) not in alloc_pid_list:
+                alloc_pid_list[(track.addr, track.pid)] = 0
+            alloc_pid_list[(track.addr, track.pid)] =\
+                            alloc_pid_list[(track.addr, track.pid)] + 1
+        else:
+            if (track.addr, track.pid) not in free_pid_list:
+                free_pid_list[(track.addr, track.pid)] = 0
+            free_pid_list[(track.addr, track.pid)] =\
+                            free_pid_list[(track.addr, track.pid)] + 1
 
         if options.all:
-            print("OBJ at 0x%x" % (obj_addr))
+            if alloc_item:
+                print("OBJ at [0x%x]" % (obj_addr))
+            else:
+                print("OBJ at  0x%x" % (obj_addr))
             print("< struct track 0x%x >" % (track_addr))
             print(exec_crash_command("rd 0x%x -S 16" % track_addr))
 
@@ -1118,22 +1141,36 @@ def print_slab_layout(kmem_cache, offset):
 def show_alloc_track(options, kmem_cache, addr, slab_addr, offset):
     page = readSU("struct page", slab_addr)
     total_slab = page.objects & 0xff # Make sure it only uses a byte
+    alloc_item = True
 
     for idx in range(0, total_slab):
         obj_addr = addr + kmem_cache.size * idx
-        read_a_track(options, kmem_cache, obj_addr, offset)
+        read_a_track(options, kmem_cache, obj_addr, offset, alloc_item)
 
 
 def show_partial_alloc_track(options, kmem_cache, slab_addr, offset):
     lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
+    is_head = True
 
     for line in lines:
         line = line.strip()
-        if not line.startswith("["):
+        if line.startswith("FREE"):
+            is_head = False
             continue
-        line = line[1:-1]
+
+        if is_head:
+            continue
+
+        if not line.startswith("["):
+            if not options.all:
+                continue
+            alloc_item = False
+        else:
+            alloc_item = True
+            line = line[1:-1]
+
         obj_addr = int(line, 16)
-        read_a_track(options, kmem_cache, obj_addr, offset)
+        read_a_track(options, kmem_cache, obj_addr, offset, alloc_item)
 
 
 def show_slub_debug_user_all(options):
