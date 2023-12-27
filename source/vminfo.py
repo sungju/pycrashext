@@ -22,10 +22,16 @@ def vmw_mem(options, balloon):
         print ('%s' % (balloon_result))
 
     crashcolor.set_color(crashcolor.LIGHTRED)
-    print ("allocated size (pages)     = %d" % balloon.size)
+    alloc_size = 0
+    try:
+        alloc_size = balloon.size.counter
+    except:
+        alloc_size = balloon.size
+
+    print ("allocated size (pages)     = %d" % alloc_size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %
-           (balloon.size * crash.PAGESIZE,
-           ((balloon.size * crash.PAGESIZE)/1024/1024/1024)))
+           (alloc_size * crash.PAGESIZE,
+           ((alloc_size * crash.PAGESIZE)/1024/1024/1024)))
     print ("required target (pages)    = %d" % balloon.target)
     print ("required target (bytes)    = %d, (%.2fGB)" %
            (balloon.target * crash.PAGESIZE,
@@ -37,7 +43,9 @@ def vmw_mem(options, balloon):
     if (member_offset(balloon, "n_refused_pages") > -1):
         print ("refuesed pages             = %d" %
                balloon.n_refused_pages)
-    print ("rate_alloc                 = %d" % balloon.rate_alloc)
+
+    if (member_offset(balloon, "rate_alloc") > -1):
+        print ("rate_alloc                 = %d" % balloon.rate_alloc)
 
     if (member_offset(balloon, "rate_free") > -1):
         print ("rate_free                  = %d" % balloon.rate_free)
