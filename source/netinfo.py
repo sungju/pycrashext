@@ -197,6 +197,7 @@ def show_unix_sock(options, sock):
     print("\tunix_sock.addr", unix_sock.addr)
     if unix_sock.addr != 0x0:
         print("\t\taddr = '%s'" % (unix_sock.addr.name.sun_path))
+    print("\tunix_sock.peer_wait", unix_sock.peer_wq.wait)
 
     if options.details:
         if unix_sock.peer != 0:
