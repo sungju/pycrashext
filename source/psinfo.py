@@ -47,6 +47,12 @@ def get_uid(task_struct):
     if val == -1 or val == 4294967295:
         val = 0
 
+    return val
+
+
+def get_uid_str(task_struct):
+    val = get_uid(task_struct)
+
     if val == 0:
         return "root"
     return "%d" % val
@@ -56,7 +62,7 @@ def get_uid_from_task(task_struct):
     global is_userdata_avail
 
     if is_userdata_avail == False or task_struct.mm == 0:
-        return get_uid(task_struct)
+        return get_uid_str(task_struct)
 
     resultlines = exec_crash_command("ps -a %d" % (task_struct.pid)).splitlines()
     for line in resultlines:
@@ -64,7 +70,7 @@ def get_uid_from_task(task_struct):
         if words[0] == 'USER':
             return words[1]
 
-    return get_uid(task_struct)
+    return get_uid_str(task_struct)
 
 
 timekeeper = None
@@ -570,7 +576,7 @@ def get_pid_namespace(task):
 def show_task_details(options):
     task = readSU("struct task_struct", int(options.taskaddr, 16))
     print("%d (%s)" % (task.pid, task.comm))
-    print("login id = %s" % ("root" if task.loginuid.val == 4294967295 else task.loginuid.val))
+    print("login id = %s" % (get_uid_str(task)))
     print("SCHED: %s, PRIORITY: %d" % (get_policy_str(task.policy),
             task.prio if task.policy == 0 else task.rt_priority))
     print("pid_namespace = 0x%x" % (get_pid_namespace(task)))
@@ -579,16 +585,19 @@ def show_task_details(options):
         show_task_path(task, options)
 
     thread = task.thread
-    fpu = thread.fpu
-    if member_offset("struct fpu", "fpstate") >= 0:
-        # struct fpu.fpstate
-        if member_offset("struct fpstate", "regs") >= 0:
-            if member_offset("union fpregs_state", "fxsave") >= 0:
-                print(fpu.fpstate.regs.fxsave)
-    elif member_offset("struct fpu", "state") >= 0:
-        # struct fpu.state
-        if member_offset("union thread_xstate", "fxsave") >= 0:
-            print(fpu.state.fxsave)
+    try:
+        fpu = thread.fpu
+        if member_offset("struct fpu", "fpstate") >= 0:
+            # struct fpu.fpstate
+            if member_offset("struct fpstate", "regs") >= 0:
+                if member_offset("union fpregs_state", "fxsave") >= 0:
+                    print(fpu.fpstate.regs.fxsave)
+        elif member_offset("struct fpu", "state") >= 0:
+            # struct fpu.state
+            if member_offset("union thread_xstate", "fxsave") >= 0:
+                print(fpu.state.fxsave)
+    except:
+        pass
 
 
 def psinfo():
