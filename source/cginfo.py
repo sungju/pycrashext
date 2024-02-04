@@ -1302,6 +1302,10 @@ def cgroupinfo():
                   action="store", type="string",
                   help="Shows a speicific cgroup tree")
 
+    op.add_option("-d", "--detail", dest="show_detail", default=0,
+                  action="store_true",
+                  help="Shows cgroup details")
+
     op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
                   help="task_group list")
@@ -1309,18 +1313,6 @@ def cgroupinfo():
     op.add_option("-G", "--tgtree", dest="taskgroup_tree", default="",
                   action="store", type="string",
                   help="task_group tree")
-
-    op.add_option("-t", "--tree", dest="cgroup_tree", default=0,
-                  action="store_true",
-                  help="hierarchial display of cgroups")
-
-    op.add_option("-l", "--tasklist", dest="task_list", default=0,
-                  action="store_true",
-                  help="Shows task list in cgroup")
-
-    op.add_option("-d", "--detail", dest="show_detail", default=0,
-                  action="store_true",
-                  help="Shows cgroup details")
 
     op.add_option("-i", "--idr", dest="mem_cgroup_idr", default=0,
                   action="store_true",
@@ -1330,6 +1322,10 @@ def cgroupinfo():
                   action="store_true",
                   help="mem_cgroup_idr detail include free entries")
 
+    op.add_option("-l", "--tasklist", dest="task_list", default=0,
+                  action="store_true",
+                  help="Shows task list in cgroup")
+
     op.add_option("-n", "--name", dest="filter_cgroup_name", default="",
                   action="store", type="string",
                   help="Shows cgroups with specified name only")
@@ -1337,6 +1333,11 @@ def cgroupinfo():
     op.add_option("-s", "--subsys", dest="filter_subsys", default="",
                   action="store", type="string",
                   help="Shows cgroups with specified subsystem only")
+
+    op.add_option("-t", "--tree", dest="cgroup_tree", default=0,
+                  action="store_true",
+                  help="hierarchial display of cgroups")
+
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)
