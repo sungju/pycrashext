@@ -146,6 +146,22 @@ def run_rules():
     else:
         print("No issues detected")
 
+
+
+def reload_rules():
+    global modules
+
+    for module in modules:
+        try:
+            print("Reloading [%s]" % (module.__name__), end='')
+            module = importlib.reload(module)
+            print("... DONE")
+        except:
+            print("... FAILED")
+
+    print("Reloading DONE")
+
+
 def autocheck():
     op = OptionParser()
 
@@ -155,9 +171,22 @@ def autocheck():
                   default=False,
                   help="Shows the currently available rules")
 
+    op.add_option("-r", "--reload",
+                  action="store_true",
+                  dest="reload",
+                  default=False,
+                  help="Re-load rules")
+
+
     (o, args) = op.parse_args()
     get_system_info()
+
     load_rules()
+
+    if o.reload == True:
+        reload_rules()
+        sys.exit(0)
+
 
     if o.list == True:
         show_rules_list()
