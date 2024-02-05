@@ -48,12 +48,18 @@ def get_total_physical_mem_kb():
     return totalram_pages * 4
 
 
+BUG_CONSIDER_PERCENT = 50 # Not scientific number, but 50% sounds reasonable
+
 def run_rule(sysinfo):
     try:
         pcpu_nr_populated = readSymbol("pcpu_nr_populated")
         pcpu_nr_units = readSymbol("pcpu_nr_units")
         total_used_kb = pcpu_nr_populated * pcpu_nr_units * 4
         total_physical_mem_kb = get_total_physical_mem_kb()
+        used_percent = (total_used_kb / total_physical_mem_kb) * 100
+
+        if used_percent < BUG_CONSIDER_PERCENT:
+            return None
 
         result_dict = {}
         result_dict["TITLE"] = "num_cgroups bug detected by %s" % \
@@ -61,7 +67,7 @@ def run_rule(sysinfo):
         result_dict["MSG"] = "(pcpu_nr_populated * pcpu_nr_units) * " \
                 "page\n\t%s (%d %%) out of %s" % \
                 (meminfo.get_size_str(total_used_kb * 1024), \
-                 (total_used_kb / total_physical_mem_kb) * 100, \
+                 used_percent, \
                  meminfo.get_size_str(total_physical_mem_kb * 1024))
         result_dict["KCS_TITLE"] = "The num_cgroups for blkio in cgroups keeps increasing"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7014337"
