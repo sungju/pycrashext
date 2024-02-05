@@ -27,9 +27,8 @@ def add_rule(sysinfo):
         return True
     
     release = sysinfo["RELEASE"]
-    for rhel_ver in ["el8", "el9"]:
-        if rhel_ver in release:
-            return True
+    if ("el8" or "el9") in release:
+        return True
 
     return False
 
