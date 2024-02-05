@@ -19,11 +19,19 @@ import meminfo
 
 
 def description():
-    return "Checking hung tasks"
+    return "Checking num_cgroups bug"
 
 
 def add_rule(sysinfo):
-    return True
+    if sysinfo is None or "RELEASE" not in sysinfo:
+        return True
+    
+    release = sysinfo["RELEASE"]
+    for rhel_ver in ["el8", "el9"]:
+        if rhel_ver in release:
+            return True
+
+    return False
 
 
 def get_total_physical_mem_kb():
