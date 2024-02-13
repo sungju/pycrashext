@@ -643,10 +643,12 @@ def try_get_module_struct(options):
         crashcolor.set_color(crashcolor.RESET)
         module_addr_min = 0
         module_addr_max = 0
+        mod_addr_min_str = "module_addr_min"
+        mod_addr_max_str = "module_addr_max"
         module_addr = int(options.module_addr, 16)
         try:
-            module_addr_min = readSymbol("module_addr_min")
-            module_addr_max = readSymbol("module_addr_max")
+            module_addr_min = readSymbol(mod_addr_min_str)
+            module_addr_max = readSymbol(mod_addr_max_str)
         except:
             pass
 
@@ -655,13 +657,17 @@ def try_get_module_struct(options):
                 mod_tree = readSymbol("mod_tree")
                 module_addr_min = mod_tree.addr_min
                 module_addr_max = mod_tree.addr_max
+                mod_addr_min_str = "mod_tree.addr_min"
+                mod_addr_max_str = "mod_tree.addr_max"
             except:
                 pass
 
         if (module_addr_min < module_addr) and (module_addr < module_addr_max):
             print("\nThis address belongs to module allocation memory range")
-            print("\tmodule address min: 0x%x" % (module_addr_min))
-            print("\tmodule address max: 0x%x" % (module_addr_max))
+            print("\tmodule address min (%s): 0x%x" % \
+                  (mod_addr_min_str, module_addr_min))
+            print("\tmodule address max (%s): 0x%x" % \
+                  (mod_addr_max_str, module_addr_max))
 
     print_last_unloaded_module()
 
