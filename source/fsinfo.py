@@ -999,8 +999,10 @@ def show_fsnotify_group(options):
 
     if fsnotify_owner_task != None:
         print()
+        crashcolor.set_color(crashcolor.LIGHTGREEN)
         print("fsnotify owner = ", end="")
         print(fsnotify_owner_task)
+        crashcolor.set_color(crashcolor.RESET)
 
 
 '''
