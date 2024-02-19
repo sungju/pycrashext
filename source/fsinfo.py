@@ -975,21 +975,33 @@ def show_fsnotify_group(options):
                 options.inode = "%x" % inode
                 show_inode_details(options)
 
+    if options.show_details:
         print("%s Process with fsnofiy_group %s" % ("-"*20, "-"*20))
-        tt = Tasks.TaskTable()
-        for t in tt.allThreads():
-            files_result = exec_crash_command("files %d" % t.pid)
-            if files_result.find("[fanotify]") < 0:
+    tt = Tasks.TaskTable()
+    fsnotify_owner_task = None
+    for t in tt.allThreads():
+        files_result = exec_crash_command("files %d" % t.pid)
+        if files_result.find("[fanotify]") < 0:
+            continue
+        files_list = files_result.splitlines()
+        for f in files_list:
+            if f.find("[fanotify]") < 0:
                 continue
-            files_list = files_result.splitlines()
-            for f in files_list:
-                if f.find("[fanotify]") < 0:
-                    continue
-                words = f.split()
-                file_data = readSU("struct file", int(words[1], 16))
-                if file_data.private_data == fsnotify_group:
+            words = f.split()
+            file_data = readSU("struct file", int(words[1], 16))
+            if file_data.private_data == fsnotify_group:
+                if options.show_details:
                     print("PID : %d (%s)" % (t.pid, t.comm))
                     print(f)
+                if t.pid == t.tgid:
+                    fsnotify_owner_task = t
+
+
+    if fsnotify_owner_task != None:
+        print()
+        print("fsnotify owner = ", end="")
+        print(fsnotify_owner_task)
+
 
 '''
         if member_offset("struct fsnotify_group", "fanotify_data") >= 0:
