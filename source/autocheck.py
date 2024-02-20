@@ -53,11 +53,17 @@ def show_rules_list():
     for module in modules:
         crashcolor.set_color(crashcolor.BLUE)
         print("[%s]" % (module.__name__), end='')
-        crashcolor.set_color(crashcolor.RESET)
+        if module.is_major():
+            crashcolor.set_color(crashcolor.GREEN)
+        else:
+            crashcolor.set_color(crashcolor.RESET)
         try:
             print(": %s" % (module.description()))
         except:
             print(": No description available")
+
+        crashcolor.set_color(crashcolor.RESET)
+
 
     print("-" * 75)
     print("There are %d rules available for this vmcore" % (count))
@@ -121,7 +127,7 @@ def print_result(result_list):
         print("-" * 75)
 
 
-def run_rules():
+def run_rules(options):
     global modules
     global sysinfo
 
@@ -129,6 +135,8 @@ def run_rules():
 
     for module in modules:
         try:
+            if not options.do_all and not module.is_major():
+                continue
             result_list = module.run_rule(sysinfo)
             if result_list != None:
                 issue_count = issue_count + len(result_list)
@@ -165,6 +173,12 @@ def reload_rules():
 def autocheck():
     op = OptionParser()
 
+    op.add_option("-a", "--all",
+                  action="store_true",
+                  dest="do_all",
+                  default=False,
+                  help="Do try all rules. default is doing major rules only")
+
     op.add_option("-l", "--list",
                   action="store_true",
                   dest="list",
@@ -192,7 +206,7 @@ def autocheck():
         show_rules_list()
         sys.exit(0)
 
-    run_rules()
+    run_rules(o)
 
 
 if ( __name__ == '__main__'):

@@ -14,6 +14,10 @@ import ntpath
 import operator
 
 
+def is_major():
+    return True
+
+
 def description():
     return "Checking find_get_page() bug in the system"
 

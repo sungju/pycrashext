@@ -18,6 +18,10 @@ import crashhelper
 import meminfo
 
 
+def is_major():
+    return True
+
+
 def description():
     return "RHEL 8.4: kernel crashed due to list_del corruption with LIST_POISON2"
 

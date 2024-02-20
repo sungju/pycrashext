@@ -17,6 +17,10 @@ import math
 import crashhelper
 
 
+def is_major():
+    return False
+
+
 def description():
     return "Checking hung tasks"
 

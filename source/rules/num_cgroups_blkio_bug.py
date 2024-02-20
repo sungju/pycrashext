@@ -18,6 +18,10 @@ import crashhelper
 import meminfo
 
 
+def is_major():
+    return True
+
+
 def description():
     return "Checking num_cgroups bug"
 

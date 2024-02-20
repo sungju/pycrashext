@@ -18,6 +18,10 @@ import crashhelper
 import meminfo
 
 
+def is_major():
+    return True
+
+
 def description():
     return "Checking deadlock bug between update_blocked_averages() and try_to_wake_up()."
 
