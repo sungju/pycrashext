@@ -63,11 +63,11 @@ def run_rule(sysinfo):
 
 
 
-def num_cgroups_blkio_bug():
+def css_release_work_fn_bug():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
     pp.pprint(run_rule(None))
 
 
 if ( __name__ == '__main__'):
-    num_cgroups_blkio_bug()
+    css_release_work_fn_bug()
