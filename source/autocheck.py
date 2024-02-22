@@ -85,8 +85,9 @@ def load_rules_in_a_path(source_path):
                 new_module = importlib.import_module(rule, package="rules")
                 if new_module.add_rule(sysinfo) == True:
                    modules.append(new_module)
-            except:
+            except Exception as e:
                 print("Error in adding rule %s" % (rule))
+                print(e)
 
 
 def print_result(result_list):
