@@ -979,6 +979,8 @@ def show_fsnotify_group(options):
         print("%s Process with fsnofiy_group %s" % ("-"*20, "-"*20))
     tt = Tasks.TaskTable()
     fsnotify_owner_task = None
+    fsnotify_file = None
+    fsnotify_file_str = None
     for t in tt.allThreads():
         files_result = exec_crash_command("files %d" % t.pid)
         if files_result.find("[fanotify]") < 0:
@@ -995,6 +997,8 @@ def show_fsnotify_group(options):
                     print(f)
                 if t.pid == t.tgid:
                     fsnotify_owner_task = t
+                    fsnotify_file = file_data
+                    fsnotify_file_str = f
 
 
     if fsnotify_owner_task != None:
@@ -1003,6 +1007,11 @@ def show_fsnotify_group(options):
         print("fsnotify owner = ", end="")
         print(fsnotify_owner_task)
         crashcolor.set_color(crashcolor.RESET)
+        if fsnotify_file_str != None:
+            print("\ncrash> files %d | grep fanotify" % (fsnotify_owner_task.pid))
+            print(fsnotify_file_str)
+            print("\ncrash> struct file.private_data 0x%x" % fsnotify_file)
+            print("  private_data = 0x%x," % fsnotify_file.private_data)
 
 
 '''
