@@ -37,9 +37,12 @@ def add_rule(sysinfo):
     return False
 
 
-def run_rule(sysinfo):
+def run_rule(sysinfo, log_str):
     try:
-        log_string = exec_crash_command("log")
+        if log_str == None:
+            log_string = exec_crash_command("log")
+        else:
+            log_string = log_str
         migration_entry_wait_on_locked = log_string.find("migration_entry_wait_on_locked+0x")
         hung_task_msg = log_string.rfind("INFO: task ")
 
@@ -68,7 +71,7 @@ def run_rule(sysinfo):
 def migration_entry_wait_on_locked_bug():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
-    pp.pprint(run_rule(None))
+    pp.pprint(run_rule(None, None))
 
 
 if ( __name__ == '__main__'):

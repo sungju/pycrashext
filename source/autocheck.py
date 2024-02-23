@@ -133,12 +133,13 @@ def run_rules(options):
     global sysinfo
 
     issue_count = 0
+    log_str = exec_crash_command("log")
 
     for module in modules:
         try:
             if not options.do_all and not module.is_major():
                 continue
-            result_list = module.run_rule(sysinfo)
+            result_list = module.run_rule(sysinfo, log_str)
             if result_list != None:
                 issue_count = issue_count + len(result_list)
                 print_result(result_list)

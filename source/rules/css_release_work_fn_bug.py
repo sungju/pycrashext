@@ -37,9 +37,12 @@ def add_rule(sysinfo):
     return False
 
 
-def run_rule(sysinfo):
+def run_rule(sysinfo, log_str):
     try:
-        log_string = exec_crash_command("log")
+        if log_str == None:
+            log_string = exec_crash_command("log")
+        else:
+            log_string = log_str
         pos_list_corruption = log_string.find("list_del corruption,")
         pos_css_release_work_fn = log_string.find("css_release_work_fn+0x")
 
@@ -66,7 +69,7 @@ def run_rule(sysinfo):
 def css_release_work_fn_bug():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
-    pp.pprint(run_rule(None))
+    pp.pprint(run_rule(None, None))
 
 
 if ( __name__ == '__main__'):

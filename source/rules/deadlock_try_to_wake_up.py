@@ -37,7 +37,7 @@ def add_rule(sysinfo):
     return False
 
 
-def run_rule(sysinfo):
+def run_rule(sysinfo, log_str):
     try:
         result_bt_list = exec_crash_command("bt -a").split("PID:")
         found_bug_str = ""
@@ -69,7 +69,7 @@ def run_rule(sysinfo):
 def deadlock_try_to_wake_up():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
-    pp.pprint(run_rule(None))
+    pp.pprint(run_rule(None, None))
 
 
 if ( __name__ == '__main__'):

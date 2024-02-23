@@ -53,7 +53,7 @@ def get_total_physical_mem_kb():
 
 BUG_CONSIDER_PERCENT = 50 # Not scientific number, but 50% sounds reasonable
 
-def run_rule(sysinfo):
+def run_rule(sysinfo, log_str):
     try:
         pcpu_nr_populated = readSymbol("pcpu_nr_populated")
         pcpu_nr_units = readSymbol("pcpu_nr_units")
@@ -86,7 +86,7 @@ def run_rule(sysinfo):
 def num_cgroups_blkio_bug():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
-    pp.pprint(run_rule(None))
+    pp.pprint(run_rule(None, None))
 
 
 if ( __name__ == '__main__'):

@@ -65,7 +65,7 @@ def check_system_hang(task_list):
     return False
 
 
-def run_rule(sysinfo):
+def run_rule(sysinfo, log_str):
     result = find_uninterruptible_tasks(exec_crash_command("ps -m"))
     system_hung = check_system_hang(result)
     if system_hung == False:
@@ -89,7 +89,7 @@ def run_rule(sysinfo):
 def hung_task_check():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
-    pp.pprint(run_rule(None))
+    pp.pprint(run_rule(None, None))
 
 if ( __name__ == '__main__'):
     hung_task_check()

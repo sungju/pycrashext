@@ -31,8 +31,12 @@ def add_rule(sysinfo):
 
     return False
 
-def run_rule(sysinfo):
-    result = exec_crash_command("log")
+def run_rule(sysinfo, log_str):
+    if log_str == None:
+        result = exec_crash_command("log")
+    else:
+        result = log_str
+
     idx = result.find("find_get_page+0x")
     if idx == -1:
         return None
@@ -50,7 +54,7 @@ def run_rule(sysinfo):
     return [result_dict]
 
 def find_get_page():
-    run_rule(None)
+    run_rule(None, None)
 
 if ( __name__ == '__main__'):
-    find_get_page(None)
+    find_get_page()
