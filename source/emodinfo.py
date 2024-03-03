@@ -663,7 +663,8 @@ def try_get_module_struct(options):
                 pass
 
         if (module_addr_min < module_addr) and (module_addr < module_addr_max):
-            print("\nThis address belongs to module allocation memory range")
+            print("\nThis address (0x%x) belongs to module allocation memory range" % \
+                 module_addr)
             print("\tmodule address min (%s): 0x%x" % \
                   (mod_addr_min_str, module_addr_min))
             print("\tmodule address max (%s): 0x%x" % \
