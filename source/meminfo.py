@@ -788,7 +788,10 @@ def show_slabtop(options):
     print("%-18s %-29s %12s %8s" %
           ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
     print("=" * 70)
-    for i in range(0, min(len(sorted_slabtop) - 1, min_number)):
+
+    print_count = min(len(sorted_slabtop) - 1, min_number)
+
+    for i in range(0, print_count):
         kmem_cache = readSU("struct kmem_cache",
                             int(sorted_slabtop[i][0], 16))
         obj_size = 0
@@ -805,6 +808,8 @@ def show_slabtop(options):
 
         crashcolor.set_color(crashcolor.RESET)
 
+    if print_count < len(sorted_slabtop) - 1:
+        print("\t<...>")
     print("=" * 70)
 
 
