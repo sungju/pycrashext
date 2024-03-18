@@ -1001,6 +1001,9 @@ def show_fsnotify_group(options):
                     fsnotify_file_str = f
 
 
+    fsnotify_group_ops_cmd = "struct fsnotify_group.ops,user_waits 0x%x -d" % (fsnotify_group)
+    print(fsnotify_group_ops_cmd)
+    print(exec_crash_command(fsnotify_group_ops_cmd))
     if fsnotify_owner_task != None:
         print()
         crashcolor.set_color(crashcolor.LIGHTGREEN)
