@@ -134,12 +134,18 @@ def run_rules(options):
 
     issue_count = 0
     log_str = exec_crash_command("log")
+    result_bt_list = exec_crash_command("bt -a").split("PID:")
+    basic_data = {
+        "sysinfo" : sysinfo,
+        "log_str" : log_str,
+        "bt_a"    : result_bt_list,
+    }
 
     for module in modules:
         try:
             if not options.do_all and not module.is_major():
                 continue
-            result_list = module.run_rule(sysinfo, log_str)
+            result_list = module.run_rule(basic_data)
             if result_list != None:
                 issue_count = issue_count + len(result_list)
                 print_result(result_list)
