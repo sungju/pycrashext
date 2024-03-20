@@ -57,6 +57,46 @@ def show_network_interfaces(options):
                   (dev.irq, dev.num_tx_queues, dev.real_num_tx_queues))
 
 
+def show_nft(options):
+    init_net = readSymbol("init_net")
+    netns_nftables = init_net.nft
+    rbtree_type_addr = sym2addr("nft_set_rbtree_type")
+    for nft_table in readSUListFromHead(netns_nftables.tables,
+                                        "list",
+                                        "struct nft_table"):
+        print("%s %s" % (nft_table, nft_table.name))
+
+        for nft_set in readSUListFromHead(nft_table.sets,
+                                          "list",
+                                          "struct nft_set"):
+            nft_rbtree = readSU("struct nft_rbtree", nft_set.data)
+            if nft_set.ops == rbtree_type_addr and nft_rbtree.root.rb_node != 0:
+                rbtree_count = len(exec_crash_command("tree -t rbtree 0x%x" %
+                                                  (nft_rbtree.root)).splitlines())
+            else:
+                rbtree_count = 0
+
+            rbcount_kdigit = len("%d" % (rbtree_count / 100)) - 1
+
+            print("\t%s %s %8d %s" % (nft_set, nft_set.name, rbtree_count, "#" * rbcount_kdigit))
+
+            if not options.details:
+                continue
+
+            for nft_set_binding in readSUListFromHead(nft_set.bindings,
+                                                      "list",
+                                                      "struct nft_set_binding"):
+                nft_chain = nft_set_binding.chain
+                print("\t\t%s %s" % (nft_set_binding, nft_chain))
+                rule_cnt = 0
+                for nft_rule in readSUListFromHead(nft_chain.rules,
+                                                   "list",
+                                                   "struct nft_rule"):
+                    rule_cnt += 1
+                    print("\t\t\t%s %s" % (nft_rule, nft_rule.handle))
+                print("\t\t\trule_count = %d" % (rule_cnt))
+
+
 
 def get_proto_list():
     result_list = {}
@@ -273,13 +313,17 @@ def show_sock_details(options):
 
 def netinfo():
     op = OptionParser()
+    op.add_option("-d", "--details", dest="details", default=0,
+                  action="store_true",
+                  help="Show network details")
+
     op.add_option("-i", "--interface", dest="show_interface", default=0,
                   action="store_true",
                   help="Show network interfaces")
 
-    op.add_option("-d", "--details", dest="details", default=0,
+    op.add_option("-n", "--nft", dest="nft", default=0,
                   action="store_true",
-                  help="Show network details")
+                  help="Show nft information")
 
     op.add_option("-p", "--proto", dest="show_protocols", default=0,
                   action="store_true",
@@ -300,6 +344,9 @@ def netinfo():
         show_network_interfaces(o)
         sys.exit(0)
 
+    if (o.nft):
+        show_nft(o)
+        sys.exit(0)
 
     if (o.show_protocols):
         show_network_protocols(o)
