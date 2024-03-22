@@ -573,13 +573,22 @@ def get_pid_namespace(task):
     return thread_pid.numbers[thread_pid.level].ns
 
 
+PIDNS_ADDING=(1<<31)
+
 def show_task_details(options):
     task = readSU("struct task_struct", int(options.taskaddr, 16))
-    print("%d (%s)" % (task.pid, task.comm))
-    print("login id = %s" % (get_uid_str(task)))
-    print("SCHED: %s, PRIORITY: %d" % (get_policy_str(task.policy),
+    print("pid      : %d (%s)" % (task.pid, task.comm))
+    print("login id : %s" % (get_uid_str(task)))
+    print("SCHED    : %s, PRIORITY: %d" % (get_policy_str(task.policy),
             task.prio if task.policy == 0 else task.rt_priority))
-    print("pid_namespace = 0x%x" % (get_pid_namespace(task)))
+    pid_namespace = get_pid_namespace(task)
+    print("struct pid_namespace 0x%x" % (pid_namespace))
+    print("\t.pid_allocated = %d" % (pid_namespace.pid_allocated & ~PIDNS_ADDING))
+    print("\t.child_reaper = 0x%x" % (pid_namespace.child_reaper))
+
+    if options.nodetails: # no further print
+        return
+
     if task.mm != 0:
         print("==== Binary Details ====")
         show_task_path(task, options)
