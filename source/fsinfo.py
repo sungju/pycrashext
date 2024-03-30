@@ -1094,7 +1094,12 @@ def show_task_swap_usage(task, options):
     mm_struct = task.mm
     if mm_struct == 0:
         return
-    swap_usage = long(mm_struct.rss_stat.count[MM_SWAPENTS])
+    swap_count = mm_struct.rss_stat.count[MM_SWAPENTS]
+    try:
+        swap_usage = swap_count.counter
+    except:
+        swap_usage = long(swap_count)
+
     if swap_usage > 0:
         print("%10d %15d %s" % (task.pid, swap_usage, task.comm))
 
