@@ -583,8 +583,11 @@ def show_task_details(options):
             task.prio if task.policy == 0 else task.rt_priority))
     pid_namespace = get_pid_namespace(task)
     print("struct pid_namespace 0x%x" % (pid_namespace))
-    print("\t.pid_allocated = %d" % (pid_namespace.pid_allocated & ~PIDNS_ADDING))
-    print("\t.child_reaper = 0x%x" % (pid_namespace.child_reaper))
+    if pid_namespace > 0:
+        if member_offset("struct pid_namespace", "pid_allocated") >= 0:
+            print("\t.pid_allocated = %d" % (pid_namespace.pid_allocated & ~PIDNS_ADDING))
+        if member_offset("struct pid_namespace", "child_reaper") >= 0:
+            print("\t.child_reaper = 0x%x" % (pid_namespace.child_reaper))
 
     if options.nodetails: # no further print
         return
