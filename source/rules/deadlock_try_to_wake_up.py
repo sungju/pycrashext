@@ -57,10 +57,9 @@ def run_rule(basic_data):
         result_dict["KCS_TITLE"] = "Deadlock scenario on CPU runqueue lock" \
                 " between update_blocked_averages() and try_to_wake_up()."
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/6963258"
-        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS\n" \
-                "resolved with below kernels\n" \
-                "\tkernel-4.18.0-425.3.1.el8\n" \
-                "\tkernel-4.18.0-372.16.1.el8_6"
+        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS\n"
+        result_dict["KERNELS"] = { "kernel-4.18.0-425.3.1.el8",
+                                  "kernel-4.18.0-372.16.1.el8_6" }
 
         return [result_dict]
     except Exception as e:

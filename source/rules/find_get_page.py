@@ -50,6 +50,7 @@ def run_rule(basic_data):
     result_dict["KCS_TITLE"] = "softlockup in find_get_pages after installing kernel-2.6.32-696.23.1"
     result_dict["KCS_URL"] = "https://access.redhat.com/solutions/3390081"
     result_dict["RESOLUTION"] = "Upgrade kernel to kernel-2.6.32-754.el6 or later version"
+    result_dict["KERNELS"] = { "kernel-2.6.32-754.el6" }
 
     return [result_dict]
 

@@ -59,10 +59,9 @@ def run_rule(basic_data):
         result_dict["KCS_TITLE"] = "RHEL 8.8: hung_task_timeout_secs at " \
                                     "migration_entry_wait_on_locked"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7014646"
-        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS" \
-                "resolved with below kernels\n" \
-                "\tkernel-4.18.0-477.13.1.el8_8\n" \
-                "\tkernel-4.18.0-372.96.1.el8_6.x86_64"
+        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS"
+        result_dict["KERNELS"] = { "kernel-4.18.0-477.13.1.el8_8",
+                                  "kernel-4.18.0-372.96.1.el8_6.x86_64" }
 
         return [result_dict]
     except Exception as e:

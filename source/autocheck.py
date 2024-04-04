@@ -125,6 +125,17 @@ def print_result(result_list):
         else:
             print("\tNo resolution given")
         crashcolor.set_color(crashcolor.RESET)
+
+        print("Fixed kernel version: current = %s" % sysinfo["RELEASE"])
+        crashcolor.set_color(crashcolor.CYAN)
+        if "KERNELS" in result_dict:
+            kernels = result_dict["KERNELS"]
+            for kernel in kernels:
+                print("\t%s" % kernel)
+        else:
+            print("\tNo resolution given")
+
+        crashcolor.set_color(crashcolor.RESET)
         print("-" * 75)
 
 

@@ -74,14 +74,14 @@ def run_rule(basic_data):
                  meminfo.get_size_str(total_physical_mem_kb * 1024))
         result_dict["KCS_TITLE"] = "The num_cgroups for blkio in cgroups keeps increasing"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7014337"
-        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS\n" \
-                "resolved with below kernels\n" \
-                "\tkernel-5.14.0-362.8.1.el9_3\n" \
-                "\tkernel-5.14.0-284.40.1.el9_2\n" \
-                "\tkernel-4.18.0-513.5.1.el8_9\n" \
-                "\tkernel-4.18.0-477.21.1.el8_8\n" \
-                "\tkernel-4.18.0-372.70.1.el8_6\n" \
-                "\tkernel-4.18.0-372.70.1.el8_6"
+        result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS"
+        result_dict["KERNELS"] = {
+                "kernel-5.14.0-362.8.1.el9_3",
+                "kernel-5.14.0-284.40.1.el9_2",
+                "kernel-4.18.0-513.5.1.el8_9",
+                "kernel-4.18.0-477.21.1.el8_8",
+                "kernel-4.18.0-372.70.1.el8_6",
+                "kernel-4.18.0-372.70.1.el8_6" }
 
         return [result_dict]
     except Exception as e:
