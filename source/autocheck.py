@@ -10,11 +10,21 @@ import os
 import sys
 import re
 import importlib
+import signal
 
 import crashcolor
 
 modules = []
 sysinfo = {}
+
+
+def ctrl_c_handler(signum, frame):
+    print("Interrupted")
+    sys.exit(0)
+
+
+signal.signal(signal.SIGINT, ctrl_c_handler)
+
 
 def get_system_info():
     global sysinfo
