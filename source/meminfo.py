@@ -1645,6 +1645,45 @@ def show_swap_usage(options):
     print("\nNotes. this value can be a bit different from the actual swapfile content.")
 
 
+def pfn_to_page_owner(pfn):
+    pass
+
+
+def show_page_owner_all(options):
+
+    try:
+        page_owner_inited = readSymbol("page_owner_inited").enabled.counter
+    except:
+        page_owner_inited = 0
+        pass
+
+    if page_owner_inited == 0:
+        print("page_owner is not enabled")
+        return
+
+
+    try:
+        max_pfn = readSymbol("max_pfn")
+    except:
+        print("Error to find max_pfn")
+        return
+
+    try:
+        page_ext_size = readSymbol("page_ext_size")
+    except:
+        try:
+            extra_mem = readSymbol("extra_mem")
+            page_ext_size = extra_mem + member_offset("struct po_size_table", "page_ext")
+        except:
+            print("Error to find page_ext_size/extra_mem")
+            return
+
+
+    for pfn in 0..max_pfn:
+        page_owner = pfn_to_page_owner(pfn)
+
+
+
 def meminfo():
     op = OptionParser()
     op.add_option("-a", "--all", dest="all", default=0,
@@ -1696,6 +1735,9 @@ def meminfo():
     op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
                   help="Show memory usages by tasks")
+    op.add_option("-o", "--page_owner", dest="page_owner", default=0,
+                  action="store_true",
+                  help="Show page_owner details")
     op.add_option("-P", "--pss", dest="memusage_pss", default=0,
                   action="store_true",
                   help="Show memory usages(pss) by tasks")
@@ -1770,6 +1812,11 @@ def meminfo():
             show_slub_debug_user_all(o)
         else:
             show_slub_debug_user(o)
+        sys.exit(0)
+
+
+    if (o.page_owner):
+        show_page_owner_all(o)
         sys.exit(0)
 
 

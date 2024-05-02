@@ -42,7 +42,8 @@ def run_rule(basic_data):
         result_bt_list = basic_data["bt_a"]
         found_bug_str = ""
         for one_bt_str in result_bt_list:
-            if ("try_to_wake_up" and "update_blocked_averages") in one_bt_str:
+            if "try_to_wake_up" in one_bt_str and \
+               "update_blocked_averages" in one_bt_str:
                 found_bug_str = "PID: " + one_bt_str
                 break
 
