@@ -30,15 +30,42 @@ def check_global_symbols():
     global first_ksymbol
 
     try:
-        help_s_out = exec_crash_command("help -m")
-        lines = help_s_out.splitlines()
-        for line in lines:
-            words = line.split(":")
-            if words[0].strip() == "kvbase":
-                first_ksymbol = int(words[1].split()[0], 16)
-                return
+        first_ksymbol = int(get_machine_symbol("kvbase").split()[0], 16)
+    except:
+        pass
+
+    return
+
+
+machine_symbols = {}
+minus_one_addr = 0
+
+def get_machine_symbol(symbol):
+    global machine_symbols
+    global minus_one_addr
+    global page_size
+
+    try:
+        if len(machine_symbols) == 0:
+            help_s_out = exec_crash_command("help -m")
+            lines = help_s_out.splitlines()
+            for line in lines:
+                words = line.split(":")
+                key = words[0].strip()
+                value = words[1].strip()
+                machine_symbols[key] = value
+                if key == "bits":
+                    minus_one_addr = (1 << int(value)) - 1
+                if key == "pagesize":
+                    page_size = int(value)
+
+        if symbol in machine_symbols:
+            return machine_symbols[symbol]
+
     except Exception as e:
         pass
+
+    return ""
 
 
 def show_gfp_mask(options):
@@ -89,6 +116,24 @@ def show_gfp_mask(options):
         if val & gfp_mask == val:
             print(dict_full_match[val])
             break
+
+def get_max_order():
+    node_data = readSymbol("node_data")
+    nr_online_nodes = readSymbol("nr_online_nodes")
+
+    node_index = 0
+    max_order_index = 0
+    for node in node_data:
+        if node:
+            for zone in node.node_zones:
+                if len(zone.free_area) > max_order_index:
+                    max_order_index = len(zone.free_area)
+        elif node_index >= nr_online_nodes:
+            break
+
+        node_index = node_index + 1
+
+    return max_order_index - 1
 
 
 def show_buddyinfo(options):
@@ -761,8 +806,8 @@ def show_tasks_memusage(options):
         print("\t<...>")
     print("=" * 70)
     crashcolor.set_color(crashcolor.BLUE)
-    print("Total memory usage from user-space = %.1f GiB" %
-          (total_rss/1048576))
+    print("Total memory usage from user-space = %s" %
+          (get_size_str(total_rss * 1024)))
     crashcolor.set_color(crashcolor.RESET)
 
 
@@ -1296,6 +1341,9 @@ def get_function_name(addr):
     words = sym_name.split()
     if len(words) == 5:
         sym_name = sym_name[:sym_name.find(words[3])]
+    if sym_name.find(" /") > 0:
+        sym_name = sym_name[:sym_name.find(" /")] # Don't require source code info
+
     sym_name = sym_name.strip()
     return sym_name
 
@@ -1645,11 +1693,135 @@ def show_swap_usage(options):
     print("\nNotes. this value can be a bit different from the actual swapfile content.")
 
 
-def pfn_to_page_owner(pfn):
-    pass
+
+def pfn_to_section_nr(pfn):
+    try:
+        pageshift = int(get_machine_symbol("pageshift"))
+        section_size_bits = int(get_machine_symbol("section_size_bits"))
+        pfn_section_shift = (section_size_bits - pageshift)
+        pfn_to_section_nr = pfn >> pfn_section_shift
+
+        return pfn_to_section_nr
+    except:
+        return 0
 
 
+def section_nr_to_root(sec):
+    try:
+        return int((sec / int(get_machine_symbol("sections_per_root"))))
+    except Exception as e:
+        print(e)
+        return 0
+
+
+def __nr_to_section(nr):
+    try:
+        root = section_nr_to_root(nr)
+        mem_section_addr = sym2addr("mem_section")
+        if mem_section_addr == 0:
+            print("no mem_section")
+            return
+        sections_per_root = int(get_machine_symbol("sections_per_root"))
+        section_root_mask = sections_per_root - 1
+
+
+        addr_size = int(int(get_machine_symbol("bits")) / 8)
+        mem_section_addr = mem_section_addr + (root * addr_size)
+        mem_section_addr = readULong(mem_section_addr)
+        mem_section_array = readSUArray("struct mem_section", mem_section_addr, addr_size)
+        mem_section = mem_section_array[nr & section_root_mask]
+        return mem_section
+    except Exception as e:
+        return -1
+
+
+def valid_section(mem_section):
+    return mem_section
+
+
+def valid_section_nr(nr):
+    section = __nr_to_section(nr)
+    if section == -1:
+        return -1
+    return valid_section(section)
+
+
+# page_ext.flags
+PAGE_EXT_DEBUG_POISON = 0
+PAGE_EXT_DEBUG_GUARD = 1
+PAGE_EXT_OWNER = 2
+PAGE_EXT_YOUNG = 3
+PAGE_EXT_IDLE = 4
+
+
+def pfn_to_page_owner(pfn, page_ext_size):
+    try:
+        nr = pfn_to_section_nr(pfn)
+        mem_section = valid_section_nr(nr)
+        if mem_section == 0:
+            return None
+
+        if mem_section == -1:
+            return -1
+
+        page_cgroup = mem_section.page_cgroup + pfn
+        page_ext = page_cgroup.ext
+        if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
+            return None
+        page_owner = page_ext.owner
+        return page_owner
+    except Exception as e:
+        print(e)
+        return None
+
+
+page_owner_dict = {}
+
+
+def save_page_owner(page_owner):
+    global page_owner_dict
+    global minus_one_addr
+
+    for i in range(page_owner.nr_entries):
+        alloc_func = page_owner.trace_entries[page_owner.nr_entries - i - 1]
+        if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
+            break
+
+    if alloc_func not in page_owner_dict:
+        size = 0
+        page_owner_list = []
+    else:
+       page_owner_entry = page_owner_dict[alloc_func]
+       size = page_owner_entry["total_size"]
+       page_owner_list = page_owner_entry["page_owner_list"]
+
+    size = size + (2 ** page_owner.order) * page_size
+    page_owner_list.append(page_owner)
+    page_owner_dict[alloc_func] = { "total_size" : size,
+                                    "page_owner_list" : page_owner_list }
+
+
+
+def show_page_owner(pfn, page_owner, pageblock_order):
+    global page_owner_dict
+
+    print('Page allocated via order %d, mask 0x%x' %
+          (page_owner.order, page_owner.gfp_mask))
+    print('PFN %d Block %d' %
+          (pfn, pfn >> pageblock_order))
+    for i in range(page_owner.nr_entries):
+        trace_entry = page_owner.trace_entries[i]
+        print("  [<%x>] %s" %
+              (trace_entry, ' '.join(get_function_name(trace_entry).split()[2:])))
+    print("")
+
+
+
+# test task in galvatron 
+# retrace-server-interact 924567917 crash
+# case no 03694858
 def show_page_owner_all(options):
+    global page_owner_dict
 
     try:
         page_owner_inited = readSymbol("page_owner_inited").enabled.counter
@@ -1675,16 +1847,55 @@ def show_page_owner_all(options):
             extra_mem = readSymbol("extra_mem")
             page_ext_size = extra_mem + member_offset("struct po_size_table", "page_ext")
         except:
-            print("Error to find page_ext_size/extra_mem")
-            return
+            page_ext_size = -1 # use old RHEL7 method
+
+    pfn = 0
+    max_order = get_max_order()
+    pageblock_order = max_order - 1
+    while pfn < max_pfn:
+        page_owner = pfn_to_page_owner(pfn, page_ext_size)
+        if page_owner == -1:
+            break
+        pfn = pfn + 1
+        if page_owner != None:
+            save_page_owner(page_owner)
+            pfn = pfn + (2 ** page_owner.order) - 1
+
+            if options.all and options.details: # shows raw call trace
+                show_page_owner(pfn, page_owner, pageblock_order)
 
 
-    for pfn in 0..max_pfn:
-        page_owner = pfn_to_page_owner(pfn)
+    page_usage_dict = {}
+    for alloc_func in page_owner_dict:
+        page_usage_dict[alloc_func] = page_owner_dict[alloc_func]["total_size"]
 
+
+    sorted_usage = sorted(page_usage_dict.items(),
+                          key=operator.itemgetter(1), reverse=not options.all)
+
+    print_count = 0
+    sum_size = 0
+    for alloc_func, total_size in sorted_usage:
+        sum_size = sum_size + total_size
+
+        print("%10s : %s" % (get_size_str(total_size), get_function_name(alloc_func)))
+        print_count = print_count + 1
+        if not options.all and print_count > 9:
+            if len(sorted_usage) > 10:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_usage) - 10,
+                        " items > ..."))
+                sum_size = -1
+                break
+
+    if sum_size > 0:
+        print("\nTotal allocated size : %s" % (get_size_str(sum_size)))
 
 
 def meminfo():
+    sys.setrecursionlimit(10000000)
+
     op = OptionParser()
     op.add_option("-a", "--all", dest="all", default=0,
                   action="store_true",
@@ -1720,6 +1931,12 @@ def meminfo():
     op.add_option("-n", "--nogroup", dest="nogroup", default=0,
                   action="store_true",
                   help="Show data in individual tasks")
+    op.add_option("-o", "--page_owner", dest="page_owner", default=0,
+                  action="store_true",
+                  help="Show page_owner details")
+    op.add_option("-P", "--pss", dest="memusage_pss", default=0,
+                  action="store_true",
+                  help="Show memory usages(pss) by tasks")
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Convert percpu address into virtual address")
@@ -1735,12 +1952,6 @@ def meminfo():
     op.add_option("-u", "--memusage", dest="memusage", default=0,
                   action="store_true",
                   help="Show memory usages by tasks")
-    op.add_option("-o", "--page_owner", dest="page_owner", default=0,
-                  action="store_true",
-                  help="Show page_owner details")
-    op.add_option("-P", "--pss", dest="memusage_pss", default=0,
-                  action="store_true",
-                  help="Show memory usages(pss) by tasks")
     op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
                   action="store", type="string",
                   help="Show slub_debug=U usage")
