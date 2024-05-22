@@ -26,6 +26,9 @@ VM_SHARED = 0x00000008
 
 first_ksymbol = 0
 
+stack_pools = None
+stack_handle_version = 0
+
 def check_global_symbols():
     global first_ksymbol
 
@@ -68,54 +71,181 @@ def get_machine_symbol(symbol):
     return ""
 
 
+def get_release_str():
+    sys_output = exec_crash_command("sys")
+    for line in sys_output.splitlines():
+        words = line.split()
+        if words[0] == "RELEASE:":
+            return words[1]
+
+    return ""
+
+gfp_dict = {}
+gfp_full_match = {}
+
+
+def set_gfp_dict():
+    global gfp_dict
+    global gfp_full_match
+
+    release_str = get_release_str()
+    if "el7" in release_str:
+        gfp_dict = {
+                    0x01: "__GFP_DMA",
+                    0x02: "__GFP_HIGHMEM",
+                    0x04: "__GFP_DMA32",
+                    0x08: "__GFP_MOVABLE : Flag that this page will be movable by the page migration mechanism or reclaimed",
+                    0x10: "__GFP_WAIT : Can wait and reschedule?",
+                    0x20: "__GFP_HIGH : Should access emergency pools?",
+                    0x40: "__GFP_IO : Can start physical IO?",
+                    0x80: "__GFP_FS : Can call down to low-level FS?",
+                    0x100: "__GFP_COLD : Cache-cold page required",
+                    0x200: "__GFP_NOWARN : Suppress page allocation failure warning",
+                    0x400: "__GFP_REPEAT : Try hard to allocate the memory, but the allocation attempt _might_ fail.  This depends upon the particular VM implementation.",
+                    0x800: "__GFP_NOFAIL : The VM implementation _must_ retry infinitely: the caller cannot handle allocation failures.",
+                    0x1000: "__GFP_NORETRY : The VM implementation must not retry indefinitely",
+                    0x2000: "__GFP_MEMALLOC : Allow access to emergency reserves",
+                    0x4000: "__GFP_COMP : Add compound page metadata",
+                    0x8000: "__GFP_ZERO : Return zeroed page on success",
+                    0x10000: "__GFP_NOMEMALLOC : Don't use emergency reserves",
+                    0x20000: "__GFP_HARDWALL : Enforce hardwall cpuset memory allocs",
+                    0x40000: "__GFP_THISNODE : No fallback, no policies",
+                    0x80000: "__GFP_RECLAIMABLE : Page is reclaimable",
+                    0x100000: "__GFP_ACCOUNT",
+                    0x200000: "__GFP_NOTRACK : Don't track with kmemcheck",
+                    0x400000: "__GFP_NO_KSWAPD",
+                    0x800000: "__GFP_OTHER_NODE : On behalf of other node",
+                    0x1000000: "__GFP_WRITE : Allocator intends to dirty page",
+                   }
+
+        gfp_full_match = {
+                           0x200d2: "GFP_HIGHUSER",
+                           0x200d0: "GFP_USER",
+                           0xd0: "GFP_KERNEL",
+                           0x50: "GFP_NOFS",
+                           0x20: "GFP_ATOMIC",
+                           0x10: "GFP_NOIO",
+                          }
+    elif "el8" in release_str:
+        gfp_dict = {
+                    0x01: "__GFP_DMA",
+                    0x02: "__GFP_HIGHMEM",
+                    0x04: "__GFP_DMA32",
+                    0x08: "__GFP_MOVABLE : Flag that this page will be movable by the page migration mechanism or reclaimed",
+                    0x10: "__GFP_RECLAIMABLE",
+                    0x20: "__GFP_HIGH : Should access emergency pools?",
+                    0x40: "__GFP_IO : Can start physical IO?",
+                    0x80: "__GFP_FS : Can call down to low-level FS?",
+                    0x100: "__GFP_WRITE",
+                    0x200: "__GFP_NOWARN : Suppress page allocation failure warning",
+                    0x400: "__GFP_RETRY_MAYFAIL",
+                    0x800: "__GFP_NOFAIL : The VM implementation _must_ retry infinitely: the caller cannot handle allocation failures.",
+                    0x1000: "__GFP_NORETRY : The VM implementation must not retry indefinitely",
+                    0x2000: "__GFP_MEMALLOC : Allow access to emergency reserves",
+                    0x4000: "__GFP_COMP : Add compound page metadata",
+                    0x8000: "__GFP_ZERO : Return zeroed page on success",
+                    0x10000: "__GFP_NOMEMALLOC : Don't use emergency reserves",
+                    0x20000: "__GFP_HARDWALL : Enforce hardwall cpuset memory allocs",
+                    0x40000: "__GFP_THISNODE : No fallback, no policies",
+                    0x80000: "__GFP_ATOMIC",
+                    0x100000: "__GFP_ACCOUNT",
+                    0x200000: "__GFP_DIRECT_RECLAIM",
+                    0x400000: "__GFP_KSWAPD_RECLAIM",
+                    0x800000: "__GFP_NOLOCKDEP",
+                   }
+
+        gfp_full_match = {
+                           0x6200c2: "GFP_HIGHUSER",
+                           0x6200c0: "GFP_USER",
+                           0x6000c0: "GFP_KERNEL",
+                           0x600040: "GFP_NOFS",
+                           0x600000: "GFP_NOIO",
+                           0x480020: "GFP_ATOMIC",
+                          }
+    elif "el9" in release_str:
+        gfp_dict = {
+                    0x01: "__GFP_DMA",
+                    0x02: "__GFP_HIGHMEM",
+                    0x04: "__GFP_DMA32",
+                    0x08: "__GFP_MOVABLE : Flag that this page will be movable by the page migration mechanism or reclaimed",
+                    0x10: "__GFP_RECLAIMABLE",
+                    0x20: "__GFP_HIGH : Should access emergency pools?",
+                    0x40: "__GFP_IO : Can start physical IO?",
+                    0x80: "__GFP_FS : Can call down to low-level FS?",
+                    0x100: "__GFP_ZERO",
+                    0x200: "__GFP_ATOMIC",
+                    0x400: "__GFP_DIRECT_RECLAIM",
+                    0x800: "__GFP_KSWAPD_RECLAIM",
+                    0x1000: "__GFP_WRITE",
+                    0x2000: "__GFP_NOWARN",
+                    0x4000: "__GFP_RETRY_MAYFAIL",
+                    0x8000: "__GFP_NOFAIL",
+                    0x10000: "__GFP_NORETRY",
+                    0x20000: "__GFP_MEMALLOC",
+                    0x40000: "__GFP_COMP",
+                    0x80000: "__GFP_NOMEMALLOC",
+                    0x100000: "__GFP_HARDWALL",
+                    0x200000: "__GFP_THISNODE",
+                    0x400000: "__GFP_ACCOUNT",
+                    0x800000: "__GFP_ZEROTAGS",
+                    0x1000000: "__GFP_SKIP_ZERO",
+                    0x2000000: "__GFP_SKIP_KASAN_UNPOISON",
+                    0x4000000: "__GFP_SKIP_KASAN_POISON",
+                    0x8000000: "__GFP_NOLOCKDEP",
+                   }
+
+        gfp_full_match = {
+                           0x1000d2: "GFP_HIGHUSER",
+                           0x1000d0: "GFP_USER",
+                           0xc00: "__GFP_RECLAIM",
+                           0xa20: "GFP_ATOMIC",
+                           0xd0: "GFP_KERNEL",
+                           0x50: "GFP_NOFS",
+                           0x10: "GFP_NOIO",
+                          }
+
+
+def get_gfp_mask_str(gfp_mask):
+    global gfp_dict
+    global gfp_full_match
+
+    if len(gfp_dict) == 0:
+        set_gfp_dict()
+
+    result = []
+    for val in gfp_full_match:
+        if val & gfp_mask == val:
+            gfp_mask = gfp_mask & ~val
+            result.append(gfp_full_match[val])
+
+    for val in gfp_dict:
+        if val & gfp_mask == val:
+            gfp_mask = gfp_mask & ~val
+            result.append(gfp_dict[val].split()[0])
+
+
+    return "|".join(result)
+
+
 def show_gfp_mask(options):
+    global gfp_dict
+    global gfp_full_match
+
+    if len(gfp_dict) == 0:
+        set_gfp_dict()
+
     gfp_mask = int(options.gfp_mask, 16)
-    gfp_dict = {0x01: "__GFP_DMA",
-                0x02: "___GFP_HIGHMEM",
-                0x04: "___GFP_DMA32",
-                0x08: "___GFP_MOVABLE : Flag that this page will be movable by the page migration mechanism or reclaimed",
-                0x10: "___GFP_WAIT : Can wait and reschedule?",
-                0x20: "___GFP_HIGH : Should access emergency pools?",
-                0x40: "___GFP_IO : Can start physical IO?",
-                0x80: "___GFP_FS : Can call down to low-level FS?",
-                0x100: "___GFP_COLD : Cache-cold page required",
-                0x200: "___GFP_NOWARN : Suppress page allocation failure warning",
-                0x400: "___GFP_REPEAT : Try hard to allocate the memory, but the allocation attempt _might_ fail.  This depends upon the particular VM implementation.",
-                0x800: "___GFP_NOFAIL : The VM implementation _must_ retry infinitely: the caller cannot handle allocation failures.",
-                0x1000: "___GFP_NORETRY : The VM implementation must not retry indefinitely",
-                0x2000: "___GFP_MEMALLOC : Allow access to emergency reserves",
-                0x4000: "___GFP_COMP : Add compound page metadata",
-                0x8000: "___GFP_ZERO : Return zeroed page on success",
-                0x10000: "___GFP_NOMEMALLOC : Don't use emergency reserves",
-                0x20000: "___GFP_HARDWALL : Enforce hardwall cpuset memory allocs",
-                0x40000: "___GFP_THISNODE : No fallback, no policies",
-                0x80000: "___GFP_RECLAIMABLE : Page is reclaimable",
-                0x100000: "___GFP_KMEMCG",
-                0x200000: "___GFP_NOTRACK : Don't track with kmemcheck",
-                0x400000: "___GFP_NO_KSWAPD",
-                0x800000: "___GFP_OTHER_NODE : On behalf of other node",
-                0x1000000: "___GFP_WRITE : Allocator intends to dirty page",
-               }
 
-    dict_full_match = {
-                       0x200d2: "GFP_HIGHUSER",
-                       0x200d0: "GFP_USER",
-                       0xd0: "GFP_KERNEL",
-                       0x50: "GFP_NOFS",
-                       0x10: "GFP_NOIO",
-                       0x20: "GFP_ATOMIC",
-                      }
-
+    for val in gfp_full_match:
+        if val & gfp_mask == val:
+            print(gfp_full_match[val])
+            gfp_mask = gfp_mask & ~val
 
     for val in gfp_dict:
         if val & gfp_mask == val:
             print(gfp_dict[val])
+            gfp_mask = gfp_mask & ~val
 
-    print("")
-    for val in dict_full_match:
-        if val & gfp_mask == val:
-            print(dict_full_match[val])
-            break
 
 def get_max_order():
     node_data = readSymbol("node_data")
@@ -1717,7 +1847,7 @@ def section_nr_to_root(sec):
 def __nr_to_section(nr):
     try:
         root = section_nr_to_root(nr)
-        mem_section_addr = sym2addr("mem_section")
+        mem_section_addr = readULong(sym2addr("mem_section"))
         if mem_section_addr == 0:
             print("no mem_section")
             return
@@ -1754,7 +1884,7 @@ PAGE_EXT_YOUNG = 3
 PAGE_EXT_IDLE = 4
 
 
-def pfn_to_page_owner(pfn, page_ext_size):
+def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
     try:
         nr = pfn_to_section_nr(pfn)
         mem_section = valid_section_nr(nr)
@@ -1764,11 +1894,28 @@ def pfn_to_page_owner(pfn, page_ext_size):
         if mem_section == -1:
             return -1
 
-        page_cgroup = mem_section.page_cgroup + pfn
-        page_ext = page_cgroup.ext
-        if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
+        if member_offset("struct mem_section", "page_cgroup") > -1:
+            page_cgroup = mem_section.page_cgroup + pfn
+            page_ext = page_cgroup.ext
+        else:
+            page_ext = mem_section.page_ext
+
+        if page_ext == 0:
             return None
-        page_owner = page_ext.owner
+
+        #if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
+        #    return None
+        page_owner_offset = 0
+        if page_owner_ops != None:
+            page_owner_offset = page_owner_ops.offset
+
+        if member_offset("struct page_ext", "owner") > -1:
+            page_owner = page_ext.owner
+        else:
+            page_owner = readSU("struct page_owner", 
+                            Addr(page_ext) + (page_ext_size * pfn) + \
+                                    page_owner_offset)
+
         return page_owner
     except Exception as e:
         print(e)
@@ -1777,15 +1924,81 @@ def pfn_to_page_owner(pfn, page_ext_size):
 
 page_owner_dict = {}
 
+pool_index_bits = 21
+offset_bits = 10
+valid_bits = 1
+extra_bits = 0
+
+DEPOT_STACK_ALIGN = 4
+
+
+def extract_bits(number, low_bit, length):
+    number = (number >> low_bit)
+    number = (number & ((1 << length) - 1))
+
+    return number
+
+
+def get_stack_entries(page_owner):
+    global stack_pools
+    global stack_handle_version
+
+    handle = page_owner.handle
+
+    pool_index = extract_bits(handle, 0, pool_index_bits)
+
+    offset = extract_bits(handle,\
+            pool_index_bits,\
+            offset_bits)
+    offset = offset << DEPOT_STACK_ALIGN
+
+    valid = extract_bits(handle,\
+            pool_index_bits + offset_bits,\
+            valid_bits)
+
+    if extra_bits > 0:
+        extra = extract_bits(handle, \
+                pool_index_bits + offset_bits + valid_bits, \
+                extra_bits)
+    else:
+        extra = 0
+
+    entries = []
+    try:
+        pool = stack_pools[pool_index]
+        if pool == None:
+            return entries
+
+        stack_record = readSU("struct stack_record", pool + offset)
+
+        for i in range(stack_record.size):
+            entries.append(stack_record.entries[i])
+    except:
+        pass
+
+    return entries
+
 
 def save_page_owner(page_owner):
     global page_owner_dict
     global minus_one_addr
 
-    for i in range(page_owner.nr_entries):
-        alloc_func = page_owner.trace_entries[page_owner.nr_entries - i - 1]
+    alloc_func = minus_one_addr # 0xffffffffffffffff
+
+    if member_offset("struct page_owner", "nr_entries") > -1:
+        nr_entries = page_owner.nr_entries
+        trace_entries = page_owner.trace_entries
+    else:
+        trace_entries = get_stack_entries(page_owner)
+        nr_entries = len(trace_entries)
+
+    for i in range(nr_entries):
+        alloc_func = trace_entries[nr_entries - i - 1]
         if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
             break
+
+    if alloc_func == minus_one_addr:
+        return
 
     if alloc_func not in page_owner_dict:
         size = 0
@@ -1801,20 +2014,39 @@ def save_page_owner(page_owner):
                                     "page_owner_list" : page_owner_list }
 
 
-
 def show_page_owner(pfn, page_owner, pageblock_order):
     global page_owner_dict
 
-    print('Page allocated via order %d, mask 0x%x' %
-          (page_owner.order, page_owner.gfp_mask))
-    print('PFN %d Block %d' %
-          (pfn, pfn >> pageblock_order))
-    for i in range(page_owner.nr_entries):
-        trace_entry = page_owner.trace_entries[i]
+    if member_offset("struct page_owner", "pid") < 0: # RHEL7
+        print('Page allocated via order %d, mask 0x%x' %
+              (page_owner.order, page_owner.gfp_mask))
+        print('PFN %d Block %d' %
+              (pfn, pfn >> pageblock_order))
+    else: # RHEL8 and above
+        print("Page allocated via order %d, mask 0x%x(%s), pid %d, tgid %d (%s), ts %d ns, free_ts %d ns" % \
+                (page_owner.order, page_owner.gfp_mask, \
+                get_gfp_mask_str(page_owner.gfp_mask), \
+                page_owner.pid, page_owner.tgid, page_owner.comm, \
+                page_owner.ts_nsec, page_owner.free_ts_nsec))
+        print('PFN %d type ... Block %d' %
+              (pfn, pfn >> pageblock_order))
+
+    if member_offset("struct page_owner", "nr_entries") > -1:
+        nr_entries = page_owner.nr_entries
+        trace_entries = page_owner.trace_entries
+    else:
+        trace_entries = get_stack_entries(page_owner)
+        nr_entries = len(trace_entries)
+
+    for i in range(nr_entries):
+        trace_entry = trace_entries[i]
         print("  [<%x>] %s" %
               (trace_entry, ' '.join(get_function_name(trace_entry).split()[2:])))
     print("")
 
+
+def is_aligned(value, align):
+    return ((value & (align - 1)) == 0)
 
 
 # test task in galvatron 
@@ -1822,20 +2054,34 @@ def show_page_owner(pfn, page_owner, pageblock_order):
 # case no 03694858
 def show_page_owner_all(options):
     global page_owner_dict
+    global stack_pools
+    global stack_handle_version
+    global pool_index_bits
+    global offset_bits
+    global valid_bits
+    global extra_bits
+
+    page_owner_on = 0
 
     try:
-        page_owner_inited = readSymbol("page_owner_inited").enabled.counter
-    except:
-        page_owner_inited = 0
+        page_owner_inited = readSymbol("page_owner_inited")
+        try:
+            # RHEL8/9
+            page_owner_on = page_owner_inited.key.enabled.counter
+        except:
+            # RHEL7
+            page_owner_on = page_owner_inited.enabled.counter
+    except Exception as e:
         pass
 
-    if page_owner_inited == 0:
+    if page_owner_on == 0:
         print("page_owner is not enabled")
         return
 
 
     try:
         max_pfn = readSymbol("max_pfn")
+        min_low_pfn = readSymbol("min_low_pfn")
     except:
         print("Error to find max_pfn")
         return
@@ -1849,15 +2095,42 @@ def show_page_owner_all(options):
         except:
             page_ext_size = -1 # use old RHEL7 method
 
-    pfn = 0
+    try:
+        page_owner_ops = readSymbol("page_owner_ops")
+    except:
+        page_owner_ops = None
+
+
+    if symbol_exists("stack_pools"):
+        stack_pools = readSymbol("stack_pools")
+        stack_handle_version = 2
+
+        pool_index_bits = 16
+        offset_bits = 10
+        valid_bits = 1
+        extra_bits = 5
+    elif symbol_exists("stack_slabs"):
+        stack_pools = readSymbol("stack_slabs")
+        stack_handle_version = 1
+
+        pool_index_bits = 21
+        offset_bits = 10
+        valid_bits = 1
+    else:
+        stack_pools = None
+
+
+    pfn = min_low_pfn
     max_order = get_max_order()
     pageblock_order = max_order - 1
     while pfn < max_pfn:
-        page_owner = pfn_to_page_owner(pfn, page_ext_size)
-        if page_owner == -1:
-            break
+        page_owner = pfn_to_page_owner(pfn, page_ext_size, page_owner_ops)
         pfn = pfn + 1
+        if page_owner == -1:
+            continue
         if page_owner != None:
+            #if not is_aligned(pfn, 1 << page_owner.order):
+            #    continue
             save_page_owner(page_owner)
             pfn = pfn + (2 ** page_owner.order) - 1
 
