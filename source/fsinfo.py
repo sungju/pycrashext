@@ -1014,7 +1014,8 @@ def show_fsnotify_group(options):
             print("\ncrash> files %d | grep fanotify" % (fsnotify_owner_task.pid))
             print(fsnotify_file_str)
             print("\ncrash> struct file.private_data 0x%x" % fsnotify_file)
-            print("  private_data = 0x%x," % fsnotify_file.private_data)
+            print("  private_data = 0x%x, <-- same as fsnotify_group" %
+                  fsnotify_file.private_data)
 
 
 '''
