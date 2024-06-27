@@ -1143,6 +1143,104 @@ def show_all_vm(options):
         print()
 
 
+VM_READ         = 0x00000001   # currently active flags
+VM_WRITE        = 0x00000002
+VM_EXEC         = 0x00000004
+VM_SHARED       = 0x00000008
+VM_MAYREAD      = 0x00000010   # limits for mprotect() etc
+VM_MAYWRITE     = 0x00000020
+VM_MAYEXEC      = 0x00000040
+VM_MAYSHARE     = 0x00000080
+VM_GROWSDOWN    = 0x00000100   # general info on the segment
+VM_GROWSUP      = 0x00000200
+VM_NOHUGEPAGE   = 0x00000200   # MADV_NOHUGEPAGE marked this vma
+VM_SHM          = 0x00000400   # shared memory area, don't swap out
+VM_PFNMAP       = 0x00000400
+VM_DENYWRITE    = 0x00000800   # ETXTBSY on write attempts..
+VM_EXECUTABLE   = 0x00001000
+VM_LOCKED       = 0x00002000
+VM_IO           = 0x00004000   # Memory mapped I/O or similar
+VM_SEQ_READ     = 0x00008000   # App will access data sequentially
+VM_RAND_READ    = 0x00010000   # App will not benefit from clustered reads
+VM_DONTCOPY     = 0x00020000   # Do not copy this vma on fork
+VM_DONTEXPAND   = 0x00040000   # Cannot expand with mremap()
+VM_RESERVED     = 0x00080000   # Don't unmap it from swap_out
+
+VM_BIGPAGE      = 0x00100000   # bigpage mappings, no pte's
+VM_BIGMAP       = 0x00200000   # user wants bigpage mapping
+
+VM_WRITECOMBINED = 0x00100000   # Write-combined
+VM_NONCACHED     = 0x00200000   # Noncached access
+VM_HUGETLB       = 0x00400000   # Huge tlb Page*/
+VM_ACCOUNT       = 0x00100000   # Memory is a vm accounted object
+
+VM_NONLINEAR     = 0x00800000   # Is non-linear (remap_file_pages)
+
+VM_MAPPED_COPY  = 0x01000000    # T if mapped copy of data (nommu mmap)
+VM_HUGEPAGE     = 0x01000000    # MADV_HUGEPAGE marked this vma
+
+VM_INSERTPAGE   = 0x02000000    # The vma has had "vm_insert_page()" done on it
+VM_ALWAYSDUMP   = 0x04000000    # Always include in core dumps
+
+VM_CAN_NONLINEAR = 0x08000000   # Has ->fault & does nonlinear pages
+VM_MIXEDMAP     = 0x10000000    # Can contain "struct page" and pure PFN pages
+VM_SAO          = 0x20000000    # Strong Access Ordering (powerpc)
+VM_PFN_AT_MMAP  = 0x40000000    # PFNMAP vma that is fy mapped at mmap time
+VM_MERGEABLE    = 0x80000000    # KSM may merge identical pages
+
+vm_flags_dict = {
+	0x00000001 : "VM_READ",
+	0x00000002 : "VM_WRITE",
+	0x00000004 : "VM_EXEC",
+	0x00000008 : "VM_SHARED",
+	0x00000010 : "VM_MAYREAD",
+	0x00000020 : "VM_MAYWRITE",
+	0x00000040 : "VM_MAYEXEC",
+	0x00000080 : "VM_MAYSHARE",
+	0x00000100 : "VM_GROWSDOWN",
+	0x00000200 : "VM_GROWSUP",
+	0x00000200 : "VM_NOHUGEPAGE",
+	0x00000400 : "VM_SHM",
+	0x00000400 : "VM_PFNMAP",
+	0x00000800 : "VM_DENYWRITE",
+	0x00001000 : "VM_EXECUTABLE",
+	0x00002000 : "VM_LOCKED",
+	0x00004000 : "VM_IO",
+	0x00008000 : "VM_SEQ_READ",
+	0x00010000 : "VM_RAND_READ",
+	0x00020000 : "VM_DONTCOPY",
+	0x00040000 : "VM_DONTEXPAND",
+	0x00080000 : "VM_RESERVED",
+
+	0x00100000 : "VM_BIGPAGE",
+	0x00200000 : "VM_BIGMAP",
+
+	0x00100000 : "VM_WRITECOMBINED",
+	0x00200000 : "VM_NONCACHED",
+	0x00400000 : "VM_HUGETLB",
+	0x00100000 : "VM_ACCOUNT",
+
+	0x00800000 : "VM_NONLINEAR",
+
+	0x01000000 : "VM_MAPPED_COPY",
+	0x01000000 : "VM_HUGEPAGE",
+
+	0x02000000 : "VM_INSERTPAGE",
+	0x04000000 : "VM_ALWAYSDUMP",
+
+	0x08000000 : "VM_CAN_NONLINEAR",
+	0x10000000 : "VM_MIXEDMAP",
+	0x20000000 : "VM_SAO",
+	0x40000000 : "VM_PFN_AT_MMAP",
+	0x80000000 : "VM_MERGEABLE",
+}
+
+def show_flags_str(vm_flags):
+    for val in vm_flags_dict:
+        if val & vm_flags == val:
+            print(" %s" % (vm_flags_dict[val]), end="")
+
+
 def show_vm(options, pid):
     private_mem_pages = 0
     shared_mem_pages = 0
@@ -1169,6 +1267,9 @@ def show_vm(options, pid):
         size_str = get_size_str(size, True)
 
         print("%10s %s" % (size_str, result_lines[i]), end="")
+        if options.longer:
+            show_flags_str(int(words[3], 16))
+
         if options.details:
             pages_list = show_vm_details(options, words)
             private_mem_pages = private_mem_pages + pages_list[0]
@@ -2198,6 +2299,9 @@ def meminfo():
     op.add_option("-i", "--meminfo", dest="meminfo", default=0,
                   action="store_true",
                   help="Show /proc/meminfo-like output")
+    op.add_option("-l", "--longer", dest="longer", default=0,
+                  action="store_true",
+                  help="Show more data than normal")
     op.add_option("-m", "--numa", dest="numa", default=0,
                   action="store_true",
                   help="Show NUMA info")
