@@ -950,7 +950,12 @@ def show_slabtop(options):
         if (len(result_line) < 7):
             continue
         result_line[5] = result_line[5].replace("k", "")
-        total_used = int(result_line[4]) * int(result_line[5])
+        if options.compact:
+            # There were case that SLABS * SSIZE shows wrongly
+            # So, let's do it with objsize * total
+            total_used = (int(result_line[1]) * int(result_line[3])) / 1024
+        else:
+            total_used = int(result_line[4]) * int(result_line[5])
         slab_list[result_line[0]] = total_used
 
     sorted_slabtop = sorted(slab_list.items(),
@@ -2277,6 +2282,9 @@ def meminfo():
     op.add_option("-b", "--budyinfo", dest="buddyinfo", default=0,
                   action="store_true",
                   help="Show /proc/buddyinfo like output")
+    op.add_option("-c", "--compact", dest="compact", default=0,
+                  action="store_true",
+                  help="Show compact data for other options")
     op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="Show detailed output")
