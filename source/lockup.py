@@ -25,14 +25,17 @@ def getDelayKey(taskobj):
 
 
 def get_task_policy_str(policy):
-    return {
-        0: "N", # SCHED_NORMAL
-        1: "F", # SCHED_FIFO
-        2: "R", # SCHED_RR
-        3: "B", # SCHED_BATCH
-        5: "I", # SCHED_IDLE
-        6: "D", # SCHED_DEADLINE
-    }[policy]
+    try:
+        return {
+            0: "N", # SCHED_NORMAL
+            1: "F", # SCHED_FIFO
+            2: "R", # SCHED_RR
+            3: "B", # SCHED_BATCH
+            5: "I", # SCHED_IDLE
+            6: "D", # SCHED_DEADLINE
+        }[policy]
+    except:
+        return "?"
 
 
 def print_task_delay(task, options):

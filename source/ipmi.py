@@ -10,15 +10,19 @@ from pykdump.API import *
 import sys
 
 def si_state_str(state):
-    return {
-        0: "SI_NORMAL",
-        1: "SI_GETTING_FLAGS",
-        2: "SI_GETTING_EVENTS",
-        3: "SI_CLEARING_FLAGS",
-        4: "SI_GETTING_MESSAGES",
-        5: "SI_CHECKING_ENABLES",
-        6: "SI_SETTING_ENABLES",
-    }[state]
+    try:
+        return {
+            0: "SI_NORMAL",
+            1: "SI_GETTING_FLAGS",
+            2: "SI_GETTING_EVENTS",
+            3: "SI_CLEARING_FLAGS",
+            4: "SI_GETTING_MESSAGES",
+            5: "SI_CHECKING_ENABLES",
+            6: "SI_SETTING_ENABLES",
+        }[state]
+    except:
+        return "??"
+
 
 def irq_status(disabled):
     if (disabled):

@@ -81,24 +81,27 @@ def task_state_color(state):
     elif "|" in state:
         state = state[:state.find("|")]
 
-    return {
-        TASK_RUNNING : crashcolor.BLUE,
-        TASK_INTERRUPTIBLE : crashcolor.RESET,
-        TASK_UNINTERRUPTIBLE : crashcolor.RED,
-        __TASK_STOPPED : crashcolor.CYAN,
-        __TASK_TRACED : crashcolor.MAGENTA,
-        EXIT_ZOMBIE : crashcolor.YELLOW,
-        EXIT_DEAD : crashcolor.LIGHTRED,
-        TASK_DEAD : crashcolor.LIGHTRED,
-        "TASK_RUNNING" : crashcolor.BLUE,
-        "TASK_INTERRUPTIBLE" : crashcolor.RESET,
-        "TASK_UNINTERRUPTIBLE" : crashcolor.RED,
-        "TASK_STOPPED" : crashcolor.CYAN,
-        "__TASK_STOPPED" : crashcolor.CYAN,
-        "__TASK_TRACED" : crashcolor.MAGENTA,
-        "TASK_ZOMBIE" : crashcolor.YELLOW,
-        "TASK_DEAD" : crashcolor.LIGHTRED,
-    }[state]
+    try:
+        return {
+            TASK_RUNNING : crashcolor.BLUE,
+            TASK_INTERRUPTIBLE : crashcolor.RESET,
+            TASK_UNINTERRUPTIBLE : crashcolor.RED,
+            __TASK_STOPPED : crashcolor.CYAN,
+            __TASK_TRACED : crashcolor.MAGENTA,
+            EXIT_ZOMBIE : crashcolor.YELLOW,
+            EXIT_DEAD : crashcolor.LIGHTRED,
+            TASK_DEAD : crashcolor.LIGHTRED,
+            "TASK_RUNNING" : crashcolor.BLUE,
+            "TASK_INTERRUPTIBLE" : crashcolor.RESET,
+            "TASK_UNINTERRUPTIBLE" : crashcolor.RED,
+            "TASK_STOPPED" : crashcolor.CYAN,
+            "__TASK_STOPPED" : crashcolor.CYAN,
+            "__TASK_TRACED" : crashcolor.MAGENTA,
+            "TASK_ZOMBIE" : crashcolor.YELLOW,
+            "TASK_DEAD" : crashcolor.LIGHTRED,
+        }[state]
+    except:
+        return crashcolor.RESET
 
 
 def task_state_str(state):
@@ -107,24 +110,27 @@ def task_state_str(state):
     elif "|" in state:
         state = state[:state.find("|")]
 
-    return {
-        TASK_RUNNING: "RU",
-        TASK_INTERRUPTIBLE: "IN",
-        TASK_UNINTERRUPTIBLE: "UN",
-        __TASK_STOPPED: "ST",
-        __TASK_TRACED: "TR",
-        EXIT_ZOMBIE: "ZO",
-        EXIT_DEAD: "DE",
-        TASK_DEAD: "DE",
-        "TASK_RUNNING" : "RU",
-        "TASK_INTERRUPTIBLE" : "IN",
-        "TASK_UNINTERRUPTIBLE" : "UN",
-        "TASK_STOPPED" : "ST",
-        "__TASK_STOPPED" : "ST",
-        "__TASK_TRACED" : "TR",
-        "TASK_ZOMBIE" : "ZO",
-        "TASK_DEAD" : "DE",
-    }[state]
+    try:
+        return {
+            TASK_RUNNING: "RU",
+            TASK_INTERRUPTIBLE: "IN",
+            TASK_UNINTERRUPTIBLE: "UN",
+            __TASK_STOPPED: "ST",
+            __TASK_TRACED: "TR",
+            EXIT_ZOMBIE: "ZO",
+            EXIT_DEAD: "DE",
+            TASK_DEAD: "DE",
+            "TASK_RUNNING" : "RU",
+            "TASK_INTERRUPTIBLE" : "IN",
+            "TASK_UNINTERRUPTIBLE" : "UN",
+            "TASK_STOPPED" : "ST",
+            "__TASK_STOPPED" : "ST",
+            "__TASK_TRACED" : "TR",
+            "TASK_ZOMBIE" : "ZO",
+            "TASK_DEAD" : "DE",
+        }[state]
+    except:
+        return "??"
 
 
 def print_branch(depth, first):

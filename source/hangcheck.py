@@ -70,14 +70,18 @@ def getKey(taskObj):
 
 
 def get_task_policy_str(policy):
-    return {
-        0: "NORMAL", # SCHED_NORMAL
-        1: "FIFO", # SCHED_FIFO
-        2: "RR", # SCHED_RR
-        3: "BATCH", # SCHED_BATCH
-        5: "IDLE", # SCHED_IDLE
-        6: "DEADLINE", # SCHED_DEADLINE
-    }[policy]
+    try:
+        return {
+            0: "NORMAL", # SCHED_NORMAL
+            1: "FIFO", # SCHED_FIFO
+            2: "RR", # SCHED_RR
+            3: "BATCH", # SCHED_BATCH
+            5: "IDLE", # SCHED_IDLE
+            6: "DEADLINE", # SCHED_DEADLINE
+        }[policy]
+    except:
+        return "??"
+
 
 def show_task_details(taskObj):
     task = readSU("struct task_struct", int(taskObj["data"][4], 16))

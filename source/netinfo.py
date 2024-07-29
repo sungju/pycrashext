@@ -151,15 +151,18 @@ SOCK_EXTERNALLY_ALLOCATED = 1 << 5
 
 def get_sk_socket_flags(sk_socket_flags):
     sk_socket_flags = sk_socket_flags & 0x3f
-    return {
-        SOCK_ASYNC_NOSPACE : "SOCK_ASYNC_NOSPACE",
-        SOCK_ASYNC_WAITDATA : "SOCK_ASYNC_WAITDATA",
-        SOCK_NOSPACE : "SOCK_NOSPACE",
-        SOCK_PASSCRED : "SOCK_PASSCRED",
-        SOCK_PASSSEC : "SOCK_PASSSEC",
-        SOCK_EXTERNALLY_ALLOCATED : "SOCK_EXTERNALLY_ALLOCATED",
-        0 : "NONE"
-    }[sk_socket_flags]
+    try:
+        return {
+            SOCK_ASYNC_NOSPACE : "SOCK_ASYNC_NOSPACE",
+            SOCK_ASYNC_WAITDATA : "SOCK_ASYNC_WAITDATA",
+            SOCK_NOSPACE : "SOCK_NOSPACE",
+            SOCK_PASSCRED : "SOCK_PASSCRED",
+            SOCK_PASSSEC : "SOCK_PASSSEC",
+            SOCK_EXTERNALLY_ALLOCATED : "SOCK_EXTERNALLY_ALLOCATED",
+            0 : "NONE"
+        }[sk_socket_flags]
+    except:
+        return "NONE"
 
 
 TCP_ESTABLISHED = 1
@@ -179,22 +182,25 @@ TCP_MAX_STATES = 13
 def get_skc_state_str(skc_state):
     if skc_state >= TCP_MAX_STATES:
         skc_state = TCP_MAX_STATES
-    return {
-        TCP_ESTABLISHED : "TCP_ESTABLISHED",
-        TCP_SYN_SENT : "TCP_SYN_SENT",
-        TCP_SYN_RECV : "TCP_SYN_RECV",
-        TCP_FIN_WAIT1 : "TCP_FIN_WAIT1",
-        TCP_FIN_WAIT2 : "TCP_FIN_WAIT2",
-        TCP_TIME_WAIT : "TCP_TIME_WAIT",
-        TCP_CLOSE : "TCP_CLOSE",
-        TCP_CLOSE_WAIT : "TCP_CLOSE_WAIT",
-        TCP_LAST_ACK : "TCP_LAST_ACK",
-        TCP_LISTEN : "TCP_LISTEN",
-        TCP_CLOSING : "TCP_CLOSING",
-        TCP_NEW_SYN_RECV : "TCP_NEW_SYN_RECV",
-        TCP_MAX_STATES : "Invalid",
-        0 : "Invalid",
-    }[skc_state]
+    try:
+        return {
+            TCP_ESTABLISHED : "TCP_ESTABLISHED",
+            TCP_SYN_SENT : "TCP_SYN_SENT",
+            TCP_SYN_RECV : "TCP_SYN_RECV",
+            TCP_FIN_WAIT1 : "TCP_FIN_WAIT1",
+            TCP_FIN_WAIT2 : "TCP_FIN_WAIT2",
+            TCP_TIME_WAIT : "TCP_TIME_WAIT",
+            TCP_CLOSE : "TCP_CLOSE",
+            TCP_CLOSE_WAIT : "TCP_CLOSE_WAIT",
+            TCP_LAST_ACK : "TCP_LAST_ACK",
+            TCP_LISTEN : "TCP_LISTEN",
+            TCP_CLOSING : "TCP_CLOSING",
+            TCP_NEW_SYN_RECV : "TCP_NEW_SYN_RECV",
+            TCP_MAX_STATES : "Invalid",
+            0 : "Invalid",
+        }[skc_state]
+    except:
+        return "??"
 
 
 def show_sock_status(sock):

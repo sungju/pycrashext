@@ -92,24 +92,28 @@ def get_vfsmount_from_sb(sb):
 
 
 def get_mount_option(mnt_flags):
-    return {
-        0x01: "nosuid",         # "MNT_NOSUID",
-        0x02: "nodev",          # "MNT_NODEV",
-        0x04: "noexec",         # "MNT_NOEXEC",
-        0x08: "noatime",        # "MNT_NOATIME",
-        0x10: "nodiratime",     # "MNT_NODIRATIME",
-        0x20: "",               # "MNT_RELATIME",
-        0x40: "ro",             # "MNT_READONLY",
+    try:
+        return {
+            0x01: "nosuid",         # "MNT_NOSUID",
+            0x02: "nodev",          # "MNT_NODEV",
+            0x04: "noexec",         # "MNT_NOEXEC",
+            0x08: "noatime",        # "MNT_NOATIME",
+            0x10: "nodiratime",     # "MNT_NODIRATIME",
+            0x20: "",               # "MNT_RELATIME",
+            0x40: "ro",             # "MNT_READONLY",
 
-# Below looks too much information, so, not visible for now
-#        0x100: "SHRINKABLE",
-#        0x200: "WRITE_HOLD",
-#        0x1000: "SHARED",
-#        0x2000: "UNBINDABLE",
+    # Below looks too much information, so, not visible for now
+    #        0x100: "SHRINKABLE",
+    #        0x200: "WRITE_HOLD",
+    #        0x1000: "SHARED",
+    #        0x2000: "UNBINDABLE",
 
-        0x800000: "locked",     # MNT_LOCKED
-        0x8000000: "umount",    # MNT_UMOUNT
-    }.get(mnt_flags, "")
+            0x800000: "locked",     # MNT_LOCKED
+            0x8000000: "umount",    # MNT_UMOUNT
+        }.get(mnt_flags, "")
+    except:
+        return ""
+
 
 def get_mount_options(mnt_flags):
     result = ""
@@ -122,14 +126,17 @@ def get_mount_options(mnt_flags):
     return result
 
 def get_frozen_str(frozen_type):
-    return {
-        0: "SB_UNFROZEN",
-        1: "SB_FREEZE_WRITE",
-        2: "SB_FREEZE_PAGEFAULT",
-        3: "SB_FREEZE_FS",
-        4: "SB_FREEZE_COMPLETE",
-        -1: "UNRECOGNIZED STATE",
-    }[frozen_type]
+    try:
+        return {
+            0: "SB_UNFROZEN",
+            1: "SB_FREEZE_WRITE",
+            2: "SB_FREEZE_PAGEFAULT",
+            3: "SB_FREEZE_FS",
+            4: "SB_FREEZE_COMPLETE",
+            -1: "UNRECOGNIZED STATE",
+        }[frozen_type]
+    except:
+        return "??"
 
 
 MINORBITS = 20

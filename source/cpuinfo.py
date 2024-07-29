@@ -52,11 +52,15 @@ def show_cpuid(options):
 
 
 def cpufreq_policy_str(policy):
-    return {
-        0: "",
-        1: "CPUFREQ_POLICY_POWERSAVE",
-        2: "CPUFREQ_POLICY_PERFORMANCE",
-    } [policy];
+    try:
+        return {
+            0: "",
+            1: "CPUFREQ_POLICY_POWERSAVE",
+            2: "CPUFREQ_POLICY_PERFORMANCE",
+        } [policy];
+    except:
+        return ""
+
 
 def show_cpufreq():
     if (not sys_info.machine in ("x86_64", "i386", "i686", "athlon")):

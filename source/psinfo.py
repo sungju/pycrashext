@@ -171,15 +171,18 @@ def get_time_from_task(task_struct):
 
 
 def convert_state(state):
-    return {
-        'RU': "R",
-        'UN': "D",
-        'IN': "S",
-        'ST': "T",
-        'WA': "R", # Kinds of
-        'DE': 'X',
-        'ZO': 'Z',
-    }.get(state, "Z")
+    try:
+        return {
+            'RU': "R",
+            'UN': "D",
+            'IN': "S",
+            'ST': "T",
+            'WA': "R", # Kinds of
+            'DE': 'X',
+            'ZO': 'Z',
+        }.get(state, "Z")
+    except:
+        return "?"
 
 
 def convert_to_ps_state(state, task_struct):
@@ -342,43 +345,49 @@ def check_userdata_available():
 
 
 def get_policy_str(policy):
-    return {
-        0: "NORMAL",
-        1: "FIFO",
-        2: "RR",
-        3: "BATCH",
-        4: "ISO",
-        5: "IDLE",
-        6: "DEADLINE",
-    } [policy]
+    try:
+        return {
+            0: "NORMAL",
+            1: "FIFO",
+            2: "RR",
+            3: "BATCH",
+            4: "ISO",
+            5: "IDLE",
+            6: "DEADLINE",
+        } [policy]
+    except:
+        return "??"
 
 
 def task_policy(policy_str):
-    return {
-        "SCHED_OTHER": 0,
-        "NORMAL": 0,
-        "0": 0,
-        "SCHED_FIFO" : 1,
-        "FIFO" : 1,
-        "1" : 1,
-        "SCHED_RR" : 2,
-        "RR" : 2,
-        "2" : 2,
-        "SCHED_BATCH" : 3,
-        "BATCH" : 3,
-        "3" : 3,
+    try:
+        return {
+            "SCHED_OTHER": 0,
+            "NORMAL": 0,
+            "0": 0,
+            "SCHED_FIFO" : 1,
+            "FIFO" : 1,
+            "1" : 1,
+            "SCHED_RR" : 2,
+            "RR" : 2,
+            "2" : 2,
+            "SCHED_BATCH" : 3,
+            "BATCH" : 3,
+            "3" : 3,
 
-        "SCHED_ISO" : 4,
-        "ISO" : 4,
-        "4" : 4,
+            "SCHED_ISO" : 4,
+            "ISO" : 4,
+            "4" : 4,
 
-        "SCHED_IDLE" : 5,
-        "IDLE" : 5,
-        "5" : 5,
-        "SCHED_DEADLINE" : 6,
-        "DEADLINE" : 6,
-        "6" : 6,
-    }[policy_str.upper()]
+            "SCHED_IDLE" : 5,
+            "IDLE" : 5,
+            "5" : 5,
+            "SCHED_DEADLINE" : 6,
+            "DEADLINE" : 6,
+            "6" : 6,
+        }[policy_str.upper()]
+    except:
+        return 0
 
 
 dl_util_percent = 0
