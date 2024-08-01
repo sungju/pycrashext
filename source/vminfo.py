@@ -33,7 +33,7 @@ def vmw_mem(options, balloon, balloon_stats=False):
         except:
             alloc_size = balloon.size
 
-        target_size = baloon.target
+        target_size = balloon.target
 
     print ("allocated size (pages)     = %d" % alloc_size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %
