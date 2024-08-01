@@ -11,7 +11,7 @@ import sys
 import crashcolor
 
 
-def vmw_mem(options, balloon):
+def vmw_mem(options, balloon, balloon_stats=False):
     print("VMware virtual machine")
     print("----------------------\n")
     print("[ Memory ballooning ]")
@@ -23,19 +23,26 @@ def vmw_mem(options, balloon):
 
     crashcolor.set_color(crashcolor.LIGHTRED)
     alloc_size = 0
-    try:
-        alloc_size = balloon.size.counter
-    except:
-        alloc_size = balloon.size
+    target_size = 0
+    if balloon_stats:
+        alloc_size = balloon.current_pages
+        target_size = balloon.target_pages
+    else:
+        try:
+            alloc_size = balloon.size.counter
+        except:
+            alloc_size = balloon.size
+
+        target_size = baloon.target
 
     print ("allocated size (pages)     = %d" % alloc_size)
     print ("allocated size (bytes)     = %d, (%.2fGB)" %
            (alloc_size * crash.PAGESIZE,
            ((alloc_size * crash.PAGESIZE)/1024/1024/1024)))
-    print ("required target (pages)    = %d" % balloon.target)
+    print ("required target (pages)    = %d" % target_size)
     print ("required target (bytes)    = %d, (%.2fGB)" %
-           (balloon.target * crash.PAGESIZE,
-           ((balloon.target * crash.PAGESIZE)/1024/1024/1024)))
+           (target_size * crash.PAGESIZE,
+           ((target_size * crash.PAGESIZE)/1024/1024/1024)))
     crashcolor.set_color(crashcolor.RESET)
 
     print ("")
@@ -89,13 +96,18 @@ def balloon_info(options):
         return
 
     balloon = 0
+    balloon_stats = False
     try:
-        balloon = readSymbol('balloon');
+        if symbol_exists('balloon'):
+            balloon = readSymbol('balloon')
+        elif symbol_exists('balloon_stats'):
+            balloon = readSymbol('balloon_stats')
+            balloon_stats = True
     except:
         pass
 
     if balloon != 0:
-        vmw_mem(options, balloon)
+        vmw_mem(options, balloon, balloon_stats)
         return
 
     print("Not VM environment or not recognizable VM")
