@@ -48,7 +48,7 @@ def print_task_delay(task, options):
         print ("%20s (0x%x)[%s:%3d] : %10.2f sec delayed in queue" %
                (task.comm, task, get_task_policy_str(task.policy),
                 prio, sched_info.run_delay / 1000000000))
-        if (options.task_details):
+        if (options.details):
             print ("\t\t\texec_start = %d, exec_max = %d" %
                    (task.se.exec_start, task.se.exec_max))
     except:
@@ -242,6 +242,10 @@ def lockup_display(reverse_sort, show_tasks, options):
                (rq.cpu, delayed_time,
                 rq.curr, rq.curr.comm,
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
+        if options.details:
+            task_time = exec_crash_command("ps -m 0x%x" % (rq.curr)).splitlines()[0]
+            print("\tps -m time : %s" % (task_time.split("]")[0][1:]))
+
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
 
@@ -321,7 +325,7 @@ def lockup():
     op.add_option("-s", "--rt", dest="rt_stat", default=0,
                   action="store_true",
                   help="show RT statistics")
-    op.add_option("-d", "--details", dest="task_details", default=0,
+    op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="show task details")
     op.add_option("-q", "--qspinlock", dest="qspinlock", default="",
