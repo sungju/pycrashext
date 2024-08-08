@@ -450,7 +450,10 @@ def show_audit_status(options):
                           audit_enabled_str(audit_enabled)))
     print("%-17s %d (%s)" % ("failure", audit_failure,
                           audit_failure_str(audit_failure)))
-    print("%-17s %d (%s)" % ("pid", audit_pid, audit_task.comm))
+    try:
+        print("%-17s %d (%s)" % ("pid", audit_pid, audit_task.comm))
+    except:
+        pass
     print("%-17s %d" % ("rate_limit", rate_limit))
     print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
     print("%-17s %d" % ("lost", audit_lost))
