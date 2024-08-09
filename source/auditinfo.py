@@ -453,6 +453,10 @@ def show_audit_status(options):
     try:
         print("%-17s %d (%s)" % ("pid", audit_pid, audit_task.comm))
     except:
+        if symbol_exists("audit_sig_pid"):
+            sig_pid = readSymbol("audit_sig_pid")
+            if sig_pid != -1:
+                print("%-17s %d" % ("auditd killed by", sig_pid))
         pass
     print("%-17s %d" % ("rate_limit", rate_limit))
     print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
