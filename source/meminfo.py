@@ -671,25 +671,25 @@ def get_meminfo():
         if len(words) == 0:
             continue
         if words[0] == "NR_ACTIVE_ANON:":
-            meminfo["Active(anon)"] = int(words[1])
+            meminfo["Active(anon)"] = round(int(words[1]) * page_unit)
             meminfo["Active"] = meminfo["Active"] + meminfo["Active(anon)"]
         elif words[0] == "NR_INACTIVE_ANON:":
-            meminfo["Inactive(anon)"] = int(words[1])
+            meminfo["Inactive(anon)"] = round(int(words[1]) * page_unit)
             meminfo["Inactive"] = meminfo["Inactive"] + meminfo["Inactive(anon)"]
         elif words[0] == "NR_ACTIVE_FILE:":
-            meminfo["Active(file)"] = int(words[1])
+            meminfo["Active(file)"] = round(int(words[1]) * page_unit)
             meminfo["Active"] = meminfo["Active"] + meminfo["Active(file)"]
         elif words[0] == "NR_INACTIVE_FILE:":
-            meminfo["Inactive(file)"] = int(words[1])
+            meminfo["Inactive(file)"] = round(int(words[1]) * page_unit)
             meminfo["Inactive"] = meminfo["Inactive"] + meminfo["Inactive(file)"]
         elif words[0] == "NR_UNEVICTABLE:":
-            meminfo["Unevictable"] = int(words[1])
+            meminfo["Unevictable"] = round(int(words[1]) * page_unit)
         elif words[0] == "NR_MLOCK:":
-            meminfo["Mlocked"] = int(words[1])
+            meminfo["Mlocked"] = round(int(words[1]) * page_unit)
         elif words[0] == "NR_FILE_DIRTY:":
-            meminfo["Dirty"] = int(words[1])
+            meminfo["Dirty"] = round(int(words[1]) * page_unit)
         elif words[0] == "NR_WRITEBACK:":
-            meminfo["Writeback"] = int(words[1])
+            meminfo["Writeback"] = round(int(words[1]) * page_unit)
         elif words[0] == "NR_ANON_PAGES:":
             meminfo["AnonPages"] = round(int(words[1]) * page_unit)
         elif words[0] == "NR_FILE_MAPPED:":
