@@ -244,7 +244,7 @@ def lockup_display(reverse_sort, show_tasks, options):
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
         if options.details:
             task_time = exec_crash_command("ps -m 0x%x" % (rq.curr)).splitlines()[0]
-            print("\tps -m time : %s" % (task_time.split("]")[0][1:]))
+            print("\tps -m %-8s : %s" % (rq.curr.pid, task_time.split("]")[0][1:]))
 
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
