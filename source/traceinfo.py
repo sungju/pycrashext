@@ -192,22 +192,47 @@ def show_trace_modules(options):
               (tp_module.tracepoints_ptrs, tp_ptrs_name))
 
 
+def show_bpf_tree(options):
+    bpf_tree = readSymbol("bpf_tree")
+    count = 0
+    for bpf_ksym in for_all_rbtree(bpf_tree.tree[0],
+                                   "struct bpf_ksym",
+                                   "tnode"):
+        try:
+            print("0x%x : %s\n\trange (0x%x - 0x%x)" % \
+                  (bpf_ksym, bpf_ksym.name, bpf_ksym.start, bpf_ksym.end))
+            count = count + 1
+        except Exception as e:
+            print(e)
+
+    print("Total bpf : %d" % (count))
+
+
+
 def traceinfo():
     op = OptionParser()
+    op.add_option("-b", "--bpf_tree", dest="bpf_tree", default=0,
+                  action="store_true",
+                  help="Show bpf_tree list")
+
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
-
-    op.add_option("-t", "--trace_types", dest="show_trace_types", default=0,
-                  action="store_true",
-                  help="Show ftrace types")
 
     op.add_option("-m", "--trace_modules", dest="show_trace_modules", default=0,
                   action="store_true",
                   help="Show modules involved in ftrace")
 
+    op.add_option("-t", "--trace_types", dest="show_trace_types", default=0,
+                  action="store_true",
+                  help="Show ftrace types")
+
     (o, args) = op.parse_args()
 
+
+    if o.bpf_tree:
+        show_bpf_tree(o)
+        sys.exit(0)
 
     if o.show_trace_types:
         show_trace_types(o)
