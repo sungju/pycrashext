@@ -83,7 +83,28 @@ def hv_mem(options, hv_context):
         show_hv_details(options, hv_context, dm_device)
 
 
+def get_system_info(options):
+    results = exec_crash_command("sys -i").splitlines()
+    print("System Information")
+    print("------------------")
+    for line in results:
+        words = line.split()
+        if words[0] == 'DMI_PRODUCT_NAME:':
+            print(line)
+        elif words[0] == 'DMI_BIOS_DATE:':
+            print(line)
+        elif words[0] == 'DMI_SYS_VENDOR:':
+            print(line)
+        elif words[0] == 'DMI_BIOS_VERSION:':
+            print(line)
+        elif words[0] == 'DMI_BIOS_VENDOR:':
+            print(line)
+
+    print()
+
+
 def balloon_info(options):
+    get_system_info(options)
     hv_context = 0
     try:
         hv_context = readSymbol("hv_context")
