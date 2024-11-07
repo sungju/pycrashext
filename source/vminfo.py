@@ -18,7 +18,7 @@ def vmw_mem(options, balloon, balloon_stats=False):
     if options.show_details:
         print(balloon)
         baddr = sym2addr('balloon')
-        balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x' % (baddr))
+        balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x -d' % (baddr))
         print ('%s' % (balloon_result))
 
     crashcolor.set_color(crashcolor.LIGHTRED)

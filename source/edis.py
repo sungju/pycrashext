@@ -277,7 +277,9 @@ def ppc_stack_reg_op(words, result_str):
                 else:
                     offset = 0
                 internal_count = 0
-                for stackaddr in register_dict["%rsp"]:
+                stackaddr_list = register_dict["%rsp"]
+                result_stack_addr_list = []
+                for stackaddr in stackaddr_list:
                     actual_addr = stackaddr + offset
                     data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
                     if internal_count == 0:
@@ -286,6 +288,15 @@ def ppc_stack_reg_op(words, result_str):
                         result_str = "%s, 0x%s" % (result_str, data)
                     internal_count = internal_count + 1
 
+                    # Handling the situation the stack address changes
+                    # begin
+                    if words[2] == "stdu" and op_words[0] == "r1":
+                        result_stack_addr_list.append(actual_addr)
+                    else:
+                        result_stack_addr_list.append(stackaddr)
+
+                register_dict["%rsp"] = result_stack_addr_list
+                #end
                 break
 
     return result_str

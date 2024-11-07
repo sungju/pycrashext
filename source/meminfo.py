@@ -299,28 +299,39 @@ def show_buddyinfo(options):
         print("")
 
 
+def get_node_numbers(nr_blks=1):
+    node_numbers = []
+    try:
+        addrs = percpu.get_cpu_var("node_number")
+        for cpu, addr in enumerate(addrs):
+            node = readInt(addr)
+            if node not in node_numbers:
+                node_numbers.append(node)
+
+        nr_blks = len(node_numbers)
+    except:
+        node_numbers = None
+
+    return nr_blks, node_numbers
+
+
+def get_numa_meminfo():
+    numa_meminfo = None
+    nr_blks = 1
+    try:
+        numa_meminfo = readSymbol("numa_meminfo")
+        nr_blks = numa_meminfo.nr_blks
+    except:
+        numa_meminfo = None
+        nr_blks = 1
+
+    return nr_blks, numa_meminfo
+
 
 def show_numa_info(options):
     try:
-        try:
-            numa_meminfo = readSymbol("numa_meminfo")
-            nr_blks = numa_meminfo.nr_blks
-        except:
-            numa_meminfo = None
-            nr_blks = 1
-
-        try:
-            node_numbers = []
-            addrs = percpu.get_cpu_var("node_number")
-            for cpu, addr in enumerate(addrs):
-                node = readInt(addr)
-                if node not in node_numbers:
-                    node_numbers.append(node)
-
-            nr_blks = len(node_numbers)
-            nr_blks = 4
-        except:
-            node_numbers = None
+        nr_blks, numa_meminfo = get_numa_meminfo()
+        nr_blks, node_numbers = get_node_numbers(nr_blks)
 
         if numa_meminfo == None and node_numbers == None:
             print("No NUMA information available")
@@ -993,7 +1004,151 @@ def show_slabtop(options):
     print("=" * 70)
 
 
+def show_full_slab(options, kmem_cache, addr, slab_addr, offset):
+    page = readSU("struct page", slab_addr)
+    total_slab = page.objects & 0xff # Make sure it only uses a byte
+    alloc_item = True
+    if kmem_cache.max.x != total_slab:
+        print("kmem_cache.max.x = %d" % (kmem_cache.max.x))
+        print("total_slab in page = %d" % (total_slab))
+
+    for idx in range(0, total_slab):
+        obj_addr = addr + kmem_cache.size * idx
+        #print("0x%x" % obj_addr)
+
+
+def show_partial_slab(options, kmem_cache, slab_addr, offset):
+    lines = exec_crash_command("kmem -S 0x%x" % (slab_addr)).splitlines()
+    is_head = True
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith("FREE"):
+            is_head = False
+            continue
+
+        if is_head:
+            continue
+
+        if not line.startswith("["):
+            if not options.all:
+                continue
+            alloc_item = False
+            line = line.split()[0]
+        else:
+            alloc_item = True
+            line = line[1:-1]
+
+        obj_addr = int(line, 16)
+        print("0x%x" % obj_addr)
+
+
+def show_slabs_in_node(kc_node):
+    print(kc_node)
+    if member_offset("struct kmem_cache_node", "partial") >= 0:
+        count = 0
+        print("PARTIAL:")
+        for page in readSUListFromHead(kc_node.partial,
+                                        "lru",
+                                        "struct page",
+                                        maxel=1000000):
+            objects = (page.objects & 0x7fff)
+            inuse = (page.inuse & 0xffff)
+            nr_objects = objects - inuse
+            count = count + nr_objects
+            print(page, end="")
+            print("  %d - %d = %d" % (objects, inuse, nr_objects))
+
+        print("FULL:")
+        for page in readSUListFromHead(kc_node.full,
+                                        "lru",
+                                        "struct page",
+                                        maxel=1000000):
+            count = count + 1
+            print(page)
+
+        print("PARTIAL = %d" % kc_node.nr_partial)
+        print("SLABS = %d" % kc_node.nr_slabs.counter)
+        print("TOTAL = %d" % kc_node.total_objects.counter)
+        print(count)
+
+
 def show_slabdetail(options):
+    lines = exec_crash_command("kmem -s %s" % options.slabdetail)
+    if len(lines) == 0:
+        return
+
+    words = lines.splitlines()[1].split()
+    kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
+
+    if kmem_cache.offset >= kmem_cache.object_size:
+        offset = kmem_cache.offset + getSizeOf("long")
+    else:
+        offset = kmem_cache.inuse
+
+    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
+        offset = offset + kmem_cache.red_left_pad
+        offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
+
+    # Extracting the data in the way the kernel get for slabinfo
+    try:
+        nr_blks, numa_meminfo = get_numa_meminfo()
+        nr_blks, node_numbers = get_node_numbers(nr_blks)
+
+        if numa_meminfo == None and node_numbers == None:
+            print("No NUMA information available")
+            return
+
+        for node in range(0, nr_blks):
+            n = kmem_cache.node[node]
+            if n == None:
+                continue
+
+            show_slabs_in_node(n)
+
+        return
+    except Exception as e:
+        print(e)
+        return
+    # end of it
+
+    lines = exec_crash_command("kmem -S %s" % options.slabdetail).splitlines()
+    full_mode = False
+    partial_mode = False
+    alloc_count = 0
+
+    for line in lines:
+        line = line.strip()
+        if line.startswith("NODE") or line.startswith("KMEM_CACHE_NODE"):
+            full_mode = False
+            partial_mode = False
+
+            if not line.endswith("FULL:") and not line.endswith("PARTIAL:"):
+                continue
+
+        if line.endswith("FULL:"):
+            full_mode = True
+
+        if line.endswith("PARTIAL:"):
+            partial_mode = True
+
+        if not full_mode and not partial_mode:
+            continue
+
+        words = line.split()
+        if len(words) < 5 or words[0] == "SLAB":
+            continue
+
+        if full_mode:
+            show_full_slab(options, kmem_cache, int(words[1], 16),
+                           int(words[0], 16), offset)
+        elif partial_mode:
+            show_partial_slab(options, kmem_cache,
+                              int(words[0], 16), offset)
+
+
+
+'''
     result = exec_crash_command("kmem -S %s" % options.slabdetail)
     result_lines = result.splitlines(True)
     slab_list = {}
@@ -1052,6 +1207,8 @@ def show_slabdetail(options):
         ascii_str = exec_crash_command("ascii %s" % sorted_content[i][0])
         print("\t%s %5d %s" % (sorted_content[i][0], sorted_content[i][1],
                                ascii_str[ascii_str.index(":") + 2:]), end="")
+'''
+
 
 def show_percpu(options):
     total_count = 0
