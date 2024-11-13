@@ -2436,9 +2436,13 @@ def show_oom_meminfo(op, meminfo_dict):
     print("%-30s %15s" % ("Category", "Size"))
     print("%s" % ('-' * 46))
 
-    for key in meminfo_dict:
+    sorted_meminfo_dict = sorted(meminfo_dict.items(),
+                            key=operator.itemgetter(1), reverse=True)
+
+    for i in range(0, len(sorted_meminfo_dict)):
         try:
-            val = meminfo_dict[key]
+            key = sorted_meminfo_dict[i][0]
+            val = sorted_meminfo_dict[i][1]
             if val.endswith("B"):
                 size_str = val
             else:
@@ -2486,6 +2490,7 @@ def show_oom_events(op):
         result_lines = exec_crash_command('log').splitlines()
         oom_invoked = False
         oom_meminfo = False
+        is_first_meminfo = True
         oom_ps_started = False
         rss_index = -1
         pid_index = -1
@@ -2506,13 +2511,17 @@ def show_oom_events(op):
                 is_first_oom = False
                 continue
 
-            time_str = line.split(']')[0] + ']'
-            time_str_len = len(time_str)
-            line = line[time_str_len:]
+            time_str = line.split(']')[0]
+            if time_str.startswith("["):
+                time_str_len = len(time_str)
+                if not is_first_meminfo and time_str_len != 0:
+                    oom_meminfo = False
+                line = line[time_str_len + 1:]
 
             if oom_invoked:
                 if "Mem-Info:" in line:
                     oom_meminfo = True
+                    is_first_meminfo = True
                     continue
                 elif "memory: usage" in line:
                     cgroup_dict["memory"] = line
@@ -2527,22 +2536,22 @@ def show_oom_events(op):
 
 
             if oom_meminfo:
-                if " Node " not in line and "shmem:" in line:
-                    words = line.split()
-                    for entry in words:
-                        key_val = entry.split(':')
-                        meminfo_dict[key_val[0]] = key_val[1]
-                    continue
-                elif " hugepages_total" in line:
-                    line = line[line.find("hugepages_total="):]
-                    words = line.split()
-                    for entry in words:
-                        key_val = entry.split('=')
-                        meminfo_dict[key_val[0]] = key_val[1]
-                    continue
-                elif " total pagecache pages" in line:
-                    words = line.split()
-                    meminfo_dict["Pagecaches"] = words[0]
+                is_first_meminfo = False
+                words = line.split()
+                for entry in words:
+                    key_val = entry.split(':')
+                    meminfo_dict[key_val[0]] = key_val[1]
+                continue
+            if " hugepages_total" in line:
+                line = line[line.find("hugepages_total="):]
+                words = line.split()
+                for entry in words:
+                    key_val = entry.split('=')
+                    meminfo_dict[key_val[0]] = key_val[1]
+                continue
+            elif " total pagecache pages" in line:
+                words = line.split()
+                meminfo_dict["Pagecaches"] = words[0]
 
 
             if oom_invoked and "uid" in line and "total_vm" in line:
