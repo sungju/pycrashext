@@ -2442,8 +2442,9 @@ def show_oom_meminfo(op, meminfo_dict):
             if val.endswith("B"):
                 size_str = val
             else:
-                size_str = get_size_str(int(val.split('#')[0]) * page_size)
+                size_str = get_size_str(int(val.split('#')[0]) * page_size, True)
             print("%-30s %15s" % (key, size_str))
+            crashcolor.set_color(crashcolor.RESET)
         except:
             pass
     print("%s" % ('~' * 46))
@@ -2466,12 +2467,14 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
         pname = sorted_oom_dict[i][0]
 
         mem_usage = sorted_oom_dict[i][1]
-        print("%-42s %15s" % (pname, get_size_str(mem_usage)))
+        print("%-42s %15s" % (pname, get_size_str(mem_usage, True)))
+        crashcolor.set_color(crashcolor.RESET)
 
     if print_count < len(sorted_oom_dict) - 1:
         print("\t<...>")
     print("=" * 58)
-    print("Total memory usage from processes = %s" % get_size_str(total_usage))
+    print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def show_oom_events(op):
@@ -2496,7 +2499,10 @@ def show_oom_events(op):
                 oom_invoked = True
                 if not is_first_oom:
                     print()
+
+                crashcolor.set_color(crashcolor.RED)
                 print(line)
+                crashcolor.set_color(crashcolor.RESET)
                 is_first_oom = False
                 continue
 
