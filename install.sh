@@ -16,7 +16,6 @@ grep "mpykdump.*.so" ~/.crashrc >/dev/null 2>&1
 if (( $? != 0 ))
 then
   echo "mpykdump64.so needs to be loaded before the script in ~/.crashrc"
-  exit 0
 fi
 
 echo
