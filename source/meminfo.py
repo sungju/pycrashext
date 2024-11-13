@@ -2429,6 +2429,178 @@ def show_page_owner_all(options):
         print("\nTotal allocated size : %s" % (get_size_str(sum_size)))
 
 
+def show_oom_meminfo(op, meminfo_dict):
+    global page_size
+
+    print("\n%s" % ('#' * 46))
+    print("%-30s %15s" % ("Category", "Size"))
+    print("%s" % ('-' * 46))
+
+    for key in meminfo_dict:
+        try:
+            val = meminfo_dict[key]
+            if val.endswith("B"):
+                size_str = val
+            else:
+                size_str = get_size_str(int(val.split('#')[0]) * page_size)
+            print("%-30s %15s" % (key, size_str))
+        except:
+            pass
+    print("%s" % ('~' * 46))
+
+
+def show_oom_memory_usage(op, oom_dict, total_usage):
+    sorted_oom_dict = sorted(oom_dict.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    min_number = 10
+    if (op.all):
+        min_number = len(sorted_oom_dict) - 1
+
+    print("=" * 58)
+    print("%-42s %15s" % ("NAME", "Usage"))
+    print("=" * 58)
+
+    print_count = min(len(sorted_oom_dict) - 1, min_number)
+
+    for i in range(0, print_count):
+        pname = sorted_oom_dict[i][0]
+
+        mem_usage = sorted_oom_dict[i][1]
+        print("%-42s %15s" % (pname, get_size_str(mem_usage)))
+
+    if print_count < len(sorted_oom_dict) - 1:
+        print("\t<...>")
+    print("=" * 58)
+    print("Total memory usage from processes = %s" % get_size_str(total_usage))
+
+
+def show_oom_events(op):
+    global page_size
+
+    page_size = 1 << get_page_shift()
+    is_first_oom = True
+    try:
+        result_lines = exec_crash_command('log').splitlines()
+        oom_invoked = False
+        oom_meminfo = False
+        oom_ps_started = False
+        rss_index = -1
+        pid_index = -1
+        pname_index = -1
+        oom_dict = {}
+        meminfo_dict = {}
+        cgroup_dict = {}
+        total_usage = 0
+        for line in result_lines:
+            if "invoked oom-killer:" in line:
+                oom_invoked = True
+                if not is_first_oom:
+                    print()
+                print(line)
+                is_first_oom = False
+                continue
+
+            time_str = line.split(']')[0] + ']'
+            time_str_len = len(time_str)
+            line = line[time_str_len:]
+
+            if oom_invoked:
+                if "Mem-Info:" in line:
+                    oom_meminfo = True
+                    continue
+                elif "memory: usage" in line:
+                    cgroup_dict["memory"] = line
+                    continue
+                elif "swap: usage" in line:
+                    cgroup_dict["swap"] = line
+                    continue
+                elif "Memory cgroup stats for" in line:
+                    line = line[line.find(" stats for ") + 11:-2]
+                    cgroup_dict["cgroup"] = line
+                    continue
+
+
+            if oom_meminfo:
+                if " Node " not in line and "shmem:" in line:
+                    words = line.split()
+                    for entry in words:
+                        key_val = entry.split(':')
+                        meminfo_dict[key_val[0]] = key_val[1]
+                    continue
+                elif " hugepages_total" in line:
+                    line = line[line.find("hugepages_total="):]
+                    words = line.split()
+                    for entry in words:
+                        key_val = entry.split('=')
+                        meminfo_dict[key_val[0]] = key_val[1]
+                    continue
+                elif " total pagecache pages" in line:
+                    words = line.split()
+                    meminfo_dict["Pagecaches"] = words[0]
+
+
+            if oom_invoked and "uid" in line and "total_vm" in line:
+                oom_ps_started = True
+                oom_meminfo = False
+                line = line.replace("[", "")
+                line = line.replace("]", "")
+                words = line.split()
+                for i in range(0, len(words)):
+                    if words[i] == "rss":
+                        rss_index = i
+                    elif words[i] == "pid":
+                        pid_index = i
+                    elif words[i] == "name":
+                        pname_index = i
+
+                continue
+
+            if not oom_ps_started:
+                continue
+
+            if "[" not in line: #end of oom_ps
+                if len(cgroup_dict) > 0:
+                    print("CGroup : " + cgroup_dict["cgroup"])
+                    cgroup_dict.pop("cgroup")
+                    for key in cgroup_dict:
+                        print("  " + cgroup_dict[key])
+
+                show_oom_memory_usage(op, oom_dict, total_usage)
+                if op.details:
+                    show_oom_meminfo(op, meminfo_dict)
+                oom_invoked = False
+                oom_meminfo = False
+                oom_ps_started = False
+                rss_index = -1
+                pid_index = -1
+                pname_index = -1
+                oom_dict = {}
+                meminfo_dict = {}
+                cgroup_dict = {}
+                total_usage = 0
+                continue
+
+            line = line.replace("[", "")
+            line = line.replace("]", "")
+            words = line.split()
+            if len(words) <= pname_index:
+                continue
+            pid = words[pid_index]
+            rss = int(words[rss_index]) * page_size
+            total_usage = total_usage + rss
+            pname = words[pname_index]
+            if op.all:
+                pname = pname + (" (%s)" % pid)
+            if pname in oom_dict:
+                rss = rss + oom_dict[pname]
+            oom_dict[pname] = rss
+    except Exception as e:
+        print(e)
+        pass
+
+
+
+
 def meminfo():
     sys.setrecursionlimit(10000000)
 
@@ -2476,6 +2648,9 @@ def meminfo():
     op.add_option("-o", "--page_owner", dest="page_owner", default=0,
                   action="store_true",
                   help="Show page_owner details")
+    op.add_option("-O", "--OOM", dest="OOM", default=0,
+                  action="store_true",
+                  help="Analyse OOM messages in log")
     op.add_option("-P", "--pss", dest="memusage_pss", default=0,
                   action="store_true",
                   help="Show memory usages(pss) by tasks")
@@ -2572,6 +2747,9 @@ def meminfo():
         show_page_owner_all(o)
         sys.exit(0)
 
+    if (o.OOM):
+        show_oom_events(o)
+        sys.exit(0)
 
     if (o.swapshow or o.swap_full_show):
         show_swap_usage(o)
