@@ -2481,8 +2481,12 @@ def get_size(val):
     global page_size
 
     size = 0
-    if val.endswith("B"):
+    if val.lower().endswith("kb"):
         size = int(val[:-2]) * 1024
+    elif val.lower().endswith("mb"):
+        size = int(val[:-2]) * 1024 * 1024
+    elif val.lower().endswith("gb"):
+        size = int(val[:-2]) * 1024 * 1024 * 1024
     else:
         size = int(val.split('#')[0]) * page_size
 
@@ -2498,6 +2502,7 @@ def show_oom_events(op):
         result_lines = exec_crash_command('log').splitlines()
         oom_invoked = False
         oom_meminfo = False
+        oom_cgroup_stats = False
         is_first_meminfo = True
         oom_ps_started = False
         rss_index = -1
@@ -2538,33 +2543,65 @@ def show_oom_events(op):
                     cgroup_dict["swap"] = line
                     continue
                 elif "Memory cgroup stats for" in line:
-                    line = line[line.find(" stats for ") + 11:-1]
-                    cgroup_dict["cgroup"] = line
-                    continue
+                    line = line[line.find(" stats for ") + 11:]
+                    oom_cgroup_stats = True
+                    if ': ' in line:
+                        cgroup_dict["cgroup"] = line.split(':')[0]
+                        line = line[line.find(':') + 1:]
+                    else:
+                        cgroup_dict["cgroup"] = line[:-1]
+                        continue
 
 
             if oom_meminfo:
                 is_first_meminfo = False
-                words = line.split()
-                for entry in words:
-                    key_val = entry.split(':')
-                    meminfo_dict[key_val[0]] = get_size(key_val[1])
-                continue
-            if " hugepages_total" in line:
-                line = line[line.find("hugepages_total="):]
-                words = line.split()
-                for entry in words:
-                    key_val = entry.split('=')
-                    meminfo_dict[key_val[0]] = get_size(key_val[1])
-                continue
-            elif " total pagecache pages" in line:
-                words = line.split()
-                meminfo_dict["Pagecaches"] = get_size(words[0])
+                #words = line.split()
+                #for entry in words:
+                #    key_val = entry.split(':')
+                #    meminfo_dict[key_val[0]] = get_size(key_val[1])
+                #continue
+                if " hugepages_total" in line:
+                    line = line[line.find("hugepages_total="):]
+                    words = line.split()
+                    for entry in words:
+                        key_val = entry.split('=')
+                        meminfo_dict[key_val[0]] = get_size(key_val[1])
+                    continue
+                elif " total pagecache pages" in line:
+                    words = line.split()
+                    meminfo_dict["Pagecaches"] = get_size(words[0])
+                    continue
+                else:
+                    try:
+                        words = line.split()
+                        for word in words:
+                            key_val = word.split(':')
+                            meminfo_dict[key_val[0]] = get_size(key_val[1])
+                        continue
+                    except: # Ignore messed log
+                        pass
+
+
+            if oom_cgroup_stats:
+                try:
+                    words = line.split()
+                    if ':' in words[0]:
+                        for word in words:
+                            key_val = word.split(':')
+                            meminfo_dict[key_val[0]] = get_size(key_val[1])
+                    else:
+                        if words[1].isdigit():
+                            meminfo_dict[words[0]] = get_size(words[1])
+                        else:
+                            oom_cgroup_stats = False
+                except:
+                    pass
 
 
             if oom_invoked and "uid" in line and "total_vm" in line:
                 oom_ps_started = True
                 oom_meminfo = False
+                oom_cgroup_stats = False
                 line = line.replace("[", "")
                 line = line.replace("]", "")
                 words = line.split()
@@ -2593,6 +2630,7 @@ def show_oom_events(op):
                     show_oom_meminfo(op, meminfo_dict)
                 oom_invoked = False
                 oom_meminfo = False
+                oom_cgroup_stats = False
                 oom_ps_started = False
                 rss_index = -1
                 pid_index = -1
