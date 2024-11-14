@@ -2443,11 +2443,7 @@ def show_oom_meminfo(op, meminfo_dict):
         try:
             key = sorted_meminfo_dict[i][0]
             val = sorted_meminfo_dict[i][1]
-            if val.endswith("B"):
-                size_str = val
-            else:
-                size_str = get_size_str(int(val.split('#')[0]) * page_size, True)
-            print("%-30s %15s" % (key, size_str))
+            print("%-30s %15s" % (key, get_size_str(val, True)))
             crashcolor.set_color(crashcolor.RESET)
         except:
             pass
@@ -2479,6 +2475,18 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     print("=" * 58)
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
     crashcolor.set_color(crashcolor.RESET)
+
+
+def get_size(val):
+    global page_size
+
+    size = 0
+    if val.endswith("B"):
+        size = int(val[:-2]) * 1024
+    else:
+        size = int(val.split('#')[0]) * page_size
+
+    return size
 
 
 def show_oom_events(op):
@@ -2540,18 +2548,18 @@ def show_oom_events(op):
                 words = line.split()
                 for entry in words:
                     key_val = entry.split(':')
-                    meminfo_dict[key_val[0]] = key_val[1]
+                    meminfo_dict[key_val[0]] = get_size(key_val[1])
                 continue
             if " hugepages_total" in line:
                 line = line[line.find("hugepages_total="):]
                 words = line.split()
                 for entry in words:
                     key_val = entry.split('=')
-                    meminfo_dict[key_val[0]] = key_val[1]
+                    meminfo_dict[key_val[0]] = get_size(key_val[1])
                 continue
             elif " total pagecache pages" in line:
                 words = line.split()
-                meminfo_dict["Pagecaches"] = words[0]
+                meminfo_dict["Pagecaches"] = get_size(words[0])
 
 
             if oom_invoked and "uid" in line and "total_vm" in line:
