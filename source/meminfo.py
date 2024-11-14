@@ -2538,7 +2538,7 @@ def show_oom_events(op):
                     cgroup_dict["swap"] = line
                     continue
                 elif "Memory cgroup stats for" in line:
-                    line = line[line.find(" stats for ") + 11:-2]
+                    line = line[line.find(" stats for ") + 11:-1]
                     cgroup_dict["cgroup"] = line
                     continue
 
