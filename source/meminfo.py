@@ -2455,13 +2455,13 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
                             key=operator.itemgetter(1), reverse=True)
     min_number = 10
     if (op.all):
-        min_number = len(sorted_oom_dict) - 1
+        min_number = len(sorted_oom_dict)
 
     print("=" * 58)
     print("%-42s %15s" % ("NAME", "Usage"))
     print("=" * 58)
 
-    print_count = min(len(sorted_oom_dict) - 1, min_number)
+    print_count = min(len(sorted_oom_dict), min_number)
 
     for i in range(0, print_count):
         pname = sorted_oom_dict[i][0]
@@ -2582,22 +2582,6 @@ def show_oom_events(op):
                         pass
 
 
-            if oom_cgroup_stats:
-                try:
-                    words = line.split()
-                    if ':' in words[0]:
-                        for word in words:
-                            key_val = word.split(':')
-                            meminfo_dict[key_val[0]] = get_size(key_val[1])
-                    else:
-                        if words[1].isdigit():
-                            meminfo_dict[words[0]] = get_size(words[1])
-                        else:
-                            oom_cgroup_stats = False
-                except:
-                    pass
-
-
             if oom_invoked and "uid" in line and "total_vm" in line:
                 oom_ps_started = True
                 oom_meminfo = False
@@ -2614,6 +2598,22 @@ def show_oom_events(op):
                         pname_index = i
 
                 continue
+
+            if oom_cgroup_stats:
+                try:
+                    words = line.split()
+                    if ':' in words[0]:
+                        for word in words:
+                            key_val = word.split(':')
+                            meminfo_dict[key_val[0]] = get_size(key_val[1])
+                    else:
+                        if words[1].isdigit():
+                            meminfo_dict[words[0]] = get_size(words[1])
+                        else:
+                            oom_cgroup_stats = False
+                except:
+                    pass
+
 
             if not oom_ps_started:
                 continue
