@@ -49,7 +49,7 @@ def show_case_info(options):
             tasks_id = tasks_id[:tasks_id.find("/")]
             dump_path = dump_path[:dump_path.find("%s/" % tasks_id) + len(tasks_id) + 1]
 
-        with open(dump_path + "caseno", "r")s f:
+        with open(dump_path + "caseno", "r") as f:
             caseno_str = f.read()
     except:
         pass
