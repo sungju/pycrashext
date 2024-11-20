@@ -55,7 +55,7 @@ def show_case_info(options):
         pass
 
     if caseno_str != "":
-        print(" Case No: %s, " % (red_str + f.read() + reset_str), end="")
+        print(" Case No: %s, " % (red_str + caseno_str + reset_str), end="")
     print("Hostname: %s" % (green_str + sysinfo["NODENAME"] + reset_str))
     crash_date=sysinfo["DATE"]
     tz=crash_date.split()[-2]
