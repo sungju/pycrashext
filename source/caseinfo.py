@@ -40,12 +40,22 @@ def show_case_info(options):
     get_system_info()
 
     dump_path = sysinfo["DUMPFILE"]
-    dump_path = dump_path[:dump_path.find("crash/")]
+    caseno_str = ""
     try:
-        f = open(dump_path + "caseno", "r")
-        print(" Case No: %s, " % (red_str + f.read() + reset_str), end="")
+        if "crash/" in dump_path:
+            dump_path = dump_path[:dump_path.find("crash/")]
+        elif "/tasks/" in dump_path:
+            tasks_id = dump_path[dump_path.find("/tasks/") + 7:]
+            tasks_id = tasks_id[:tasks_id.find("/")]
+            dump_path = dump_path[:dump_path.find("%s/" % tasks_id) + len(tasks_id) + 1]
+
+        with open(dump_path + "caseno", "r")s f:
+            caseno_str = f.read()
     except:
         pass
+
+    if caseno_str != "":
+        print(" Case No: %s, " % (red_str + f.read() + reset_str), end="")
     print("Hostname: %s" % (green_str + sysinfo["NODENAME"] + reset_str))
     crash_date=sysinfo["DATE"]
     tz=crash_date.split()[-2]
