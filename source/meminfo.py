@@ -2524,6 +2524,13 @@ def show_oom_events(op):
                 is_first_oom = False
                 continue
 
+            if "Out of memory: Killed process" in line:
+                crashcolor.set_color(crashcolor.GREEN)
+                print(line)
+                crashcolor.set_color(crashcolor.RESET)
+                continue
+
+
             time_str = line.split(']')[0]
             if time_str.startswith("["):
                 time_str_len = len(time_str)
