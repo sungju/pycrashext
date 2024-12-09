@@ -2312,9 +2312,6 @@ def is_aligned(value, align):
     return ((value & (align - 1)) == 0)
 
 
-# test task in galvatron 
-# retrace-server-interact 924567917 crash
-# case no 03694858
 def show_page_owner_all(options):
     global page_owner_dict
     global stack_pools
