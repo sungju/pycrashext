@@ -1020,6 +1020,39 @@ Node 1, zone   Device      0      0      0      0      0      0      0      0   
 
 # Order                  2^0    2^1    2^2    2^3    2^4    2^5    2^6    2^7    2^8    2^9   2^10
 # Size (KB)                4      8     16     32     64    128    256    512   1024   2048   4096
+
+
+crash> meminfo -O
+[236198.066904] java invoked oom-killer: gfp_mask=0x6200ca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0
+==========================================================
+NAME                                                 Usage
+==========================================================
+java                                             121.1 GiB
+ds_am                                            326.5 MiB
+wdavdaemon                                       266.9 MiB
+bash                                             223.1 MiB
+ds_agent                                         207.6 MiB
+su                                               136.1 MiB
+	<...>
+==========================================================
+Total memory usage from processes = 124.2 GiB
+[236204.876687] Out of memory: Killed process 281864 (java) total-vm:37363292kB, anon-rss:13863416kB, file-rss:0kB, shmem-rss:48kB, UID:23312672 pgtables:27796kB oom_score_adj:0
+
+[245177.286137] ds_agent invoked oom-killer: gfp_mask=0x6200ca(GFP_HIGHUSER_MOVABLE), order=0, oom_score_adj=0
+==========================================================
+NAME                                                 Usage
+==========================================================
+java                                             120.9 GiB
+ds_am                                            326.8 MiB
+wdavdaemon                                       266.4 MiB
+ds_agent                                         214.7 MiB
+bash                                             129.7 MiB
+sshd                                              81.3 MiB
+su                                                68.5 MiB
+	<...>
+==========================================================
+Total memory usage from processes = 123.5 GiB
+[245184.406619] Out of memory: Killed process 574755 (java) total-vm:37363292kB, anon-rss:9893024kB, file-rss:460kB, shmem-rss:48kB, UID:23312672 pgtables:20032kB oom_score_adj:0
 ```
 
 ### revs ###

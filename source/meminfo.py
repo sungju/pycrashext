@@ -2490,6 +2490,7 @@ def get_size(val):
     return size
 
 
+import traceback
 def show_oom_events(op):
     global page_size
 
@@ -2645,22 +2646,26 @@ def show_oom_events(op):
                 total_usage = 0
                 continue
 
-            line = line.replace("[", "")
-            line = line.replace("]", "")
-            words = line.split()
-            if len(words) <= pname_index:
-                continue
-            pid = words[pid_index]
-            rss = int(words[rss_index]) * page_size
-            total_usage = total_usage + rss
-            pname = words[pname_index]
-            if op.all:
-                pname = pname + (" (%s)" % pid)
-            if pname in oom_dict:
-                rss = rss + oom_dict[pname]
-            oom_dict[pname] = rss
+            try:
+                line = line.replace("[", "")
+                line = line.replace("]", "")
+                words = line.split()
+                if len(words) <= pname_index:
+                    continue
+                pid = words[pid_index]
+                rss = int(words[rss_index]) * page_size
+                total_usage = total_usage + rss
+                pname = words[pname_index]
+                if op.all:
+                    pname = pname + (" (%s)" % pid)
+                if pname in oom_dict:
+                    rss = rss + oom_dict[pname]
+                oom_dict[pname] = rss
+            except:
+                pass
     except Exception as e:
         print(e)
+        traceback.print_exc()
         pass
 
 
