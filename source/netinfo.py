@@ -266,6 +266,53 @@ def show_inet_sock(options, sock):
 
     show_sock_status(sock)
 
+    if options.details:
+        show_inet_sock_details(inet_sock, options)
+
+
+def read_string(addr, delimiter=0x0, highchar=128):
+    result = ""
+    idx = 0
+    while True:
+        one_byte = readU8(addr + idx)
+        idx = idx + 1
+        if one_byte == delimiter or one_byte > highchar:
+            break
+        result = result + str(chr(one_byte))
+
+    return result
+
+
+def show_inet_sock_details(inet_sock, options):
+    print("\n== Socket Receive Queue ==")
+    count = 0
+    for sk_buff in readSUListFromHead(inet_sock.sk.sk_receive_queue,
+            "next",
+            "struct sk_buff",
+            maxel=1000000):
+        print(sk_buff)
+        data = read_string(sk_buff.data)
+        print("\t%s" % (data))
+        count = count + 1
+
+    if count == 0:
+        print("\tNone")
+
+    print("\n== Socket Write Queue ==")
+    count = 0
+    for sk_buff in readSUListFromHead(inet_sock.sk.sk_write_queue,
+            "next",
+            "struct sk_buff",
+            maxel=1000000):
+        print(sk_buff)
+        #data = SmartString(sk_buff.data)
+        data = read_string(sk_buff.data)
+        print("\t%s" % (data))
+        count = count + 1
+
+    if count == 0:
+        print("\tNone")
+
 
 def show_netlink_sock(options, sock):
     offset = member_offset("struct netlink_sock", "sk")
