@@ -430,6 +430,14 @@ def show_open_files(options):
         print("\t<...>")
     print("=" * 70)
     print("\tTotal open files = %s" % (f"{total_files:,}"))
+    try:
+        files_stat = readSymbol("files_stat")
+        print("\n\tnr_files      = %s" % (f"{files_stat.nr_files:,}"))
+        print("\tnr_free_files = %s" % (f"{files_stat.nr_free_files:,}"))
+        print("\tmax_files     = %s" % (f"{files_stat.max_files:,}"))
+    except Exception as e:
+        print(e)
+        pass
 
 
 def show_open_file_size(options):
