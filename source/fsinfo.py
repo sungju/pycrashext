@@ -394,6 +394,43 @@ def show_file_details(options):
             found = True
 
 
+def show_open_files(options):
+    open_files_dict = {}
+
+    all_procs = exec_crash_command("foreach files").split("PID: ")
+    total_files = 0
+    for one_proc in all_procs:
+        all_files = one_proc.splitlines()
+        if len(all_files) >= 3:
+            if all_files[2] == "No open files":
+                continue
+            file_cnt = len(all_files) - 2
+            total_files = total_files + file_cnt
+            open_files_dict[all_files[0].split()[2]] = file_cnt
+
+    sorted_open_files = sorted(open_files_dict.items(),
+                               key=operator.itemgetter(1), reverse=not options.all)
+    print("=" * 70)
+    print("%14s %-s" % ("[ Open files ]", "[ task_struct  ] (comm)"))
+    print("=" * 70)
+    min_number = 10
+    if (options.all):
+        min_number = len(sorted_open_files) - 1
+
+    print_count = min(len(sorted_open_files) - 1, min_number)
+
+    for i in range(0, print_count):
+        task = readSU("struct task_struct", int(sorted_open_files[i][0], 16))
+        print("%14s  %-s (%s)" %
+                (sorted_open_files[i][1],
+                 sorted_open_files[i][0],
+                 task.comm))
+
+    if print_count < len(sorted_open_files) - 1:
+        print("\t<...>")
+    print("=" * 70)
+    print("\tTotal open files = %s" % (f"{total_files:,}"))
+
 
 def show_open_file_size(options):
     all_files = exec_crash_command("foreach files").splitlines()
@@ -1125,6 +1162,9 @@ def show_swap_usage(options):
 
 def fsinfo():
     op = OptionParser()
+    op.add_option("-a", "--all", dest="all", default=0,
+                  action="store_true",
+                  help="Show all")
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show detailed information")
@@ -1158,6 +1198,9 @@ def fsinfo():
     op.add_option("-s", "--slab", dest="show_slab", default=0,
                   action="store_true",
                   help="Show all 'dentry' details in slab")
+    op.add_option("--show_open_files", dest="show_open_files", default=0,
+                  action="store_true",
+                  help="Show open files per process")
     op.add_option("--show_open_file_size", dest="show_open_file_size", default=0,
                   action="store_true",
                   help="Show file size of each open files")
@@ -1213,6 +1256,10 @@ def fsinfo():
 
     if (o.task_info):
         show_task_info(o)
+        sys.exit(0)
+
+    if (o.show_open_files):
+        show_open_files(o)
         sys.exit(0)
 
     if (o.show_open_file_size):
