@@ -58,6 +58,9 @@ def run_rule(basic_data):
         result_dict["KCS_TITLE"] = "RHEL 8.4: kernel crashed due to list_del corruption with LIST_POISON2"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/6094611"
         result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS"
+        result_dict["KERNELS"] = { "kernel-4.18.0-305.12.1.el8_4",
+                                  "kernel-4.18.0-348.el8" }
+
 
         return [result_dict]
     except Exception as e:
