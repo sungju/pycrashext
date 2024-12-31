@@ -1692,6 +1692,9 @@ def show_slub_debug_user(options):
             show_partial_alloc_track(options, kmem_cache,
                     int(words[0], 16), offset)
 
+        if alloc_count > 0 and alloc_count > options.maxcount:
+            break
+
 
     sorted_alloc_func_list = sorted(alloc_func_list.items(),
                           key=operator.itemgetter(1), reverse=True)
@@ -2742,6 +2745,9 @@ def meminfo():
     op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
                   action="store", type="string",
                   help="Show slub_debug=U usage")
+    op.add_option("--maxcount", dest="maxcount", default=0,
+                  action="store", type="int",
+                  help="Check only maxcount")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
