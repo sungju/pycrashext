@@ -31,7 +31,7 @@ def ai_analyse():
         model_str = request.form["model_str"]
         AI_MODEL = model_str
     except:
-        pass
+        AI_MODEL='llama3.2'
 
     try:
         query_str = base64.b64decode(query_str).decode("utf-8")
