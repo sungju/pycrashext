@@ -25,6 +25,12 @@ def ai_send():
 
     # Additional options that can pass to the server
     op = OptionParser()
+    op.add_option("-m", "--model",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="ai_model",
+                  help="Set AI model to run")
     (o, args) = op.parse_args()
 
 
@@ -36,6 +42,9 @@ def ai_send():
             data['model_str'] = model_str
     except:
         pass
+
+    if o.ai_model != "":
+        data['model_str'] = o.ai_model
 
 
     try:

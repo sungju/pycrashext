@@ -41,6 +41,8 @@ def ai_send(ins_addr, o, args, cmd_path_list):
 
     options = ""
     cmd_options = ""
+    if o.ai_model != "":
+        cmd_options = cmd_options + " -m " + o.ai_model
 
     result_str = ""
     python_list = { "python", "python3", "python2" }
@@ -81,6 +83,12 @@ def ai():
         print("No server to use AI is available")
         return 
 
+    op.add_option("-m", "--model",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="ai_model",
+                  help="Choose AI model to use")
     (o, args) = op.parse_args()
 
 
