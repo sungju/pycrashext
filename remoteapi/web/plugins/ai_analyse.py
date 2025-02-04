@@ -28,6 +28,12 @@ def ai_analyse():
         return 'error getting query data'
 
     try:
+        model_str = request.form["model_str"]
+        AI_MODEL = model_str
+    except:
+        pass
+
+    try:
         query_str = base64.b64decode(query_str).decode("utf-8")
     except:
         return 'error found in decoding base64'
