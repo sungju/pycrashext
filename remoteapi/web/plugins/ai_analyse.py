@@ -19,7 +19,7 @@ AI_CMD='ollama'
 AI_RUN='run'
 AI_MODEL='llama3.2'
 
-def disasm():
+def ai_analyse():
     # First line can be used to identify kernel version
     try:
         query_str = request.form["query_str"]
