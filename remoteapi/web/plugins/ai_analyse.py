@@ -46,5 +46,7 @@ def ai_analyse():
     except:
         result_str = result.stderr.decode()
 
+    model_used_str = "RESULT FROM THE AI MODEL <" + AI_MODEL + ">"
 
-    return query_str + "\n\n" + result_str.rstrip()
+    return query_str + "\n\n" + model_used_str + "\n" + \
+            ("=" * len(model_used_str)) + "\n" + result_str.rstrip()
