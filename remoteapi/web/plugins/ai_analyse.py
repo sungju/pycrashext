@@ -18,6 +18,7 @@ def add_plugin_rule(app):
 AI_CMD='ollama'
 AI_RUN='run'
 AI_MODEL='llama3.2'
+#AI_MODEL='deepseek-r1'
 
 def ai_analyse():
     # First line can be used to identify kernel version
@@ -40,4 +41,4 @@ def ai_analyse():
         result_str = result.stderr.decode()
 
 
-    return result_str.rstrip()
+    return query_str + "\n\n" + result_str.rstrip()
