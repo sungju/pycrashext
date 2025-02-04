@@ -28,8 +28,7 @@ def ai_send():
     (o, args) = op.parse_args()
 
 
-    data = {"query_str" : encoded_query,
-            "model_str" : "deepseek-r1"}
+    data = {"query_str" : encoded_query}
 
     try:
         model_str = os.environ['AI_MODEL']
