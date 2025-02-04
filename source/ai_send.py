@@ -28,7 +28,17 @@ def ai_send():
     (o, args) = op.parse_args()
 
 
-    data = {"query_str" : encoded_query}
+    data = {"query_str" : encoded_query,
+            "model_str" : "deepseek-r1"}
+
+    try:
+        model_str = os.environ['AI_MODEL']
+        if model_str != '':
+            data['model_str'] = model_str
+    except:
+        pass
+
+
     try:
         res = r.post(encode_url, data = data).text
     except r.exceptions.RequestException as e:
