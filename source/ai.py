@@ -15,9 +15,63 @@ import os
 from os.path import expanduser
 import time
 import base64
+import tempfile
 
 import crashcolor
 import crashhelper
+
+
+question_dict = {}
+
+def read_ai_questions_from_a_file(filepath):
+    global question_dict
+
+    try:
+        with open(filepath, 'r', encoding="utf-8") as f:
+            lines = f.readlines()
+            cmd_str = ""
+            q_str = ""
+            for line in lines:
+                if line.startswith("CMD:"):
+                    cmd_str = line.split(":")[1].strip()
+                    q_str = ""
+                    continue
+                elif line.startswith("CMD_END:"):
+                    if line.split(":")[1].strip() == cmd_str:
+                        question_dict[cmd_str] = q_str.strip()
+                        cmd_str = q_str = ""
+                        continue
+
+                q_str = q_str + line + "\n"
+    except:
+        pass
+
+
+def read_ai_questions():
+    global question_dict
+
+    default_file= "ai_questions.txt"
+    try:
+        cmd_path_list = os.environ["PYKDUMPPATH"]
+        path_list = cmd_path_list.split(':')
+        for path in path_list:
+            if os.path.exists(path + ("/ai_questions.txt")):
+                default_file = path + ("/ai_questions.txt")
+                break
+    except:
+        pass
+
+
+    user_questions_file = "~/.ai_questions.cfg"
+    try:
+        user_questions_file = expanduser("~") + "/.ai_questions.cfg"
+    except:
+        pass
+
+    question_dict = {}
+    for fpath in [default_file, user_questions_file]:
+        read_ai_questions_from_a_file(fpath)
+
 
 
 def is_command_exist(name):
@@ -27,7 +81,9 @@ def is_command_exist(name):
     return True
 
 
-def ai_send(ins_addr, o, args, cmd_path_list):
+def ai_send(o, args, cmd_path_list):
+    global question_dict
+
     path_list = cmd_path_list.split(':')
     ai_send_path = ""
     for path in path_list:
@@ -48,21 +104,38 @@ def ai_send(ins_addr, o, args, cmd_path_list):
     python_list = { "python", "python3", "python2" }
     for python_cmd in python_list:
         if (is_command_exist(python_cmd)):
-            cmd_to_run = ' '.join(args)
-            result_str = "crash> " + cmd_to_run + "\n" +\
-                    exec_crash_command(cmd_to_run)
-            if cmd_to_run.strip().startswith("dis "):
-                result_str = "Please analyze the following assembly code " +\
-                             "focusing on the flags set by each instruction " +\
-                             "and how they affect the branch decisions made " +\
-                             "by conditional jump instructions. Provide a " +\
-                             "step-by-step breakdown of the code, describing " +\
-                             "the function and any side effects for each line and explain " +\
-                             "how the flags are used to make branch decisions." +\
-                             "\n\n~~~\n" + result_str.rstrip() + "\n~~~"
-            else:
+            cmd_str = ""
+            if o.cmd_str != "":
+                cmd_str = o.cmd_str
+                result_str = "\n~~~\ncrash> " + cmd_str + "\n" +\
+                        exec_crash_command(cmd_str).rstrip() + "\n~~~"
+                cmd_str = cmd_str.split()[0]
+            elif o.input_file != "":
+                try:
+                    with open(o.input_file) as fp:
+                        result_str = "".join(fp.readlines())
+                except Exception as e:
+                    print(e)
+                    pass
+
+            read_ai_questions()
+            if len(args) != 0:
+                result_str = " ".join(args) + "\n" + result_str
+            elif cmd_str in question_dict:
+                result_str = question_dict[cmd_str] + result_str
+            elif len(args) == 0:
                 result_str = "Analyse the below output from linux kernel vmcore" +\
-                        "\n\n~~~\n" + result_str + "\n~~~"
+                        result_str
+            
+
+            try:
+                with tempfile.NamedTemporaryFile(delete=False) as fp:
+                    fp.write(result_str.encode())
+                    cmd_options = cmd_options + " -i " + fp.name
+                    result_str = ""
+            except Exception as e:
+                print("Error", e)
+                pass
 
             result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
                                                 (result_str, python_cmd, \
@@ -83,6 +156,20 @@ def ai():
         print("No server to use AI is available")
         return 
 
+    op.add_option("-c", "--cmd",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="cmd_str",
+                  help="The output of this command will be anlaysed")
+
+    op.add_option("-i", "--input",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="input_file",
+                  help="Use file for input data")
+
     op.add_option("-m", "--model",
                   action="store",
                   type="string",
@@ -92,11 +179,11 @@ def ai():
     (o, args) = op.parse_args()
 
 
-    if len(args) != 0:
-        ai_send(args[0], o, args, os.environ["PYKDUMPPATH"])
+    if o.cmd_str != "" or len(args) != 0 or o.input_file != "":
+        ai_send(o, args, os.environ["PYKDUMPPATH"])
     else:
         print("ERROR> ai needs an instruction to run before send data.\n",
-              "\ti.e) ai \"bt -a\"")
+              "\ti.e) ai -c \"bt -a\"")
 
 
 if ( __name__ == '__main__'):

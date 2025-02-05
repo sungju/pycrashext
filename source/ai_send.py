@@ -7,9 +7,6 @@ from optparse import OptionParser
 
 
 def ai_send():
-    orig_query = "".join(sys.stdin.readlines())
-    encoded_query = base64.b64encode(orig_query.encode())
-
     try:
         encode_url = os.environ['CRASHEXT_SERVER'] + '/api/ai'
     except:
@@ -25,6 +22,12 @@ def ai_send():
 
     # Additional options that can pass to the server
     op = OptionParser()
+    op.add_option("-i", "--input",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="input_file",
+                  help="Use file for input data")
     op.add_option("-m", "--model",
                   action="store",
                   type="string",
@@ -34,7 +37,20 @@ def ai_send():
     (o, args) = op.parse_args()
 
 
+    orig_query = "".join(sys.stdin.readlines())
+    if o.input_file != "":
+        try:
+            with open(o.input_file) as fp:
+                orig_query = "".join(fp.readlines())
+
+            os.remove(o.input_file)
+        except:
+            pass
+
+    encoded_query = base64.b64encode(orig_query.encode())
+
     data = {"query_str" : encoded_query}
+
 
     try:
         model_str = os.environ['AI_MODEL']

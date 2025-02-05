@@ -1,0 +1,7 @@
+CMD: dis
+Please analyze the following assembly code focusing on the flags set by each instruction and how they affect the branch decisions made by conditional jump instructions. Provide a step-by-step breakdown of the code, describing the function and any side effects for each line and explain how the flags are used to make branch decisions.
+CMD_END: dis
+
+CMD: bt
+Please analyse the following backtrace from vmcore. Check if there's any known issue or any possible clue from call pattern.
+CMD_END: bt
