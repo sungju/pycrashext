@@ -2,7 +2,7 @@
 
 rm -rf bin/
 
-python3 -m venv .
+python3 -m venv --upgrade-deps .
 MYOS="$OSTYPE"
 if ( test "$MYOS" = "msys" ); then
 	source Scripts/activate.bat
