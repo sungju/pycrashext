@@ -15,6 +15,7 @@ def add_plugin_rule(app):
     app.add_url_rule('/api/ai', 'ai', ai_analyse, methods=['POST'])
 
 
+AI_URL='https://ollama.com/'
 AI_CMD='ollama'
 AI_RUN='run'
 AI_MODEL='llama3.2'
@@ -43,8 +44,14 @@ def ai_analyse():
         result = subprocess.run([AI_CMD, AI_RUN, AI_MODEL, query_str],
                                 capture_output=True)
         result_str = result.stdout.decode()
-    except:
-        result_str = result.stderr.decode()
+    except Exception as e:
+        try:
+            result_str = result.stderr.decode()
+        except:
+            result_str = "Error : %s" % e
+
+        result_str = result_str + \
+                ("\nPlease install '%s' by checking '%s'" % (AI_CMD, AI_URL))
 
     model_used_str = "RESULT FROM THE AI MODEL <" + AI_MODEL + ">"
 
