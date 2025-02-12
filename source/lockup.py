@@ -207,6 +207,12 @@ def show_task_list(runqueue, reverse_sort, options):
     print("")
 
 
+def get_useconds(dto):
+    days, hours, minutes, seconds, useconds = dto
+    return useconds + (seconds * 1000000) + (minutes * 60 * 1000000) + (hours * 60 * 60 * 1000000) + (days * 24 * 60 * 60 * 1000000)
+
+
+
 def lockup_display(reverse_sort, show_tasks, options):
     rqlist = Tasks.getRunQueues()
     rqsorted = sorted(rqlist, key=getKey, reverse=reverse_sort)
@@ -244,7 +250,20 @@ def lockup_display(reverse_sort, show_tasks, options):
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
         if options.details:
             task_time = exec_crash_command("ps -m 0x%x" % (rq.curr)).splitlines()[0]
-            print(" └──> ps -m %-8s : %s" % (rq.curr.pid, task_time.split("]")[0][1:]))
+            task_time = task_time.split("]")[0][1:]
+            days_str, time_str = task_time.split()
+            dto = datetime.strptime(time_str, "%H:%M:%S.%f")
+
+            date_info = (int(days_str), dto.hour, dto.minute, dto.second, dto.microsecond)
+            runtime = get_useconds(date_info)
+            if runtime >= 2 * 60 * 1000000:
+                crashcolor.set_color(crashcolor.LIGHTRED)
+            elif runtime >= 60 * 1000000:
+                crashcolor.set_color(crashcolor.BLUE)
+            else:
+                crashcolor.set_color(crashcolor.RESET)
+            print(" └──> ps -m %-8s : %s" % (rq.curr.pid, task_time))
+            crashcolor.set_color(crashcolor.RESET)
 
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
