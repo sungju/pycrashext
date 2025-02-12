@@ -81,6 +81,19 @@ def is_command_exist(name):
     return True
 
 
+def get_crash_command_output(cmd_str):
+    result_str = ""
+    try:
+        result_str = "crash> sys\n" +\
+                exec_crash_command("sys").rstrip() +\
+                "\ncrash> " + cmd_str + "\n" +\
+                exec_crash_command(cmd_str).rstrip()
+    except Exception as e:
+        result_str = "crash> " + cmd_str + "\nERROR: " + repr(e)
+
+    return result_str
+
+
 def ai_send(o, args, cmd_path_list):
     global question_dict
 
@@ -107,8 +120,12 @@ def ai_send(o, args, cmd_path_list):
             cmd_str = ""
             if o.cmd_str != "":
                 cmd_str = o.cmd_str
-                result_str = "\n~~~\ncrash> " + cmd_str + "\n" +\
-                        exec_crash_command(cmd_str).rstrip() + "\n~~~"
+                result_str = get_crash_command_output(cmd_str)
+                if "crash: command not found:" in result_str:
+                    print("Cannot execute command '%s'" % cmd_str)
+                    return
+
+                result_str = "\n\n~~~\n" + result_str + "\n~~~"
                 cmd_str = cmd_str.split()[0]
             elif o.input_file != "":
                 try:
