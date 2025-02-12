@@ -19,6 +19,38 @@ sys_str = ""
 ver_magic = 0
 VER_MAGIC_3_3 = 303 # version 3.3
 
+
+machine_symbols = {}
+minus_one_addr = 0
+page_size = 4096
+
+def get_machine_symbol(symbol):
+    global machine_symbols
+    global minus_one_addr
+    global page_size
+
+    try:
+        if len(machine_symbols) == 0:
+            help_s_out = exec_crash_command("help -m")
+            lines = help_s_out.splitlines()
+            for line in lines:
+                words = line.split(":")
+                key = words[0].strip()
+                value = words[1].strip()
+                machine_symbols[key] = value
+                if key == "bits":
+                    minus_one_addr = (1 << int(value)) - 1
+                if key == "pagesize":
+                    page_size = int(value)
+
+        if symbol in machine_symbols:
+            return machine_symbols[symbol]
+
+    except Exception as e:
+        pass
+
+    return ""
+
 def get_system_info():
     global sysinfo
     global sys_str
@@ -587,7 +619,7 @@ wb_caches = {}
 
 
 def pages_to_str(pages):
-    page_bytes = pages * 4096
+    page_bytes = pages * page_size
     result_str = ""
     if page_bytes > 1024*1024*1024:
         result_str = "%d GB" % (page_bytes/1024/1024/1024)
@@ -1225,6 +1257,7 @@ def fsinfo():
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)
+    get_machine_symbol("")
 
     if (o.file_addr_for_pid != ""):
         find_pid_from_file(o)
