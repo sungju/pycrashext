@@ -25,8 +25,8 @@ def ai_analyse():
     # First line can be used to identify kernel version
     try:
         query_str = request.form["query_str"]
-    except:
-        return 'error getting query data'
+    except Exception as e:
+        return 'error getting query data: %s' % repr(e)
 
     try:
         model_str = request.form["model_str"]

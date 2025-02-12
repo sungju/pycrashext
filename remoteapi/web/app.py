@@ -51,6 +51,8 @@ class AppReloader(object):
     def __init__(self, create_app):
         self.create_app = create_app
         self.app = create_app()
+        # 5MB for each form field
+        self.app.config['MAX_FORM_MEMORY_SIZE'] = 5 * 1024 * 1024
         load_plugins(self.app)
 
     def get_application(self):
