@@ -260,6 +260,10 @@ def lockup_display(reverse_sort, show_tasks, options):
                 crashcolor.set_color(crashcolor.LIGHTRED)
             elif runtime >= 60 * 1000000:
                 crashcolor.set_color(crashcolor.BLUE)
+            elif runtime >= 20 * 1000000:
+                crashcolor.set_color(crashcolor.GREEN)
+            elif runtime >= 10 * 1000000:
+                crashcolor.set_color(crashcolor.YELLOW)
             else:
                 crashcolor.set_color(crashcolor.RESET)
             print(" └──> ps -m %-8s : %s" % (rq.curr.pid, task_time))
