@@ -16,6 +16,7 @@ from os.path import expanduser
 import time
 import base64
 import tempfile
+from io import StringIO
 
 import crashcolor
 import crashhelper
@@ -81,13 +82,35 @@ def is_command_exist(name):
     return True
 
 
+def my_exec_command(cmdline):
+    stdout_capture = StringIO()
+    stderr_capture = StringIO()
+
+    original_stdout = sys.stdout
+    original_stderr = sys.stderr
+    result_str = ""
+    try:
+        sys.stdout = stdout_capture
+        sys.stderr = stderr_capture
+
+        exec_command(cmdline)
+        result_str = stdout_capture.getvalue() + stderr_capture.getvalue()
+    except Exception as e:
+        print(e)
+    finally:
+        sys.stdout = original_stdout
+        sys.stderr = original_stderr
+        
+    return result_str
+
+
 def get_crash_command_output(cmd_str):
     result_str = ""
     try:
         result_str = "crash> sys\n" +\
                 exec_crash_command("sys").rstrip() +\
                 "\ncrash> " + cmd_str + "\n" +\
-                exec_crash_command(cmd_str).rstrip()
+                my_exec_command(cmd_str).rstrip()
     except Exception as e:
         result_str = "crash> " + cmd_str + "\nERROR: " + repr(e)
 
