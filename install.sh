@@ -39,7 +39,11 @@ fi
 # Set the extention code path in .bash_profile
 echo -n "Setting the extention code path in .bash_profile ..."
 INSTALL_PATH=`echo "$(cd "$(dirname "$0")"; pwd)/source"`
-echo "export PYKDUMPPATH=$INSTALL_PATH:\$PYKDUMPPATH" >> ~/.bash_profile
+PLIB=$(python3 -c 'import sys; print(":".join(sys.path).strip())')
+if (( $? != 0 )); then
+	PLIB=""
+fi
+echo "export PYKDUMPPATH=$INSTALL_PATH:\$PYKDUMPPATH:$PLIB" >> ~/.bash_profile
 echo " [DONE]"
 
 # Make it load the registeration code during crash start
