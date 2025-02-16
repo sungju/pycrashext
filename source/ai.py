@@ -12,6 +12,7 @@ from LinuxDump import Tasks
 import sys
 import operator
 import os
+import io
 from os.path import expanduser
 import time
 import base64
@@ -83,25 +84,26 @@ def is_command_exist(name):
 
 
 def my_exec_command(cmdline):
-    stdout_capture = StringIO()
-    stderr_capture = StringIO()
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
 
-    original_stdout = sys.stdout
-    original_stderr = sys.stderr
-    result_str = ""
+    orig_stdout = sys.stdout
+    orig_stderr = sys.stderr
+
+    sys.stdout = stdout_capture
+    sys.stderr = stderr_capture
+
     try:
-        sys.stdout = stdout_capture
-        sys.stderr = stderr_capture
-
         exec_command(cmdline)
-        result_str = stdout_capture.getvalue() + stderr_capture.getvalue()
     except Exception as e:
         print(e)
     finally:
-        sys.stdout = original_stdout
-        sys.stderr = original_stderr
-        
-    return result_str
+        sys.stdout = orig_stdout
+        sys.stderr = orig_stderr
+
+    result = stdout_capture.getvalue()
+
+    return result
 
 
 def get_crash_command_output(cmd_str):
