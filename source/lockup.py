@@ -250,7 +250,8 @@ def lockup_display(reverse_sort, show_tasks, options):
                 rq.curr, rq.curr.comm,
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
         if options.details:
-            task_time = exec_crash_command("ps -m 0x%x" % (rq.curr)).splitlines()[0]
+            task_pid = rq.curr
+            task_time = exec_crash_command("ps -m 0x%x" % (task_pid)).splitlines()[0]
             task_time = task_time.split("]")[0][1:]
             days_str, time_str = task_time.split()
             dto = datetime.strptime(time_str, "%H:%M:%S.%f")
