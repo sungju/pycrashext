@@ -5,6 +5,7 @@ from pykdump.API import *
 
 from LinuxDump.fs import *
 from LinuxDump import Dev
+from LinuxDump.block import *
 
 import sys
 
@@ -143,6 +144,27 @@ def show_iotlb(options):
             print("io_tlb_list[%d] = %d" % (i, io_tlb_list[i]))
 
 
+def show_requests(options):
+    filter = ""
+    for rq in get_all_request_queues(filter):
+        for request in get_queue_requests(rq):
+            dev_name = rq_names[rq]
+            try:
+                hd_struct = request.part
+                dev_name = hd_struct.__dev.kobj.name
+            except:
+                pass
+
+            reqinfo = request._reqinfo_
+            alloc_time = "%.3f" % reqinfo.rq_alloc
+            try:
+                if reqinfo.rq_alloc < 0:
+                    alloc_time = "%.3f sec ago" % (-reqinfo.rq_alloc)
+            except:
+                pass
+
+            print("0x%x %7s %5s  allocated  %s" % (request, reqinfo.state, dev_name, alloc_time))
+
 
 def devinfo():
     op = OptionParser()
@@ -166,6 +188,10 @@ def devinfo():
                   action="store_true",
                   help="Show IOTLB data")
 
+    op.add_option("-q", "--requests", dest="show_requests", default=False,
+                  action="store_true",
+                  help="Show requests list")
+
     (o, args) = op.parse_args()
 
     if o.show_block:
@@ -176,6 +202,9 @@ def devinfo():
 
     if o.show_iotlb:
         show_iotlb(o)
+
+    if o.show_requests:
+        show_requests(o)
 
 
 if ( __name__ == '__main__'):
