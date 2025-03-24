@@ -8,6 +8,7 @@ from LinuxDump import Dev
 from LinuxDump.block import *
 
 import sys
+import operator
 
 def decode_devt(dev):
     if (dev >>16):
@@ -146,24 +147,47 @@ def show_iotlb(options):
 
 def show_requests(options):
     filter = ""
+    rq_list_dict = {}
     for rq in get_all_request_queues(filter):
         for request in get_queue_requests(rq):
-            dev_name = rq_names[rq]
-            try:
-                hd_struct = request.part
-                dev_name = hd_struct.__dev.kobj.name
-            except:
-                pass
-
             reqinfo = request._reqinfo_
-            alloc_time = "%.3f" % reqinfo.rq_alloc
-            try:
-                if reqinfo.rq_alloc < 0:
-                    alloc_time = "%.3f sec ago" % (-reqinfo.rq_alloc)
-            except:
-                pass
+            rq_list_dict[request] = reqinfo.rq_alloc
 
-            print("0x%x %7s %5s  allocated  %s" % (request, reqinfo.state, dev_name, alloc_time))
+
+    sorted_rq_list = sorted(rq_list_dict.items(),
+            key=operator.itemgetter(1), reverse=True)
+    for request, _ in sorted_rq_list:
+        rq = request.q
+        reqinfo = request._reqinfo_
+        dev_name = rq_names[rq]
+        try:
+            hd_struct = request.part
+            dev_name = hd_struct.__dev.kobj.name
+        except:
+            pass
+
+        rq_alloc = reqinfo.rq_alloc
+        alloc_time = "%.3f" % rq_alloc
+        try:
+            if rq_alloc < 0:
+                alloc_time = "%.3f sec ago" % (-rq_alloc)
+        except:
+            pass
+
+        if rq_alloc  < -5:
+            if rq_alloc > -10:
+                crashcolor.set_color(crashcolor.GREEN)
+            elif rq_alloc > -20:
+                crashcolor.set_color(crashcolor.MAGENTA)
+            elif rq_alloc > -50:
+                crashcolor.set_color(crashcolor.BLUE)
+            else:
+                crashcolor.set_color(crashcolor.RED)
+        else:
+            crashcolor.set_color(crashcolor.RESET)
+
+        print("0x%x %7s %5s  allocated  %s" % (request, reqinfo.state, dev_name, alloc_time))
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def devinfo():
