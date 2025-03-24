@@ -233,6 +233,8 @@ def lockup_display(reverse_sort, show_tasks, options):
             watchdog_thresh = -1
 
     for rq in rqsorted:
+        if options.compact and rq.curr.comm.startswith("swapper/"):
+            continue
         prio = rq.curr.prio
         if (rq.curr.policy != 0):
             prio = rq.curr.rt_priority
@@ -341,6 +343,12 @@ include/asm-generic/qspinlock_types.h
 
 def lockup():
     op = OptionParser()
+    op.add_option("-c", "--compact", dest="compact", default=0,
+                  action="store_true",
+                  help="Exclude swapper/* from the list")
+    op.add_option("-d", "--details", dest="details", default=0,
+                  action="store_true",
+                  help="show task details")
     op.add_option("-r", "--reverse", dest="reverse_sort", default=0,
                   action="store_true",
                   help="show longest holder at top")
@@ -350,9 +358,6 @@ def lockup():
     op.add_option("-s", "--rt", dest="rt_stat", default=0,
                   action="store_true",
                   help="show RT statistics")
-    op.add_option("-d", "--details", dest="details", default=0,
-                  action="store_true",
-                  help="show task details")
     op.add_option("-q", "--qspinlock", dest="qspinlock", default="",
                   action="store", type="string",
                   help="Shows qspinlock details")
