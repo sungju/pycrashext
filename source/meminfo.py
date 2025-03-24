@@ -2070,7 +2070,8 @@ def show_swap_usage(options):
                           key=operator.itemgetter(1), reverse=True)
 
     count = 0
-    print("%20s  %7s    %10s" % ("COMM", "PID", "SIZE"))
+    print("%s" % ("=" * 46))
+    print("%20s  %7s    %13s" % ("COMM", "PID", "Swap usage"))
     print("%s" % ("-" * 46))
     total_usage = 0
     for task, usage_bytes in sorted_usage:
@@ -2083,6 +2084,8 @@ def show_swap_usage(options):
 #        print("%20s (%7d) : %10s KB" % (task.comm, task.pid, f'{usage_kb:,}'))
         count = count + 1
 
+    if count < len(sorted_usage) - 1:
+        print("\t\t<...>")
     print("%s" % ("=" * 46))
     print("Total usage : %32s" % (get_size_str(total_usage)))
 #    print("Total usage : %29s KB" % (f'{total_usage:,}'))
