@@ -39,6 +39,25 @@ xzr, wzr: The zero registers. Always read as 0 and ignore writes.
 sp: Stack pointer
 pc: Program counter
 
+# Example from edis output
+
+~~~
+store pair
+stp	x29, x30, [sp, #-32]!    ; 0xffff80002c3afde0 0xffff80001039d604
+x29 == 0xffff80002c3afde0
+x30 == 0xffff80001039d604
+sp = sp - 32
+store x29 at sp
+store x30 at sp + 8
+
+mov x29, sp
+Saves stack pointer to x29
+
+store
+str	x19, [sp, #16]    ; 0xffff80002c3afde0
+x19 == 0xffff80002c3afde0 ; store x19 into sp + 16
+~~~
+
 Procedure Call Standard for the Arm 64-bit Architecture
 https://developer.arm.com/docs/ihi0055/latest/procedure-call-standard-for-the-arm-64-bit-architecture
 END_REGISTERS: arm aarch64
