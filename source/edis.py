@@ -329,7 +329,7 @@ def arm_stack_reg_op(words, result_str):
             reg_list.append(actual_addr)
         register_dict["%rbp"] = reg_list
 
-    elif words[2] == "stp" and words[len(words)-1].find("[sp,") >= 0:
+    elif words[2] == "stp" and words[len(words)-2].find("[sp,") >= 0:
         stack_word = words[len(words)-1]
         if stack_word.endswith("]!"):
             # Stack Push
@@ -348,7 +348,7 @@ def arm_stack_reg_op(words, result_str):
             update_sp=False
 
         stack_word = stack_word[1:stack_word.find("]")]
-        offset = get_stack_offset(stack_word)
+        offset = get_stack_offset("," + stack_word)
 
         if update_sp == True:
             stackaddr_list = register_dict["%rsp"]
