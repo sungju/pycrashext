@@ -16,6 +16,18 @@ grep "mpykdump.*.so" ~/.crashrc >/dev/null 2>&1
 if (( $? != 0 ))
 then
   echo "mpykdump64.so needs to be loaded before the script in ~/.crashrc"
+  echo -n "Please provide mpykdump path> "
+  read mpykdump_path
+
+  echo '' >> ~/.crashrc
+  if [ -z $mpykdump_path ] || [ $mpykdump_path == "" ]; then
+	mpykdump_path="/usr/lib64/crash/extensions"
+	echo $mpykdump_path
+  fi
+  echo "mach | grep 'MACHINE TYPE' | tail -n 1 | awk '{ printf \"$mpykdump_path/mpykdump%s.so\n\", \$3}' > $HOME/arch_mpykdump" >> ~/.crashrc
+  echo "sf" >> ~/.crashrc
+  echo "p linux_banner" >> ~/.crashrc
+  echo "extend < $HOME/arch_mpykdump" >> ~/.crashrc
 fi
 
 echo
