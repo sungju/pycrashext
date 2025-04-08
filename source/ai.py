@@ -109,9 +109,13 @@ def my_exec_command(cmdline):
 def get_crash_command_output(cmd_str):
     result_str = ""
     try:
+        '''
         result_str = "crash> sys\n" +\
                 exec_crash_command("sys").rstrip() +\
                 "\ncrash> " + cmd_str + "\n" +\
+                my_exec_command(cmd_str).rstrip()
+        '''
+        result_str = "crash> " + cmd_str + "\n" +\
                 my_exec_command(cmd_str).rstrip()
     except Exception as e:
         result_str = "crash> " + cmd_str + "\nERROR: " + repr(e)
