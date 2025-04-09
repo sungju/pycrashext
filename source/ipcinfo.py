@@ -8,6 +8,7 @@ from __future__ import division
 from pykdump.API import *
 
 import sys
+import operator
 import crashcolor
 
 
@@ -119,14 +120,77 @@ def show_shared_memory(options):
     crashcolor.set_color(crashcolor.RESET)
 
 
+def show_sysv(options):
+    sysv_usage_dict = {}
+    try:
+        pid = ''
+        total_size = 0
+        result_str = ''
+        result_lines = exec_crash_command("foreach vm").splitlines()
+        for line in result_lines:
+            if line.startswith("PID:"):
+                pid = line
+                if total_size > 0:
+                    result_str = result_str + \
+                            ("\tTotal : %s\n" % (bytes_to_str(total_size)))
+                    sysv_usage_dict[result_str] = total_size
+                    result_str = ''
+                    total_size = 0
+
+            if " SYSV" in line:
+                words = line.split()
+                vma = readSU("struct vm_area_struct", int(words[0], 16))
+                file = vma.vm_file
+                if file:
+                    mnt_sb = file.f_path.mnt.mnt_sb
+                    sysv_size = vma.vm_end - vma.vm_start
+                    total_size = total_size + sysv_size
+                    if pid:
+                        result_str = result_str + pid + "\n"
+                        pid = ""
+                    result_str = result_str + \
+                            ("0x%x 0x%x %-12s : %s\n" % \
+								(vma, mnt_sb, words[4], bytes_to_str(sysv_size)))
+
+    except Exception as e:
+        print(e)
+        pass
+
+    sorted_usage = sorted(sysv_usage_dict.items(),
+            key=operator.itemgetter(1), reverse=True)
+
+    print("=" * 70)
+    print("%14s     %14s  %14s  : %-s" % \
+			("[ VMA ]", "[ mnt_sb ]", "[ name ]", "[ size ]"))
+    print("=" * 70)
+    min_number = 10
+    if (options.all):
+        min_number = len(sorted_usage) - 1
+
+    print_count = min(len(sorted_usage) - 1, min_number)
+
+    for i in range(0, print_count):
+        print(sorted_usage[i][0])
+
+    if print_count < len(sorted_usage) - 1:
+        print("\t<...>")
+    print("=" * 70)
+
+
 def ipcinfo():
     op = OptionParser()
+    op.add_option("-a", "--all", dest="all", default=0,
+                  action="store_true",
+                  help="Show all data when the default shows limited data")
     op.add_option("-m", "--memory", dest="show_shared_memory", default=0,
                   action="store_true",
                   help="Show Shared Memory information")
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
+    op.add_option("-s", "--sysv", dest="show_sysv", default=0,
+                  action="store_true",
+                  help="Show SYSV allocations in each tasks")
 
     (o, args) = op.parse_args()
 
@@ -134,6 +198,9 @@ def ipcinfo():
         show_shared_memory(o)
         sys.exit(0)
 
+    if o.show_sysv:
+        show_sysv(o)
+        sys.exit(0)
 
     # when no selection is given
     show_shared_memory(o)
