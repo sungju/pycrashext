@@ -458,6 +458,8 @@ def x86_stack_reg_op(words, result_str):
     elif words[2] == "sub" and words[3].endswith(",%rsp"):
         # sub    $0x40,%rsp
         op_words = words[3].split(",")
+        if "%" in op_words[0]: # Cannot use other register values
+            return result_str + "  ;CAUTION: skipped register sub"
         value_to_sub = int(op_words[0][1:], 16)
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
