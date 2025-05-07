@@ -741,7 +741,7 @@ def get_meminfo():
     if symbol_exists("pcpu_nr_populated") and symbol_exists("pcpu_nr_units"):
         pcpu_nr_populated = readSymbol("pcpu_nr_populated")
         pcpu_nr_units = readSymbol("pcpu_nr_units")
-        meminfo['Percpu'] = int(pcpu_nr_populated * pcpu_nr_units * page_unit / 1024)
+        meminfo['Percpu'] = int(pcpu_nr_populated * pcpu_nr_units * page_unit)
 
     meminfo['HardwareCorrupted'] = get_hardware_corrupted()
 
