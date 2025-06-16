@@ -200,6 +200,7 @@ EM_MN10300 = 89
 EM_OPENRISC = 92
 EM_BLACKFIN = 106
 EM_TI_C6000 = 140
+EM_AARCH64  = 183
 EM_MICROBLAZE = 189
 EM_FRV = 0x5441
 EM_AVR32 = 0x18ad
@@ -212,6 +213,7 @@ EM_CYGNUS_MN10300 = 0xbeef
 
 __AUDIT_ARCH_64BIT = 0x80000000
 __AUDIT_ARCH_LE = 0x40000000
+AUDIT_ARCH_AARCH64 = (EM_AARCH64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
 AUDIT_ARCH_ALPHA = (EM_ALPHA|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
 AUDIT_ARCH_ARM = (EM_ARM|__AUDIT_ARCH_LE)
 AUDIT_ARCH_ARMEB = (EM_ARM)
@@ -246,35 +248,36 @@ AUDIT_ARCH_X86_64 = (EM_X86_64|__AUDIT_ARCH_64BIT|__AUDIT_ARCH_LE)
 
 audit_arch_dict = {
     AUDIT_ARCH_ALPHA : "AUDIT_ARCH_ALPHA",
-    AUDIT_ARCH_ARM : "AUDIT_ARCH_ARM",
+    AUDIT_ARCH_ARM : "arm",
+    AUDIT_ARCH_AARCH64 : "arm64",
     AUDIT_ARCH_ARMEB : "AUDIT_ARCH_ARMEB",
     AUDIT_ARCH_CRIS : "AUDIT_ARCH_CRIS",
     AUDIT_ARCH_FRV : "AUDIT_ARCH_FRV",
     AUDIT_ARCH_H8300 : "AUDIT_ARCH_H8300",
-    AUDIT_ARCH_I386 : "AUDIT_ARCH_I386",
+    AUDIT_ARCH_I386 : "b32",
     AUDIT_ARCH_IA64 : "AUDIT_ARCH_IA64",
     AUDIT_ARCH_M32R : "AUDIT_ARCH_M32R",
     AUDIT_ARCH_M68K : "AUDIT_ARCH_M68K",
     AUDIT_ARCH_MICROBLAZE : "AUDIT_ARCH_MICROBLAZE",
-    AUDIT_ARCH_MIPS : "AUDIT_ARCH_MIPS",
+    AUDIT_ARCH_MIPS : "mips",
     AUDIT_ARCH_MIPSEL : "AUDIT_ARCH_MIPSEL",
-    AUDIT_ARCH_MIPS64 : "AUDIT_ARCH_MIPS64",
+    AUDIT_ARCH_MIPS64 : "mips64",
     AUDIT_ARCH_MIPSEL64 : "AUDIT_ARCH_MIPSEL64",
     AUDIT_ARCH_OPENRISC : "AUDIT_ARCH_OPENRISC",
     AUDIT_ARCH_PARISC : "AUDIT_ARCH_PARISC",
     AUDIT_ARCH_PARISC64 : "AUDIT_ARCH_PARISC64",
-    AUDIT_ARCH_PPC : "AUDIT_ARCH_PPC",
-    AUDIT_ARCH_PPC64 : "AUDIT_ARCH_PPC64",
-    AUDIT_ARCH_PPC64LE : "AUDIT_ARCH_PPC64LE",
-    AUDIT_ARCH_S390 : "AUDIT_ARCH_S390",
-    AUDIT_ARCH_S390X : "AUDIT_ARCH_S390X",
+    AUDIT_ARCH_PPC : "ppc",
+    AUDIT_ARCH_PPC64 : "ppc64",
+    AUDIT_ARCH_PPC64LE : "ppc64le",
+    AUDIT_ARCH_S390 : "s390",
+    AUDIT_ARCH_S390X : "s390x",
     AUDIT_ARCH_SH : "AUDIT_ARCH_SH",
     AUDIT_ARCH_SHEL : "AUDIT_ARCH_SHEL",
     AUDIT_ARCH_SH64 : "AUDIT_ARCH_SH64",
     AUDIT_ARCH_SHEL64 : "AUDIT_ARCH_SHEL64",
     AUDIT_ARCH_SPARC : "AUDIT_ARCH_SPARC",
     AUDIT_ARCH_SPARC64 : "AUDIT_ARCH_SPARC64",
-    AUDIT_ARCH_X86_64 : "AUDIT_ARCH_X86_64",
+    AUDIT_ARCH_X86_64 : "b64",
 }
 
 def get_audit_arch_str(arch_type):
@@ -338,28 +341,66 @@ def get_audit_action_str(action):
     return  "%d" % action
 
 
-def show_audit_fields_details(audit_entry):
+AUDIT_PERM_EXEC  = 1
+AUDIT_PERM_WRITE = 2
+AUDIT_PERM_READ  = 4
+AUDIT_PERM_ATTR  = 8
+
+audit_perm_dict = {
+    AUDIT_PERM_EXEC  : "e",
+    AUDIT_PERM_WRITE : "w",
+    AUDIT_PERM_READ  : "r",
+    AUDIT_PERM_ATTR  : "a",
+}
+
+
+def get_audit_perm_str(val):
+    result = ""
+    for key in audit_perm_dict:
+        if (key & val) == key:
+            result = result + audit_perm_dict[key]
+
+    if result ==  "":
+        result = "%s" % val
+
+    return result
+
+
+def get_audit_val_str(ftype, fval):
+    val_str = ""
+    if ftype == AUDIT_ARCH:
+        val_str = "-F %s" % (get_audit_arch_str(fval))
+    elif ftype == AUDIT_PERM:
+        val_str = "-p %s" % (get_audit_perm_str(fval))
+    else:
+        pass
+        #val_str = "%d" % (fval if int(fval) < 4294967283 else -1)
+
+    return val_str
+
+
+def get_audit_fields_details(audit_entry):
     rule = audit_entry.rule
+    result_str = ""
 
     for i in range(0, rule.field_count):
         field = rule.fields[i]
-        if field.type == AUDIT_ARCH:
-            val_str = get_audit_arch_str(field.val)
-        else:
-            val_str = "%d" % (field.val if int(field.val) < 4294967283 else -1)
+        result_str = result_str + get_audit_val_str(field.type, field.val)
 
-        set_color_for_particular_types(field.type)
-        print("\ttype = %s, val = %s, op = '%s'" %
-              (get_audit_type_str(field.type),
-               val_str,
-               get_audit_op_str(field.op)))
-        crashcolor.set_color(crashcolor.RESET)
+    return result_str
 
 
-def show_audit_watch_details(audit_entry):
-    crashcolor.set_color(crashcolor.GREEN)
-    print("\twatch path: %s" % (audit_entry.rule.watch.path))
-    crashcolor.set_color(crashcolor.RESET)
+def get_mask_str(masks):
+    result_str = ""
+    idx = 0
+    for mask in masks:
+        if mask != 4294967295 and mask != 0: # -1 in 32bit
+            for i in range(0, 31):
+            print(mask)
+
+        idx = idx + 1
+
+    return result_str
 
 
 def show_audit_rules(options):
@@ -371,14 +412,25 @@ def show_audit_rules(options):
         next_addr = audit_rules.next
         while next_addr != audit_rules:
             audit_entry = readSU("struct audit_entry", next_addr - offset)
-            print("0x%x %s (%s,%s)" %\
-                  (audit_entry, audit_entry.rule.filterkey,
-                   get_audit_flag_str(audit_entry.rule.flags & ~AUDIT_FILTER_PREPEND),
-                  get_audit_action_str(audit_entry.rule.action)))
-            if audit_entry.rule.field_count > 0:
-                show_audit_fields_details(audit_entry)
+            result_str = ""
             if audit_entry.rule.watch:
-                show_audit_watch_details(audit_entry)
+                result_str = "-w %s" % audit_entry.rule.watch.path
+            flag_str = get_audit_flag_str(audit_entry.rule.flags & ~AUDIT_FILTER_PREPEND)
+            action_str = get_audit_action_str(audit_entry.rule.action)
+            listnr_str = get_audit_flag_str(audit_entry.rule.listnr)
+            if action_str != "":
+                if listnr_str != "":
+                    listnr_str = "," + listnr_str + get_mask_str(audit_entry.rule.mask)
+                result_str = result_str + (" -a %s" % (action_str + listnr_str))
+
+            if audit_entry.rule.field_count > 0:
+                result_str = result_str + (" %s" % get_audit_fields_details(audit_entry))
+            filter_key = audit_entry.rule.filterkey
+            if filter_key != "":
+                result_str = result_str + (" -k %s" % filter_key)
+
+
+            print("struct audit_entry 0x%x\n\t%s" % (audit_entry, result_str))
             next_addr = audit_entry.rule.list.next
 
 
