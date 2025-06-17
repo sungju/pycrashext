@@ -1,21 +1,12 @@
 """
  Written by Daniel Sungju Kwon
 """
-
-from __future__ import print_function
-from __future__ import division
-
-from pykdump.API import *
-
-from LinuxDump import Tasks
-
 import sys
 import ntpath
 import operator
 import math
 
-import crashhelper
-import meminfo
+import rules_helper as rh
 
 
 def is_major():
@@ -40,7 +31,7 @@ def add_rule(sysinfo):
 def run_rule(basic_data):
     try:
         if basic_data == None:
-            log_string = exec_crash_command("log")
+            log_string = rh.get_data(basic_data, "log")
         else:
             log_string = basic_data["log_str"]
         migration_entry_wait_on_locked = log_string.find("migration_entry_wait_on_locked+0x")

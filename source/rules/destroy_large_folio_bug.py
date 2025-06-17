@@ -8,21 +8,20 @@ import math
 
 import rules_helper as rh
 
-
 def is_major():
     return True
 
 
 def description():
-    return "RHEL 8.4: kernel crashed due to list_del corruption with LIST_POISON2"
+    return "RHEL 9.6: list corruption detected during large folio migration"
 
 
 def add_rule(sysinfo):
     if sysinfo is None or "RELEASE" not in sysinfo:
         return True
-    
+
     release = sysinfo["RELEASE"]
-    if ("el8") in release:
+    if ("el9") in release:
         return True
 
     return False
@@ -34,24 +33,24 @@ def run_rule(basic_data):
             log_string = rh.get_data(basic_data, "log")
         else:
             log_string = basic_data["log_str"]
-        pos_list_corruption = log_string.find("list_del corruption,")
-        pos_css_release_work_fn = log_string.find("css_release_work_fn+0x")
 
-        if pos_list_corruption < 0 or pos_css_release_work_fn < 0:
+        large_rmappable_string = log_string.find("__folio_undo_large_rmappable+0x")
+        list_corruption_string = log_string.find("kernel BUG at lib/list_debug")
+
+        if list_corruption_string < 0 or large_rmappable_string < 0:
             return None
 
-        pos_list_corruption = log_string.rfind('[', 0, pos_list_corruption)
+        crash_msg = log_string.rfind('[', 0, list_corruption_string)
 
         result_dict = {}
-        result_dict["TITLE"] = "list_del corruption bug detected by %s" % \
+        result_dict["TITLE"] = "crashed with list corruption during large folio migration"\
+                               " bug\n\tdetected by %s" % \
                                 ntpath.basename(__file__)
-        result_dict["MSG"] = log_string[pos_list_corruption:]
-        result_dict["KCS_TITLE"] = "RHEL 8.4: kernel crashed due to list_del corruption with LIST_POISON2"
-        result_dict["KCS_URL"] = "https://access.redhat.com/solutions/6094611"
+        result_dict["MSG"] = log_string[crash_msg:]
+        result_dict["KCS_TITLE"] = "Kernel panic with list corruption detected during large folio migration"
+        result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7121871"
         result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS"
-        result_dict["KERNELS"] = { "kernel-4.18.0-305.12.1.el8_4",
-                                  "kernel-4.18.0-348.el8" }
-
+        result_dict["KERNELS"] = { "kernel-5.14.0-570.22.1.el9_6", }
 
         return [result_dict]
     except Exception as e:
@@ -60,11 +59,11 @@ def run_rule(basic_data):
 
 
 
-def css_release_work_fn_bug():
+def destroy_large_folio_bug():
     import pprint
     pp = pprint.PrettyPrinter(indent=0, width=180)
     pp.pprint(run_rule(None))
 
 
 if ( __name__ == '__main__'):
-    css_release_work_fn_bug()
+    destroy_large_folio_bug()

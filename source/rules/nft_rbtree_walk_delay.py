@@ -1,21 +1,12 @@
 """
  Written by Daniel Sungju Kwon
 """
-
-from __future__ import print_function
-from __future__ import division
-
-from pykdump.API import *
-
-from LinuxDump import Tasks
-
 import sys
 import ntpath
 import operator
 import math
 
-import crashhelper
-import meminfo
+import rules_helper as rh
 
 
 def is_major():

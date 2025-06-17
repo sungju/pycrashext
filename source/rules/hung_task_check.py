@@ -1,20 +1,12 @@
 """
  Written by Daniel Sungju Kwon
 """
-
-from __future__ import print_function
-from __future__ import division
-
-from pykdump.API import *
-
-from LinuxDump import Tasks
-
 import sys
 import ntpath
 import operator
 import math
 
-import crashhelper
+import rules_helper as rh
 
 
 def is_major():
@@ -56,8 +48,8 @@ def check_system_hang(task_list):
     time = int(days) * 24 * 60 * 60 + int(words[0]) * 60 * 60 + \
             int(words[1]) * 60 + math.ceil(float(words[2]))
 
-    hung_task_timeout_secs = readSymbol("sysctl_hung_task_timeout_secs")
-    hung_task_panic = readSymbol("sysctl_hung_task_panic")
+    hung_task_timeout_secs = rh.get_symbol("sysctl_hung_task_timeout_secs")
+    hung_task_panic = rh.get_symbol("sysctl_hung_task_panic")
 
     if time >= hung_task_timeout_secs:
         return True
@@ -66,7 +58,7 @@ def check_system_hang(task_list):
 
 
 def run_rule(basic_data):
-    result = find_uninterruptible_tasks(exec_crash_command("ps -m"))
+    result = find_uninterruptible_tasks(rh.get_data(basic_data, "ps -m"))
     system_hung = check_system_hang(result)
     if system_hung == False:
         return None

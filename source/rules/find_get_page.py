@@ -1,17 +1,11 @@
 """
  Written by Daniel Sungju Kwon
 """
-
-from __future__ import print_function
-from __future__ import division
-
-from pykdump.API import *
-
-from LinuxDump import Tasks
-
 import sys
 import ntpath
 import operator
+
+import rules_helper as rh
 
 
 def is_major():
@@ -33,7 +27,7 @@ def add_rule(sysinfo):
 
 def run_rule(basic_data):
     if basic_data == None:
-        result = exec_crash_command("log")
+        result = rh.get_data(basic_data, "log")
     else:
         result = basic_data["log_str"]
 
