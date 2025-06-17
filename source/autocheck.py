@@ -14,7 +14,7 @@ import signal
 
 import crashcolor
 
-modules = []
+modules = {}
 sysinfo = {}
 
 
@@ -41,6 +41,7 @@ def load_rules():
     cmd_path_list = os.environ["PYKDUMPPATH"]
     path_list = cmd_path_list.split(':')
     source_path = ""
+    modules = {}
     for path in path_list:
         try:
             if os.path.exists(path + "/rules"):
@@ -60,7 +61,7 @@ def show_rules_list():
         return
 
     print("-" * 75)
-    for module in modules:
+    for module in modules.values():
         crashcolor.set_color(crashcolor.BLUE)
         print("[%s]" % (module.__name__), end='')
         if module.is_major():
@@ -94,7 +95,7 @@ def load_rules_in_a_path(source_path):
             try:
                 new_module = importlib.import_module(rule, package="rules")
                 if new_module.add_rule(sysinfo) == True:
-                   modules.append(new_module)
+                   modules[new_module.__name__] = new_module
             except Exception as e:
                 print("Error in adding rule %s" % (rule))
                 print(e)
@@ -162,7 +163,7 @@ def run_rules(options):
         "bt_a"    : result_bt_list,
     }
 
-    for module in modules:
+    for module in modules.values():
         try:
             if not options.do_all and not module.is_major():
                 continue
@@ -188,7 +189,7 @@ def run_rules(options):
 def reload_rules():
     global modules
 
-    for module in modules:
+    for module in modules.values():
         try:
             print("Reloading [%s]" % (module.__name__), end='')
             module = importlib.reload(module)
