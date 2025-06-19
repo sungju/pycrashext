@@ -219,23 +219,61 @@ def show_cpu_capability(options):
         crashcolor.set_color(crashcolor.RESET)
 
 
+def show_cpuidle_state_table(options):
+    try:
+        addr = Addr(readSymbol("cpuidle_state_table"))
+        cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
+        cpu_state_name = {}
+        idx = 0
+        for cpuidle_state in cpuidle_state_table:
+            cpu_state_name[idx] = cpuidle_state
+            idx = idx + 1
+
+        cpuidle_devices = percpu.get_cpu_var("cpuidle_devices")
+        cpu_idx = 0
+        for addr in cpuidle_devices:
+            cpuidle_device = readSU("struct cpuidle_device", addr)
+            print("CPU %d:" % (cpu_idx))
+            state_idx = 0
+            for state_usage in cpuidle_device.states_usage:
+                if state_usage.usage > 0:
+                    print("\t%10s : %d" % (cpu_state_name[state_idx].name, state_usage.usage))
+                state_idx = state_idx + 1
+                if state_idx >= idx:
+                    break
+            cpu_idx = cpu_idx + 1
+    except Exception as e:
+        print("Error : ", e)
+        pass
+
+def show_cstate(options):
+    if symbol_exists("cpuidle_state_table"):
+        show_cpuidle_state_table(options)
+    else:
+        print("Cannot tell you")
+
+
+
 def cpuinfo():
     op = OptionParser()
+    op.add_option("-c", "--capability", dest="capability", default=0,
+                  action="store_true",
+                  help="Show CPU capability")
+    op.add_option("-d", "--driver", dest="driver", default=0,
+                  action="store_true",
+                  help="Show CPU idle driver")
     op.add_option("-f", "--cpufreq", dest="cpufreq", default=0,
                   action="store_true",
                   help="CPU frequency details")
     op.add_option("-i", "--cpuid", dest="cpuid", default=0,
                   action="store_true",
                   help="Show CPU's physical and core ID")
+    op.add_option("-s", "--cstate", dest="cstate", default=0,
+                  action="store_true",
+                  help="Show CPU c-state")
     op.add_option("-t", "--tlb", dest="tlb", default=0,
                   action="store_true",
                   help="Show CPU tlb state")
-    op.add_option("-d", "--driver", dest="driver", default=0,
-                  action="store_true",
-                  help="Show CPU idle driver")
-    op.add_option("-c", "--capability", dest="capability", default=0,
-                  action="store_true",
-                  help="Show CPU capability")
 
     (o, args) = op.parse_args()
 
@@ -258,6 +296,10 @@ def cpuinfo():
 
     if (o.capability):
         show_cpu_capability(o)
+        sys.exit(0)
+
+    if (o.cstate):
+        show_cstate(o)
         sys.exit(0)
 
     # default action
