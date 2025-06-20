@@ -221,13 +221,22 @@ def show_cpu_capability(options):
 
 def show_cpuidle_state_table(options):
     try:
-        addr = Addr(readSymbol("cpuidle_state_table"))
-        cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
-        cpu_state_name = {}
         idx = 0
-        for cpuidle_state in cpuidle_state_table:
-            cpu_state_name[idx] = cpuidle_state
-            idx = idx + 1
+        cpu_state_name = {}
+        try:
+            cpuidle_driver = readSymbol("cpuidle_curr_driver")
+            idx = 0
+            for cpuidle_state in cpuidle_driver.states:
+                cpu_state_name[idx] = cpuidle_state
+                idx = idx + 1
+            #addr = Addr(readSymbol("cpuidle_state_table"))
+            #cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
+            #for cpuidle_state in cpuidle_state_table:
+            #    cpu_state_name[idx] = cpuidle_state
+            #    idx = idx + 1
+            #cpu_state_name[idx].name
+        except:
+            pass
 
         cpuidle_devices = percpu.get_cpu_var("cpuidle_devices")
         cpu_idx = 0
@@ -237,7 +246,12 @@ def show_cpuidle_state_table(options):
             state_idx = 0
             for state_usage in cpuidle_device.states_usage:
                 if state_usage.usage > 0:
-                    print("\t%10s : %d" % (cpu_state_name[state_idx].name, state_usage.usage))
+                    state_name = ""
+                    try:
+                        state_name = cpu_state_name[state_idx].name
+                    except:
+                        pass
+                    print("\t%10s : %d" % (state_name, state_usage.usage))
                 state_idx = state_idx + 1
                 if state_idx >= idx:
                     break
