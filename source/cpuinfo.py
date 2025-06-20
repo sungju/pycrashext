@@ -226,26 +226,32 @@ def show_cpuidle_state_table(options):
         try:
             cpuidle_driver = readSymbol("cpuidle_curr_driver")
             idx = 0
+            print("CPU idle driver : %s" % (cpuidle_driver.name))
+            if options.verbose:
+                print(cpuidle_driver)
             for cpuidle_state in cpuidle_driver.states:
                 cpu_state_name[idx] = cpuidle_state
+                if options.verbose:
+                    print(cpuidle_state)
                 idx = idx + 1
-            #addr = Addr(readSymbol("cpuidle_state_table"))
-            #cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
-            #for cpuidle_state in cpuidle_state_table:
-            #    cpu_state_name[idx] = cpuidle_state
-            #    idx = idx + 1
-            #cpu_state_name[idx].name
         except:
-            pass
+            idx = 0
+            addr = Addr(readSymbol("cpuidle_state_table"))
+            cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
+            for cpuidle_state in cpuidle_state_table:
+                cpu_state_name[idx] = cpuidle_state
+                idx = idx + 1
 
         cpuidle_devices = percpu.get_cpu_var("cpuidle_devices")
         cpu_idx = 0
         for addr in cpuidle_devices:
             cpuidle_device = readSU("struct cpuidle_device", addr)
             print("CPU %d:" % (cpu_idx))
+            if options.verbose:
+                print(cpuidle_device)
             state_idx = 0
             for state_usage in cpuidle_device.states_usage:
-                if state_usage.usage > 0:
+                if state_usage.disable != 0:
                     state_name = ""
                     try:
                         state_name = cpu_state_name[state_idx].name
@@ -288,6 +294,9 @@ def cpuinfo():
     op.add_option("-t", "--tlb", dest="tlb", default=0,
                   action="store_true",
                   help="Show CPU tlb state")
+    op.add_option("-v", "--verbose", dest="verbose", default=0,
+                  action="store_true",
+                  help="Show more information")
 
     (o, args) = op.parse_args()
 
