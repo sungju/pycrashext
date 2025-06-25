@@ -1242,6 +1242,9 @@ def show_percpu(options):
     if func:
         print("\tTotal = %d" % (total_count))
 
+    print("\n\tnotes) You can use the below instead")
+    print("\tcrash> ptov %s:a\n" % (options.percpu))
+
 
 
 def show_vm_details(options, words):
