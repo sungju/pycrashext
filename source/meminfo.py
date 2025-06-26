@@ -1610,9 +1610,10 @@ def print_slab_layout(kmem_cache, offset):
 
     track_at = readSU("struct track", 0)
     if ((kmem_cache.flags & SLAB_STORE_USER) == SLAB_STORE_USER):
-        t_line = t_line + blue_str + ("%14s" % "Track size(at)") + reset_str + "|"
-        g_line = g_line + "-" * 14 + "+"
-        d_line = d_line + blue_str + ("%14s" % ("%d(%d)" % (len(track_at), offset))) + reset_str + "|"
+        track_len = len(track_at)
+        t_line = t_line + blue_str + ("%16s" % "Track size(at)") + reset_str + "|"
+        g_line = g_line + "-" * 16 + "+"
+        d_line = d_line + blue_str + ("%16s" % ("%d(%d)=%d" % (track_len, offset, track_len*2))) + reset_str + "|"
 
     print("%4s" % "", end="")
     print(kmem_cache)
