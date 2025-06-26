@@ -1532,6 +1532,8 @@ free_func_list = {}
 free_pid_list = {}
 free_count = 0
 
+calltrace_list= {}
+
 def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
     global alloc_pid_list
@@ -1540,6 +1542,9 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global free_func_list
     global free_pid_list
     global free_count
+
+    global calltrace_list
+
 
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
@@ -1566,6 +1571,11 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
                 free_pid_list[(track.addr, track.pid)] = 0
             free_pid_list[(track.addr, track.pid)] =\
                             free_pid_list[(track.addr, track.pid)] + 1
+
+        hex_str = ','.join(f'0x{x:x}' for x in track.addrs)
+        if hex_str not in calltrace_list:
+            calltrace_list[hex_str] = 0
+        calltrace_list[hex_str] = calltrace_list[hex_str] + 1
 
         if options.all:
             if alloc_item:
@@ -1670,6 +1680,7 @@ def show_slub_debug_user_all(options):
 def show_slub_debug_user(options):
     global alloc_func_list
     global alloc_count
+    global calltrace_list
 
     lines = exec_crash_command("kmem -s %s" % options.user_alloc)
     if len(lines) == 0:
@@ -1719,14 +1730,18 @@ def show_slub_debug_user(options):
         if len(words) < 5 or words[0] == "SLAB":
             continue
 
-        if full_mode:
-            show_alloc_track(options, kmem_cache, int(words[1], 16),
-                    int(words[0], 16), offset)
-        elif partial_mode:
-            show_partial_alloc_track(options, kmem_cache,
-                    int(words[0], 16), offset)
+        try:
+            if full_mode:
+                show_alloc_track(options, kmem_cache, int(words[1], 16),
+                        int(words[0], 16), offset)
+            elif partial_mode:
+                show_partial_alloc_track(options, kmem_cache,
+                        int(words[0], 16), offset)
+        except Exception as e:
+            print(e)
+            break
 
-        if alloc_count > 0 and alloc_count > options.maxcount:
+        if options.maxcount > 0 and alloc_count > options.maxcount:
             break
 
 
@@ -1760,8 +1775,35 @@ def show_slub_debug_user(options):
     print("Caution: This size doesn't include data structure and padding, etc")
     crashcolor.set_color(crashcolor.RESET)
 
-    if options.details:
-        show_alloc_pid_list(options)
+    if not options.details:
+        return
+
+    # Some further details
+    show_alloc_pid_list(options)
+
+    print("\nFrequence of calltraces:")
+    print(  "========================")
+    sorted_calltrace_list = sorted(calltrace_list.items(),
+                          key=operator.itemgetter(1), reverse=True)
+    print_count = 0
+    for calltrace, count in sorted_calltrace_list:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("%d times:" % (count))
+        crashcolor.set_color(crashcolor.RESET)
+        funcs = calltrace.split(",")
+        for func in funcs:
+            sym_name = get_function_name(int(func, 16))
+            if sym_name != None:
+                print(sym_name)
+        print()
+        print_count = print_count + 1
+        if not options.all and print_count > 9:
+            if len(sorted_calltrace_list) > 10:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_calltrace_list) - 10,
+                        " items > ..."))
+            break
 
 
 def get_function_name(addr):
