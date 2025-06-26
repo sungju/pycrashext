@@ -1074,12 +1074,43 @@ def show_slabs_in_node(kc_node):
 
 
 def show_slabdetail(options):
+    N_ONLINE=1
+    node_states = readSymbol("node_states")
+    node_list = []
+    for i in range(16):
+        for b in range(64):
+            if (node_states[N_ONLINE].bits[i] >> b) & 1:
+                node_list.append(i *64 + b)
+
+
     lines = exec_crash_command("kmem -s %s" % options.slabdetail)
     if len(lines) == 0:
         return
 
     words = lines.splitlines()[1].split()
     kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
+
+    total_slabs = 0
+    total_partial = 0
+    for node in node_list:
+        kmem_cache_node = kmem_cache.node[node]
+        nr_slabs = kmem_cache_node.nr_slabs.counter
+        nr_partial = kmem_cache_node.nr_partial
+        print(nr_slabs, nr_partial)
+        total_slabs = total_slabs + nr_slabs
+        total_partial = total_partial + nr_partial
+
+    print(total_slabs)
+    print(total_partial)
+
+    return
+
+    #
+    # Below is useless unless slub_debug=U is enabled
+    # and in that case, meminfo -U is a better option
+    # to check slab usage.
+    # So, it is here just as I don't want to delete the
+    # code for reference.
 
     if kmem_cache.offset >= kmem_cache.object_size:
         offset = kmem_cache.offset + getSizeOf("long")
