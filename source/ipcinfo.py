@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 
 import sys
@@ -18,11 +15,11 @@ page_size = 4096
 def bytes_to_str(num_bytes):
     num_str = ""
     if num_bytes > (1024*1024*1024):
-        num_str = "%d GB" % (num_bytes / 1024/1024/1024)
+        num_str = "%d GB" % (num_bytes // 1024//1024//1024)
     elif num_bytes > (1024*1024):
-        num_str = "%d MB" % (num_bytes / 1024/1024)
+        num_str = "%d MB" % (num_bytes // 1024//1024)
     elif num_bytes > 1024:
-        num_str = "%d KB" % (num_bytes / 1024)
+        num_str = "%d KB" % (num_bytes // 1024)
     else:
         num_str = "%d Bytes" % (num_bytes)
 

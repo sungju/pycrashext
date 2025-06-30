@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 
 from LinuxDump import Tasks
@@ -534,11 +531,11 @@ def si_mem_available():
     available = global_page_state(NR_FREE_PAGES) - totalreserve_pages
 
     pagecache = pages[LRU_ACTIVE_FILE] + pages[LRU_INACTIVE_FILE]
-    pagecache = pagecache - min(pagecache / 2, wmark_low)
+    pagecache = pagecache - min(pagecache // 2, wmark_low)
     available = available + pagecache
 
     available = available + global_page_state(NR_SLAB_RECLAIMABLE) - \
-            min(global_page_state(NR_SLAB_RECLAIMABLE) / 2, wmark_low)
+            min(global_page_state(NR_SLAB_RECLAIMABLE) // 2, wmark_low)
 
     if (available < 0):
         available = 0
@@ -595,7 +592,7 @@ def vm_commit_limit():
         allowed = sysctl_overcommit_kbytes >> (get_page_shift() - 10)
     else:
         allowed = ((totalram_pages - hugetlb_total_pages()) *\
-                   sysctl_overcommit_ratio / 100)
+                   sysctl_overcommit_ratio // 100)
 
     allowed += total_swap_pages
 
@@ -636,7 +633,7 @@ def get_meminfo():
     meminfo={}
 
     resultlines = exec_crash_command("kmem -i").splitlines()
-    page_unit = page_size / 1024
+    page_unit = page_size // 1024
     meminfo['MemFree'] = 0
     for line in resultlines:
         words = line.split()
@@ -966,7 +963,7 @@ def show_slabtop(options):
         if options.compact:
             # There were case that SLABS * SSIZE shows wrongly
             # So, let's do it with objsize * total
-            total_used = (int(result_line[1]) * int(result_line[3])) / 1024
+            total_used = (int(result_line[1]) * int(result_line[3])) // 1024
         else:
             total_used = int(result_line[4]) * int(result_line[5])
         slab_list[result_line[0]] = total_used
@@ -2294,7 +2291,7 @@ def __nr_to_section(nr):
         section_root_mask = sections_per_root - 1
 
 
-        addr_size = int(int(get_machine_symbol("bits")) / 8)
+        addr_size = int(get_machine_symbol("bits")) // 8
         mem_section_addr = mem_section_addr + (root * addr_size)
         mem_section_addr = readULong(mem_section_addr)
         mem_section_array = readSUArray("struct mem_section", mem_section_addr, addr_size)

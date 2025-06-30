@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 
 from LinuxDump import Tasks
@@ -135,7 +132,7 @@ def get_time_from_task(task_struct):
     try:
         start_time = task_struct.start_time.tv_sec
     except:
-        start_time = task_struct.start_time / 1000000000
+        start_time = task_struct.start_time // 1000000000
 
     stime = start_time
     if timekeeper == None:
@@ -427,7 +424,7 @@ def get_policy_sched_deadline(task_struct):
             (sched_dl.dl_runtime / sched_dl.dl_period) * 100
 
     return "runtime = %d us, period = %d us, deadline = %d us" % \
-            (sched_dl.dl_runtime / 1000, sched_dl.dl_period / 1000, sched_dl.dl_deadline / 1000)
+            (sched_dl.dl_runtime // 1000, sched_dl.dl_period // 1000, sched_dl.dl_deadline // 1000)
 
 
 def get_policy_details(task_struct):

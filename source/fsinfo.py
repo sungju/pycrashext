@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
@@ -923,11 +920,11 @@ def show_extX_details(sb, fs_type):
         print("%-30s %s" % ("Filesystem OS type:", get_creator_os(extX_super_block.s_creator_os)))
         print("%-30s %d" % ("Inode count:", extX_super_block.s_inodes_count))
         print("%-30s %d (%d KBytes)" % ("Block count:", s_blocks_count,
-                                        (s_blocks_count * s_block_size) / 1024))
+                                        (s_blocks_count * s_block_size) // 1024))
         print("%-30s %d (%d KBytes)" % ("Reserved block count:", s_r_blocks_count,
-                                        (s_r_blocks_count * s_block_size) / 1024))
+                                        (s_r_blocks_count * s_block_size) // 1024))
         print("%-30s %d (%d Kbytes)" % ("Free blocks:", s_free_blocks_count,
-                                        (s_free_blocks_count * s_block_size) / 1024))
+                                        (s_free_blocks_count * s_block_size) // 1024))
         print("%-30s %d" % ("Free inodes:", extX_super_block.s_free_inodes_count))
         print("%-30s %d" % ("First block:", extX_super_block.s_first_data_block))
         print("%-30s %d" % ("Block size:", s_block_size))
@@ -1190,7 +1187,7 @@ def show_task_swap_usage(task, options):
     try:
         swap_usage = swap_count.counter
     except:
-        swap_usage = long(swap_count)
+        swap_usage = int(swap_count)
 
     if swap_usage > 0:
         print("%10d %15d %s" % (task.pid, swap_usage, task.comm))

@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 from LinuxDump.inet import *
 from LinuxDump.inet import proto, netdevice
@@ -76,7 +73,7 @@ def show_nft(options):
             else:
                 rbtree_count = 0
 
-            rbcount_kdigit = len("%d" % (rbtree_count / 100)) - 1
+            rbcount_kdigit = len("%d" % (rbtree_count // 100)) - 1
 
             print("\t%s %s %8d %s" % (nft_set, nft_set.name, rbtree_count, "#" * rbcount_kdigit))
 

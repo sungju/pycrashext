@@ -2,9 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 
 import sys
@@ -48,7 +45,7 @@ def show_smi_list(show_details):
     for smi_info  in readSUListFromHead(pa,
                                         'link',
                                         'struct smi_info'):
-        print ("0x%x 0x%x 0x%x 0x%x (%s)" % (long(smi_info),
+        print ("0x%x 0x%x 0x%x 0x%x (%s)" % (int(smi_info),
                                              smi_info.intf,
                                              smi_info.si_sm,
                                              smi_info.handlers,

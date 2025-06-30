@@ -2,8 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
-
 from pykdump.API import *
 from LinuxDump.trees import *
 
@@ -37,12 +35,12 @@ def check_global_symbols():
         pass
 
 def cpu_cgroup_subsys_detail(task_group, cgroup, subsys, idx):
-    cfs_period_us = task_group.cfs_bandwidth.period.tv64 / 1000
-    cfs_quota_us = task_group.cfs_bandwidth.quota / 1000
+    cfs_period_us = task_group.cfs_bandwidth.period.tv64 // 1000
+    cfs_quota_us = task_group.cfs_bandwidth.quota // 1000
     throttled_cfs_rq = task_group.cfs_bandwidth.throttled_cfs_rq
     throttled_time = task_group.cfs_bandwidth.throttled_time
     if throttled_time > 0:
-        throttled_time = throttled_time / 1000000000
+        throttled_time = throttled_time // 1000000000
     pre_str = "\t"
     for i in range(0, idx):
         pre_str = pre_str + "\t"
@@ -245,12 +243,12 @@ def show_pids_value(kn, cgroup, cftype, ss, css):
 
 
 def show_cpu_value_max(tg):
-    cfs_period = tg.cfs_bandwidth.period / 1000
+    cfs_period = tg.cfs_bandwidth.period // 1000
     cfs_quota = tg.cfs_bandwidth.quota
     if cfs_quota == 18446744073709551615: # RUNTIME_INF     ((u64)~0ULL)
         cfs_quota = -1
     else:
-        cfs_quota = cfs_quota / 1000
+        cfs_quota = cfs_quota // 1000
 
     quota_str = "max" if cfs_quota < 0 else ("%d" % cfs_quota)
     print(" = %s %d" % (quota_str, cfs_period))
@@ -267,7 +265,7 @@ MAX_NICE = 19
 MIN_NICE = -20
 NICE_WIDTH = (MAX_NICE - MIN_NICE + 1)
 MAX_RT_PRIO = 100
-DEFAULT_PRIO = (MAX_RT_PRIO + NICE_WIDTH / 2)
+DEFAULT_PRIO = (MAX_RT_PRIO + NICE_WIDTH // 2)
 
 def show_cpu_value_weight_nice(tg):
     weight = tg.shares
@@ -287,7 +285,7 @@ def show_cpu_value_weight_nice(tg):
 
 
 def show_cpu_value_burst(tg):
-    burst = tg.cfs_bandwidth.burst / 1000
+    burst = tg.cfs_bandwidth.burst // 1000
     print(" = %d" % (burst))
 
 

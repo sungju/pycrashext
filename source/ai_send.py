@@ -1,4 +1,4 @@
-from __future__ import print_function
+
 import sys
 import base64
 import requests as r

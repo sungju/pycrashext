@@ -38,7 +38,7 @@ def load_module_details():
         if (kernel_module):
             module_list = readSymbol("module_list")
             for module in readStructNext(module_list, "next", inchead = False):
-                if (long(module) == kernel_module):
+                if (int(module) == kernel_module):
                     break
                 module_list.insert(0, module)
         else:
@@ -73,7 +73,7 @@ def is_our_module(module_addr):
 
 
 def get_module_alloc_data(module):
-    result = exec_crash_command("kmem 0x%x" % (long(module)))
+    result = exec_crash_command("kmem 0x%x" % (int(module)))
     resultlines = result.splitlines()
     found = 0
     alloc_size = 0
@@ -345,7 +345,7 @@ def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=F
     else:
         core_size = module.core_size
 
-    print("0x%x %-25s %10d %s" % (long(module),
+    print("0x%x %-25s %10d %s" % (int(module),
                              module.name,
                              core_size,
                              gap_info_str))
@@ -444,7 +444,7 @@ def show_module_detail(options):
         return
 
 
-    print ("%-15s : 0x%x" % ("struct module", long(module)))
+    print ("%-15s : 0x%x" % ("struct module", int(module)))
     print ("%-15s : %s" % ("name", module.name))
     print ("%-15s : %s" % ("version", module.version))
     print ("%-15s : %s" % ("source ver", module.srcversion))
@@ -803,7 +803,7 @@ def show_disasm(addr, size):
     if size == 0:
         return
 
-    count = int(size / 2)
+    count = int(size // 2)
     if count < 10:
         count = 10
 

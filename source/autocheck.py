@@ -3,8 +3,6 @@ Written by Daniel Sungju Kwon
 
 This is running extra rules to detect known issues.
 """
-from __future__ import print_function
-from __future__ import division
 
 import os
 import sys

@@ -2,7 +2,7 @@
  Written by Daniel Sungju Kwon
 """
 
-from __future__ import print_function
+
 
 from pykdump.API import *
 from LinuxDump import percpu
@@ -206,7 +206,7 @@ cpu_capability_list = {
 def show_cpu_capability(options):
     boot_cpu_data = readSymbol("boot_cpu_data")
     for cap_idx, cap_str in cpu_capability_list.items():
-        idx = int(cap_idx / 32)
+        idx = int(cap_idx // 32)
         bit = (1 << (cap_idx % 32))
         addr = boot_cpu_data.x86_capability[idx]
         if (addr & bit) != 0:

@@ -2,10 +2,6 @@
  Written by Daniel Sungju Kwon
 """
 
-
-from __future__ import print_function
-from __future__ import division
-
 from pykdump.API import *
 
 from LinuxDump import Tasks
@@ -48,7 +44,7 @@ def print_task_delay(task, options):
 
         print ("%20s (0x%x)[%s:%3d] : %10.2f sec delayed in queue" %
                (task.comm, task, get_task_policy_str(task.policy),
-                prio, sched_info.run_delay / 1000000000))
+                prio, sched_info.run_delay // 1000000000))
         if (options.details):
             print ("\t\t\texec_start = %d, exec_max = %d" %
                    (task.se.exec_start, task.se.exec_max))
@@ -239,7 +235,7 @@ def lockup_display(reverse_sort, show_tasks, options):
         if (rq.curr.policy != 0):
             prio = rq.curr.rt_priority
 
-        delayed_time = (now - rq.Timestamp) / 1000000000
+        delayed_time = (now - rq.Timestamp) // 1000000000
         if watchdog_thresh > 0:
             if delayed_time >= softlockup_thresh:
                 crashcolor.set_color(crashcolor.RED)
