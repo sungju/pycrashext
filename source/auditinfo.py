@@ -366,12 +366,33 @@ def get_audit_perm_str(val):
     return result
 
 
-def get_audit_val_str(ftype, fval):
+def read_string(addr, delimiter=0x0, highchar=128):
+    result = ""
+    idx = 0
+    while True:
+        one_byte = readU8(addr + idx)
+        idx = idx + 1
+        if one_byte == delimiter or one_byte > highchar:
+            break
+        result = result + str(chr(one_byte))
+
+    return result
+
+
+def get_audit_dir_str(audit_rule):
+    pathname = read_string(audit_rule.tree.pathname)
+
+    return pathname
+
+
+def get_audit_val_str(ftype, fval, audit_entry):
     val_str = ""
     if ftype == AUDIT_ARCH:
         val_str = "-F %s" % (get_audit_arch_str(fval))
     elif ftype == AUDIT_PERM:
         val_str = "-p %s" % (get_audit_perm_str(fval))
+    elif ftype == AUDIT_DIR:
+        val_str = "-w %s " % (get_audit_dir_str(audit_entry.rule))
     else:
         pass
         #val_str = "%d" % (fval if int(fval) < 4294967283 else -1)
@@ -385,7 +406,8 @@ def get_audit_fields_details(audit_entry):
 
     for i in range(0, rule.field_count):
         field = rule.fields[i]
-        result_str = result_str + get_audit_val_str(field.type, field.val)
+        result_str = result_str + get_audit_val_str(field.type, field.val, \
+                                                    audit_entry)
 
     return result_str
 
@@ -393,12 +415,17 @@ def get_audit_fields_details(audit_entry):
 def get_mask_str(masks):
     result_str = ""
     idx = 0
-    for mask in masks:
-        if mask != 4294967295 and mask != 0: # -1 in 32bit
-            for i in range(0, 31):
-            print(mask)
+    enabled_syscalls = []
+    for index, value in enumerate(masks):
+        for bit in range(32):
+            if value & (1 << bit):
+                syscall_number = index * 32 + bit
+                enabled_syscalls.append(syscall_number)
 
-        idx = idx + 1
+    if len(enabled_syscalls) > 0:
+        result_str = ",".join(str(x) for x in enabled_syscalls)
+
+    result_str = ''
 
     return result_str
 
