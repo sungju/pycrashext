@@ -298,7 +298,7 @@ AUDIT_FILTER_TYPE   = 0x05    # Apply rule at audit_log_start
 
 
 audit_flag_dict =  {
-    AUDIT_FILTER_USER : "user",
+    AUDIT_FILTER_USER : "",  # Don't need to use user in output, "user",
     AUDIT_FILTER_TASK : "task",
     AUDIT_FILTER_ENTRY : "syscall",
     AUDIT_FILTER_WATCH : "watch",
@@ -388,11 +388,13 @@ def get_audit_dir_str(audit_rule):
 def get_audit_val_str(ftype, fval, audit_entry):
     val_str = ""
     if ftype == AUDIT_ARCH:
-        val_str = "-F %s" % (get_audit_arch_str(fval))
+        val_str = "-F %s " % (get_audit_arch_str(fval))
     elif ftype == AUDIT_PERM:
-        val_str = "-p %s" % (get_audit_perm_str(fval))
+        val_str = "-p %s " % (get_audit_perm_str(fval))
     elif ftype == AUDIT_DIR:
         val_str = "-w %s " % (get_audit_dir_str(audit_entry.rule))
+    elif ftype == AUDIT_UID:
+        val_str = "-F uid=%d " % (fval)
     else:
         pass
         #val_str = "%d" % (fval if int(fval) < 4294967283 else -1)
@@ -423,9 +425,9 @@ def get_mask_str(masks):
                 enabled_syscalls.append(syscall_number)
 
     if len(enabled_syscalls) > 0:
-        result_str = ",".join(str(x) for x in enabled_syscalls)
+        result_str = " -S " + ",".join(str(x) for x in enabled_syscalls)
 
-    result_str = ''
+    #result_str = ''
 
     return result_str
 
@@ -447,17 +449,20 @@ def show_audit_rules(options):
                 result_str = result_str + ("%s " % get_audit_fields_details(audit_entry))
             action_str = get_audit_action_str(audit_entry.rule.action)
             listnr_str = get_audit_flag_str(audit_entry.rule.listnr)
-            if action_str != "":
+            #if audit_entry.rule.listnr == AUDIT_FILTER_ENTRY:
+            if "-w " not in result_str:
                 if listnr_str != "":
-                    listnr_str = "," + listnr_str + get_mask_str(audit_entry.rule.mask)
-                result_str = result_str + ("-a %s " % (action_str + listnr_str))
+                    listnr_str = action_str + "," + listnr_str + get_mask_str(audit_entry.rule.mask)
+                    result_str = result_str + ("-a %s " % (listnr_str))
 
             filter_key = audit_entry.rule.filterkey
             if filter_key != "":
                 result_str = result_str + ("-k %s " % filter_key)
 
 
-            print("struct audit_entry 0x%x\n\t%s" % (audit_entry, result_str))
+            if options.show_details:
+                print("struct audit_entry 0x%x\n\t" % (audit_entry), end="")
+            print("%s" % (result_str))
             next_addr = audit_entry.rule.list.next
 
 
