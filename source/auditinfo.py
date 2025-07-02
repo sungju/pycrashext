@@ -441,20 +441,20 @@ def show_audit_rules(options):
             audit_entry = readSU("struct audit_entry", next_addr - offset)
             result_str = ""
             if audit_entry.rule.watch:
-                result_str = "-w %s" % audit_entry.rule.watch.path
+                result_str = "-w %s " % audit_entry.rule.watch.path
             flag_str = get_audit_flag_str(audit_entry.rule.flags & ~AUDIT_FILTER_PREPEND)
+            if audit_entry.rule.field_count > 0:
+                result_str = result_str + ("%s " % get_audit_fields_details(audit_entry))
             action_str = get_audit_action_str(audit_entry.rule.action)
             listnr_str = get_audit_flag_str(audit_entry.rule.listnr)
             if action_str != "":
                 if listnr_str != "":
                     listnr_str = "," + listnr_str + get_mask_str(audit_entry.rule.mask)
-                result_str = result_str + (" -a %s" % (action_str + listnr_str))
+                result_str = result_str + ("-a %s " % (action_str + listnr_str))
 
-            if audit_entry.rule.field_count > 0:
-                result_str = result_str + (" %s" % get_audit_fields_details(audit_entry))
             filter_key = audit_entry.rule.filterkey
             if filter_key != "":
-                result_str = result_str + (" -k %s" % filter_key)
+                result_str = result_str + ("-k %s " % filter_key)
 
 
             print("struct audit_entry 0x%x\n\t%s" % (audit_entry, result_str))
