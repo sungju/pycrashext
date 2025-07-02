@@ -385,7 +385,7 @@ def get_audit_dir_str(audit_rule):
     return pathname
 
 
-def get_audit_val_str(ftype, fval, audit_entry):
+def get_audit_val_str(ftype, fval, audit_entry, audit_field):
     val_str = ""
     if ftype == AUDIT_ARCH:
         val_str = "-F %s " % (get_audit_arch_str(fval))
@@ -395,6 +395,11 @@ def get_audit_val_str(ftype, fval, audit_entry):
         val_str = "-w %s " % (get_audit_dir_str(audit_entry.rule))
     elif ftype == AUDIT_UID:
         val_str = "-F uid=%d " % (fval)
+    elif ftype >= AUDIT_ARG0 and ftype <= AUDIT_ARG3:
+        op_str = "=" if audit_field.op == 0 else "!="
+        if fval == 4294967295:
+            fval = -1
+        val_str = "-F a%d%s%d " % (ftype - AUDIT_ARG0, op_str, fval)
     else:
         pass
         #val_str = "%d" % (fval if int(fval) < 4294967283 else -1)
@@ -409,7 +414,7 @@ def get_audit_fields_details(audit_entry):
     for i in range(0, rule.field_count):
         field = rule.fields[i]
         result_str = result_str + get_audit_val_str(field.type, field.val, \
-                                                    audit_entry)
+                                                    audit_entry, field)
 
     return result_str
 
