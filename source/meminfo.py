@@ -1558,7 +1558,7 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
 
 
     if not options.details and (alloc_count % ALLOC_COUNT_UNIT) == 0:
-        print("Checked %d objects" % (alloc_count), end='\r')
+        print(f"Checked {alloc_count:,} objects", end='\r')
 
     if options.details:
         # Use tuples for memory efficiency and direct assignment
