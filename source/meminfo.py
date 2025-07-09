@@ -15,6 +15,8 @@ from collections import defaultdict
 import crashcolor
 
 
+debug_mode = False
+
 page_size = 4096
 page_shift = 12
 
@@ -1042,6 +1044,79 @@ def show_partial_slab(options, kmem_cache, slab_addr, offset):
         print("0x%x" % obj_addr)
 
 
+###
+### readList and readSUListFromHead are revised to improve performance
+###
+
+_MAXEL = 10000
+
+def readList(start, offset=0, *, maxel=_MAXEL, inchead=True, warn=True):
+    start = int(start)  # Equivalent to (void *) cast
+    if start == 0:
+        return []
+
+    out = [start] if inchead else []
+    known = {start} if inchead else set()
+    count = 1 if inchead else 0
+    next_ptr = start
+
+    while count < maxel:
+        try:
+            next_ptr = readPtr(next_ptr + offset)
+        except crash.error as val:
+            print(val)
+            break
+
+        if next_ptr == 0 or next_ptr == start or next_ptr in known:
+            if next_ptr in known:
+                pylog.error("Circular dependency in list")
+            break
+
+        out.append(next_ptr)
+        known.add(next_ptr)
+        count += 1
+
+    if count == maxel:
+        if warn:
+            warn_maxel(maxel)
+
+    return out
+
+
+def readSUListFromHead(headaddr, listfieldname, mystruct,
+                                 maxel=1000000, inchead=False, warn=True):
+    global debug_mode
+
+    if debug_mode:
+        print("readSUListFromHead()")
+
+    msi = getStructInfo(mystruct)
+    offset = msi[listfieldname].offset
+
+    if isinstance(headaddr, str):
+        headaddr = sym2addr(headaddr) + offset
+
+    addresses = readList(headaddr, 0, maxel=maxel+1, inchead=inchead, warn=warn)
+
+    truncated = len(addresses) > maxel
+    if truncated:
+        addresses = addresses[:-1]
+
+    # Preallocate and avoid repeated list growth
+    out = [readSU(mystruct, p - offset) for p in addresses]
+
+    if truncated and warn:
+        warn_maxel(maxel)
+
+    if debug_mode:
+        print("readSUListFromHead() Done")
+    return out
+
+###
+### readList and readSUListFromHead are revised to improve performance
+###
+
+
 def show_slabs_in_node(options, kmem_cache, kc_node, offset):
     global alloc_count
 
@@ -1063,7 +1138,7 @@ def show_slabs_in_node(options, kmem_cache, kc_node, offset):
                                             "lru",
                                             "struct page",
                                             maxel=1000000000):
-                show_one_slab(options, kmem_cache, Addr(page), True, offset)
+                show_one_slab(options, kmem_cache, Addr(page), False, offset)
 
                 if options.maxcount > 0 and alloc_count > options.maxcount:
                     break
@@ -1541,7 +1616,7 @@ free_count = 0
 
 calltrace_list = defaultdict(int)
 
-ALLOC_COUNT_UNIT = 100
+ALLOC_COUNT_UNIT = 2000
 
 def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
@@ -1556,9 +1631,11 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global total_objects
 
 
-    if not options.details and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+    if options.progress:
         percent = (alloc_count / total_objects) * 100
         print(f"Checked {alloc_count:,} objects out of {total_objects:,}. {percent:.2f}%", end='\r')
+        if alloc_count > 0 and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+            show_slab_alloc_result(options, kmem_cache)
 
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
@@ -1645,9 +1722,14 @@ def show_alloc_track(options, kmem_cache, addr, slab_addr, offset):
     total_slab = page.objects & 0xff # Make sure it only uses a byte
     alloc_item = True
 
+    if options.debug:
+        print("show_alloc_track")
     for idx in range(0, total_slab):
         obj_addr = addr + kmem_cache.size * idx
         read_a_track(options, kmem_cache, obj_addr, offset, alloc_item)
+
+    if options.debug:
+        print("show_alloc_track done")
 
 
 def show_partial_alloc_track(options, kmem_cache, slab_addr, offset):
@@ -2865,6 +2947,8 @@ def show_oom_events(op):
 
 
 def meminfo():
+    global debug_mode
+
     sys.setrecursionlimit(10000000)
 
     op = OptionParser()
@@ -2880,6 +2964,9 @@ def meminfo():
     op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="Show detailed output")
+    op.add_option("--debug", dest="debug", default=0,
+                  action="store_true",
+                  help="Show debug output")
     op.add_option("-e", "--error", dest="error_code", default="",
                   action="store",
                   type="string",
@@ -2905,6 +2992,12 @@ def meminfo():
     op.add_option("-m", "--numa", dest="numa", default=0,
                   action="store_true",
                   help="Show NUMA info")
+    op.add_option("--maxcount", dest="maxcount", default=0,
+                  action="store", type="int",
+                  help="Check only maxcount")
+    op.add_option("--memory_limit", dest="memory_limit", default=0,
+                  action="store", type="int",
+                  help="Limit call trace storage to reduce memory usage (default: 0, no limit)")
     op.add_option("-n", "--nogroup", dest="nogroup", default=0,
                   action="store_true",
                   help="Show data in individual tasks")
@@ -2920,6 +3013,9 @@ def meminfo():
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Convert percpu address into virtual address")
+    op.add_option("--progress", dest="progress", default=0,
+                  action="store_true",
+                  help="Show progress results while handling operation")
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
@@ -2935,12 +3031,6 @@ def meminfo():
     op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
                   action="store", type="string",
                   help="Show slub_debug=U usage")
-    op.add_option("--maxcount", dest="maxcount", default=0,
-                  action="store", type="int",
-                  help="Check only maxcount")
-    op.add_option("--memory_limit", dest="memory_limit", default=0,
-                  action="store", type="int",
-                  help="Limit call trace storage to reduce memory usage (default: 0, no limit)")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
@@ -2953,6 +3043,8 @@ def meminfo():
 
 
     (o, args) = op.parse_args()
+
+    debug_mode = o.debug
 
     if (o.pte_flags != ""):
         show_pte_flags(o)
