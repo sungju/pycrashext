@@ -1046,29 +1046,33 @@ def show_slabs_in_node(options, kmem_cache, kc_node, offset):
     global alloc_count
 
     alloc_count = 0
-    if member_offset("struct kmem_cache_node", "partial") >= 0:
-        for page in readSUListFromHead(kc_node.partial,
-                                        "lru",
-                                        "struct page",
-                                        maxel=1000000000):
-            show_one_slab(options, kmem_cache, Addr(page), False, offset)
+    try:
+        if member_offset("struct kmem_cache_node", "partial") >= 0:
+            for page in readSUListFromHead(kc_node.partial,
+                                            "lru",
+                                            "struct page",
+                                            maxel=1000000000):
+                show_one_slab(options, kmem_cache, Addr(page), False, offset)
 
-            if options.maxcount > 0 and alloc_count > options.maxcount:
-                break
+                if options.maxcount > 0 and alloc_count > options.maxcount:
+                    break
 
 
-        for page in readSUListFromHead(kc_node.full,
-                                        "lru",
-                                        "struct page",
-                                        maxel=1000000000):
-            show_one_slab(options, kmem_cache, Addr(page), True, offset)
+        if member_offset("struct kmem_cache_node", "full") >= 0:
+            for page in readSUListFromHead(kc_node.full,
+                                            "lru",
+                                            "struct page",
+                                            maxel=1000000000):
+                show_one_slab(options, kmem_cache, Addr(page), True, offset)
 
-            if options.maxcount > 0 and alloc_count > options.maxcount:
-                break
+                if options.maxcount > 0 and alloc_count > options.maxcount:
+                    break
+    except Exception as e:
+        print(e)
 
 
     if alloc_count > 0:
-        show_slab_alloc_result()
+        show_slab_alloc_result(options, kmem_cache)
 
     return alloc_count > 0
 
@@ -1100,7 +1104,7 @@ def show_one_slab(options, kmem_cache, slab_addr, full_mode, offset):
 
 
 
-def show_slab_alloc_result(options):
+def show_slab_alloc_result(options, kmem_cache):
     global alloc_func_list
     global alloc_pid_list
     global alloc_count
@@ -1210,6 +1214,8 @@ def show_slabdetail(options):
 
 
 def show_objects_in_slab(options, kmem_cache, offset):
+    global total_objects
+
     # Extracting the data in the way the kernel get for slabinfo
     try:
         nr_blks, numa_meminfo = get_numa_meminfo()
@@ -1222,10 +1228,13 @@ def show_objects_in_slab(options, kmem_cache, offset):
             #return
         '''
 
+        total_objects = 0
         for node in range(0, nr_blks):
             n = kmem_cache.node[node]
             if n == None:
                 continue
+
+            total_objects = total_objects + n.total_objects.counter
 
             show_slabs_in_node(options, kmem_cache, n, offset)
 
@@ -1524,6 +1533,7 @@ SLAB_RED_ZONE=0x00000400
 alloc_func_list = defaultdict(int)
 alloc_pid_list = defaultdict(int)
 alloc_count = 0
+total_objects = 0
 
 free_func_list = defaultdict(int)
 free_pid_list = defaultdict(int)
@@ -1531,7 +1541,7 @@ free_count = 0
 
 calltrace_list = defaultdict(int)
 
-ALLOC_COUNT_UNIT = 10000
+ALLOC_COUNT_UNIT = 100
 
 def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
@@ -1543,7 +1553,12 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global free_count
 
     global calltrace_list
+    global total_objects
 
+
+    if not options.details and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+        percent = (alloc_count / total_objects) * 100
+        print(f"Checked {alloc_count:,} objects out of {total_objects:,}. {percent:.2f}%", end='\r')
 
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
@@ -1556,9 +1571,6 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
         free_count = free_count + 1
         free_func_list[track.addr] += 1
 
-
-    if not options.details and (alloc_count % ALLOC_COUNT_UNIT) == 0:
-        print(f"Checked {alloc_count:,} objects", end='\r')
 
     if options.details:
         # Use tuples for memory efficiency and direct assignment
