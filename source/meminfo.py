@@ -1635,6 +1635,7 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
         percent = (alloc_count / total_objects) * 100
         print(f"Checked {alloc_count:,} objects out of {total_objects:,}. {percent:.2f}%", end='\r')
         if alloc_count > 0 and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+            print()
             show_slab_alloc_result(options, kmem_cache)
 
     track_addr = obj_addr + offset
