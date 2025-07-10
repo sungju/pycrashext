@@ -1228,30 +1228,32 @@ def show_slab_alloc_result(options, kmem_cache):
     show_alloc_pid_list(options)
 
     print("\nFrequence of calltraces:")
-    print(  "========================")
+    if options.memory_limit > 0 and len(calltrace_list) >= options.memory_limit:
+        print("  (Limited to %d unique patterns for memory optimization)" % options.memory_limit)
+    print("=" * 60)
     sorted_calltrace_list = sorted(calltrace_list.items(),
                           key=operator.itemgetter(1), reverse=True)
     print_count = 0
-    for calltrace, count in sorted_calltrace_list:
+    max_print_count = 3
+    for addr_tuple, count in sorted_calltrace_list:
         crashcolor.set_color(crashcolor.BLUE)
         print("%d times:" % (count))
         crashcolor.set_color(crashcolor.RESET)
-        funcs = calltrace.split(",")
-        for func in funcs:
-            sym_name = get_function_name(int(func, 16))
-            if sym_name != None:
-                print(sym_name)
+        # Convert tuple back to function names for output
+        for addr in addr_tuple:
+            if addr != 0:  # Skip zero addresses
+                sym_name = get_function_name(addr)
+                if sym_name != None:
+                    print(sym_name)
         print()
         print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_calltrace_list) > 10:
+        if not options.all and print_count >= max_print_count:
+            if len(sorted_calltrace_list) > max_print_count:
                 print("\n%15s %d %s" % (
                         "... < skiped ",
-                        len(sorted_calltrace_list) - 10,
+                        len(sorted_calltrace_list) - max_print_count,
                         " items > ..."))
             break
-
-
 
 
 def show_slabdetail(options):
@@ -1806,6 +1808,8 @@ def show_slub_debug_user(options):
     global free_func_list
     global free_pid_list
     global free_count
+    global total_objects
+
 
     # Clear previous data to prevent accumulation
     alloc_func_list.clear()
@@ -1821,6 +1825,7 @@ def show_slub_debug_user(options):
         return
     words = lines.splitlines()[1].split()
     kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
+    total_objects = int(words[2])
 
     if kmem_cache.offset >= kmem_cache.object_size:
         offset = kmem_cache.offset + getSizeOf("long")
@@ -1838,7 +1843,6 @@ def show_slub_debug_user(options):
         return
 
 
-    # TODO: New way of checking memory
     if show_objects_in_slab(options, kmem_cache, offset):
         return
 
@@ -1919,70 +1923,10 @@ def show_slub_debug_user(options):
             break
 
 
-    sorted_alloc_func_list = sorted(alloc_func_list.items(),
-                          key=operator.itemgetter(1), reverse=True)
-    print_count = 0
+
     if alloc_count > 0:
-        print("%10s %10s : %s" % ("OBJ_COUNT", "TOTAL_SIZE", "FUNCTION"))
-    for addr, count in sorted_alloc_func_list:
-        if addr == 0:
-            continue
-        sym_name = get_function_name(addr)
-        print("%10d (%8s) : %s" %
-              (count, get_size_str(count * kmem_cache.object_size),
-               sym_name))
-        print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_alloc_func_list) > 10:
-                print("\n%15s %d %s" % (
-                        "... < skiped ",
-                        len(sorted_alloc_func_list) - 10,
-                        " items > ..."))
-            break
+        show_slab_alloc_result(options, kmem_cache)
 
-    print("")
-    print("Total allocated object count = %d" % (alloc_count))
-    print("      allocated object size  = %s" %
-          (get_size_str(alloc_count * kmem_cache.object_size, True)))
-    print("\n\t", end="")
-    crashcolor.set_color(crashcolor.LIGHTGRAY + crashcolor.UNDERLINE)
-    print("Caution: This size doesn't include data structure and padding, etc")
-    crashcolor.set_color(crashcolor.RESET)
-
-    if not options.details:
-        return
-
-    # Some further details
-    show_alloc_pid_list(options)
-
-    print("\nFrequence of calltraces:")
-    if options.memory_limit > 0 and len(calltrace_list) >= options.memory_limit:
-        print("  (Limited to %d unique patterns for memory optimization)" % options.memory_limit)
-    print("=" * 60)
-    sorted_calltrace_list = sorted(calltrace_list.items(),
-                          key=operator.itemgetter(1), reverse=True)
-    print_count = 0
-    for addr_tuple, count in sorted_calltrace_list:
-        crashcolor.set_color(crashcolor.BLUE)
-        print("%d times:" % (count))
-        crashcolor.set_color(crashcolor.RESET)
-        # Convert tuple back to function names for output
-        for addr in addr_tuple:
-            if addr != 0:  # Skip zero addresses
-                sym_name = get_function_name(addr)
-                if sym_name != None:
-                    print(sym_name)
-        print()
-        print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_calltrace_list) > 10:
-                print("\n%15s %d %s" % (
-                        "... < skiped ",
-                        len(sorted_calltrace_list) - 10,
-                        " items > ..."))
-            break
-
-    # Show optimization summary
     '''
     print("\nOptimization Summary:")
     print("===================")
