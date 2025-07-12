@@ -1248,7 +1248,7 @@ def show_slab_alloc_result(options, kmem_cache):
                     if len(parts) == 3:
                         addr_str, type_str, rest = parts
                         addr_int = int(addr_str, 16)
-                        print(f"  0x{addr_int:014x} {type_str:>4} {rest}")
+                        print(f"  0x{addr_int:014x} {type_str:>3} {rest}")
                     #print(sym_name)
         print()
         print_count = print_count + 1
