@@ -1244,7 +1244,12 @@ def show_slab_alloc_result(options, kmem_cache):
             if addr != 0:  # Skip zero addresses
                 sym_name = get_function_name(addr)
                 if sym_name != None:
-                    print(sym_name)
+                    parts = sym_name.split(maxsplit=2)
+                    if len(parts) == 3:
+                        addr_str, type_str, rest = parts
+                        addr_int = int(addr_str, 16)
+                        print(f"  0x{addr_int:014x} {type_str:>4} {rest}")
+                    #print(sym_name)
         print()
         print_count = print_count + 1
         if not options.all and print_count >= max_print_count:
