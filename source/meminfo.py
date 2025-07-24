@@ -2747,7 +2747,7 @@ def show_oom_events(op):
                 is_first_oom = False
                 continue
 
-            if "Out of memory: Killed process" in line:
+            if "Out of memory: Kill" in line or "Killed process" in line:
                 crashcolor.set_color(crashcolor.GREEN)
                 print(line)
                 crashcolor.set_color(crashcolor.RESET)
