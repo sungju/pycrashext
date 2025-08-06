@@ -5,3 +5,12 @@ CMD_END: dis
 CMD: bt
 Please analyse the following backtrace from vmcore. Check if there's any known issue or any possible clue from call pattern.
 CMD_END: bt
+
+CMD: edis -f
+Please summarise this function.
+CMD_END: edis -f
+
+CMD: edis
+- Please shows meaningful register values in table format. Consider to display in 80 columns.
+- Summarise what had happened in the code until to the end.
+CMD_END: edis

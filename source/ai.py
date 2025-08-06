@@ -151,6 +151,14 @@ def get_crash_command_output(cmd_str):
     return result_str
 
 
+
+def find_best_match(d, cmd_str):
+    matching_items = [(k, v) for k, v in d.items() if cmd_str.startswith(k)]
+    if not matching_items:
+        return None
+    return max(matching_items, key=lambda item: len(item[0]))
+
+
 def ai_send(o, args, cmd_path_list):
     global question_dict
 
@@ -196,10 +204,12 @@ def ai_send(o, args, cmd_path_list):
                     pass
 
             read_ai_questions()
+            _, match_question = find_best_match(question_dict, o.cmd_str)
+
             if len(args) != 0:
                 result_str = " ".join(args) + "\n" + result_str
-            elif cmd_str in question_dict:
-                result_str = question_dict[cmd_str] + result_str
+            elif match_question != None:
+                result_str = match_question + "\n" + result_str
             elif len(args) == 0:
                 result_str = "Analyse the below output from linux kernel vmcore" +\
                         result_str
