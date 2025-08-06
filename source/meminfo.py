@@ -15,6 +15,8 @@ from collections import defaultdict
 import crashcolor
 
 
+debug_mode = False
+
 page_size = 4096
 page_shift = 12
 
@@ -1042,34 +1044,221 @@ def show_partial_slab(options, kmem_cache, slab_addr, offset):
         print("0x%x" % obj_addr)
 
 
-def show_slabs_in_node(kc_node):
-    print(kc_node)
-    if member_offset("struct kmem_cache_node", "partial") >= 0:
-        count = 0
-        print("PARTIAL:")
-        for page in readSUListFromHead(kc_node.partial,
-                                        "lru",
-                                        "struct page",
-                                        maxel=1000000):
-            objects = (page.objects & 0x7fff)
-            inuse = (page.inuse & 0xffff)
-            nr_objects = objects - inuse
-            count = count + nr_objects
-            print(page, end="")
-            print("  %d - %d = %d" % (objects, inuse, nr_objects))
+###
+### readList and readSUListFromHead are revised to improve performance
+###
 
-        print("FULL:")
-        for page in readSUListFromHead(kc_node.full,
-                                        "lru",
-                                        "struct page",
-                                        maxel=1000000):
-            count = count + 1
-            print(page)
+_MAXEL = 10000
 
-        print("PARTIAL = %d" % kc_node.nr_partial)
-        print("SLABS = %d" % kc_node.nr_slabs.counter)
-        print("TOTAL = %d" % kc_node.total_objects.counter)
-        print(count)
+def readList(start, offset=0, *, maxel=_MAXEL, inchead=True, warn=True):
+    start = int(start)  # Equivalent to (void *) cast
+    if start == 0:
+        return []
+
+    out = [start] if inchead else []
+    known = {start} if inchead else set()
+    count = 1 if inchead else 0
+    next_ptr = start
+
+    while count < maxel:
+        try:
+            next_ptr = readPtr(next_ptr + offset)
+        except crash.error as val:
+            print(val)
+            break
+
+        if next_ptr == 0 or next_ptr == start or next_ptr in known:
+            if next_ptr in known:
+                pylog.error("Circular dependency in list")
+            break
+
+        out.append(next_ptr)
+        known.add(next_ptr)
+        count += 1
+
+    if count == maxel:
+        if warn:
+            warn_maxel(maxel)
+
+    return out
+
+
+def readSUListFromHead(headaddr, listfieldname, mystruct,
+                                 maxel=1000000, inchead=False, warn=True):
+    global debug_mode
+
+    if debug_mode:
+        print("readSUListFromHead()")
+
+    msi = getStructInfo(mystruct)
+    offset = msi[listfieldname].offset
+
+    if isinstance(headaddr, str):
+        headaddr = sym2addr(headaddr) + offset
+
+    addresses = readList(headaddr, 0, maxel=maxel+1, inchead=inchead, warn=warn)
+
+    truncated = len(addresses) > maxel
+    if truncated:
+        addresses = addresses[:-1]
+
+    # Preallocate and avoid repeated list growth
+    out = [readSU(mystruct, p - offset) for p in addresses]
+
+    if truncated and warn:
+        warn_maxel(maxel)
+
+    if debug_mode:
+        print("readSUListFromHead() Done")
+    return out
+
+###
+### readList and readSUListFromHead are revised to improve performance
+###
+
+
+def show_slabs_in_node(options, kmem_cache, kc_node, offset):
+    global alloc_count
+
+    alloc_count = 0
+    try:
+        if member_offset("struct kmem_cache_node", "partial") >= 0:
+            for page in readSUListFromHead(kc_node.partial,
+                                            "lru",
+                                            "struct page",
+                                            maxel=1000000000):
+                show_one_slab(options, kmem_cache, Addr(page), False, offset)
+
+                if options.maxcount > 0 and alloc_count > options.maxcount:
+                    break
+
+
+        if member_offset("struct kmem_cache_node", "full") >= 0:
+            for page in readSUListFromHead(kc_node.full,
+                                            "lru",
+                                            "struct page",
+                                            maxel=1000000000):
+                show_one_slab(options, kmem_cache, Addr(page), False, offset)
+
+                if options.maxcount > 0 and alloc_count > options.maxcount:
+                    break
+    except Exception as e:
+        print(e)
+
+
+    if alloc_count > 0:
+        show_slab_alloc_result(options, kmem_cache)
+
+    return alloc_count > 0
+
+
+
+def show_one_slab(options, kmem_cache, slab_addr, full_mode, offset):
+    global alloc_count
+
+    lines = exec_crash_command("kmem -S 0x%x" % slab_addr).splitlines()
+
+    for line in lines[3:]:
+        words = line.split()
+        if len(words) < 5 or words[0] == "SLAB":
+            continue
+
+        try:
+            if full_mode:
+                show_alloc_track(options, kmem_cache, int(words[1], 16),
+                        int(words[0], 16), offset)
+            else:
+                show_partial_alloc_track(options, kmem_cache,
+                        int(words[0], 16), offset)
+        except Exception as e:
+            print(e)
+            break
+
+        if options.maxcount > 0 and alloc_count > options.maxcount:
+            break
+
+
+
+def show_slab_alloc_result(options, kmem_cache):
+    global alloc_func_list
+    global alloc_pid_list
+    global alloc_count
+
+    global free_func_list
+    global free_pid_list
+    global free_count
+
+    global calltrace_list
+
+
+    sorted_alloc_func_list = sorted(alloc_func_list.items(),
+                          key=operator.itemgetter(1), reverse=True)
+    print_count = 0
+    if alloc_count > 0:
+        print("%10s %10s : %s" % ("OBJ_COUNT", "TOTAL_SIZE", "FUNCTION"))
+    for addr, count in sorted_alloc_func_list:
+        if addr == 0:
+            continue
+        sym_name = get_function_name(addr)
+        print("%10d (%8s) : %s" %
+              (count, get_size_str(count * kmem_cache.object_size),
+               sym_name))
+        print_count = print_count + 1
+        if not options.all and print_count > 9:
+            if len(sorted_alloc_func_list) > 10:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_alloc_func_list) - 10,
+                        " items > ..."))
+            break
+
+    print("")
+    print("Total allocated object count = %d" % (alloc_count))
+    print("      allocated object size  = %s" %
+          (get_size_str(alloc_count * kmem_cache.object_size, True)))
+    print("\n\t", end="")
+    crashcolor.set_color(crashcolor.LIGHTGRAY + crashcolor.UNDERLINE)
+    print("Caution: This size doesn't include data structure and padding, etc")
+    crashcolor.set_color(crashcolor.RESET)
+
+    if not options.details:
+        return
+
+    # Some further details
+    show_alloc_pid_list(options)
+
+    print("\nFrequence of calltraces:")
+    if options.memory_limit > 0 and len(calltrace_list) >= options.memory_limit:
+        print("  (Limited to %d unique patterns for memory optimization)" % options.memory_limit)
+    print("=" * 60)
+    sorted_calltrace_list = sorted(calltrace_list.items(),
+                          key=operator.itemgetter(1), reverse=True)
+    print_count = 0
+    max_print_count = 3
+    for addr_tuple, count in sorted_calltrace_list:
+        crashcolor.set_color(crashcolor.BLUE)
+        print("%d times:" % (count))
+        crashcolor.set_color(crashcolor.RESET)
+        # Convert tuple back to function names for output
+        for addr in addr_tuple:
+            if addr != 0:  # Skip zero addresses
+                sym_name = get_function_name(addr)
+                if sym_name != None:
+                    parts = sym_name.split(maxsplit=2)
+                    if len(parts) == 3:
+                        addr_str, type_str, rest = parts
+                        addr_int = int(addr_str, 16)
+                        print(f"  0x{addr_int:014x} {type_str:>3} {rest}")
+                    #print(sym_name)
+        print()
+        print_count = print_count + 1
+        if not options.all and print_count >= max_print_count:
+            if len(sorted_calltrace_list) > max_print_count:
+                print("\n%15s %d %s" % (
+                        "... < skiped ",
+                        len(sorted_calltrace_list) - max_print_count,
+                        " items > ..."))
+            break
 
 
 def show_slabdetail(options):
@@ -1104,37 +1293,32 @@ def show_slabdetail(options):
 
     return
 
-    #
-    # Below is useless unless slub_debug=U is enabled
-    # and in that case, meminfo -U is a better option
-    # to check slab usage.
-    # So, it is here just as I don't want to delete the
-    # code for reference.
 
-    if kmem_cache.offset >= kmem_cache.object_size:
-        offset = kmem_cache.offset + getSizeOf("long")
-    else:
-        offset = kmem_cache.inuse
 
-    if (kmem_cache.flags & SLAB_RED_ZONE) == SLAB_RED_ZONE:
-        offset = offset + kmem_cache.red_left_pad
-        offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
+def show_objects_in_slab(options, kmem_cache, offset):
+    global total_objects
 
     # Extracting the data in the way the kernel get for slabinfo
     try:
         nr_blks, numa_meminfo = get_numa_meminfo()
         nr_blks, node_numbers = get_node_numbers(nr_blks)
 
+        '''
         if numa_meminfo == None and node_numbers == None:
             print("No NUMA information available")
-            return
+            print(nr_blks)
+            #return
+        '''
 
+        total_objects = 0
         for node in range(0, nr_blks):
             n = kmem_cache.node[node]
             if n == None:
                 continue
 
-            show_slabs_in_node(n)
+            total_objects = total_objects + n.total_objects.counter
+
+            show_slabs_in_node(options, kmem_cache, n, offset)
 
         return
     except Exception as e:
@@ -1142,102 +1326,6 @@ def show_slabdetail(options):
         return
     # end of it
 
-    lines = exec_crash_command("kmem -S %s" % options.slabdetail).splitlines()
-    full_mode = False
-    partial_mode = False
-    alloc_count = 0
-
-    for line in lines:
-        line = line.strip()
-        if line.startswith("NODE") or line.startswith("KMEM_CACHE_NODE"):
-            full_mode = False
-            partial_mode = False
-
-            if not line.endswith("FULL:") and not line.endswith("PARTIAL:"):
-                continue
-
-        if line.endswith("FULL:"):
-            full_mode = True
-
-        if line.endswith("PARTIAL:"):
-            partial_mode = True
-
-        if not full_mode and not partial_mode:
-            continue
-
-        words = line.split()
-        if len(words) < 5 or words[0] == "SLAB":
-            continue
-
-        if full_mode:
-            show_full_slab(options, kmem_cache, int(words[1], 16),
-                           int(words[0], 16), offset)
-        elif partial_mode:
-            show_partial_slab(options, kmem_cache,
-                              int(words[0], 16), offset)
-
-
-
-'''
-    result = exec_crash_command("kmem -S %s" % options.slabdetail)
-    result_lines = result.splitlines(True)
-    slab_list = {}
-    result_len = len(result_lines)
-    objsize = 0
-    content_count = {}
-    blue_color = crashcolor.get_color(crashcolor.BLUE)
-    red_color = crashcolor.get_color(crashcolor.RED)
-    reset_color = crashcolor.get_color(crashcolor.RESET)
-    print("CACHE             OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE  NAME")
-    for i in range(1, result_len - 1):
-        if result_lines[i].startswith("kmem: "): # error message
-            continue
-        result_line = result_lines[i].split()
-        if objsize == 0:
-            objsize = int(result_line[1])
-        print(result_lines[i], end="")
-        if result_line[0].startswith("["):
-            content = exec_crash_command("rd 0x%s %d" %
-                                         (result_line[0][1:-1],
-                                          objsize / sys_info.pointersize))
-            content_lines = content.splitlines(True)
-            for line in content_lines:
-                words = line.split()
-                output_string = words[0]
-                for cnt_pos in range(1, 3):
-                    word = words[cnt_pos]
-                    if word not in content_count:
-                        content_count[word] = 1
-                    else:
-                        content_count[word] = content_count[word] + 1
-
-                    if options.details == False:
-                        continue
-
-                    if content_count[word] > 10:
-                        output_string = output_string + blue_color +\
-                                        " " + word + reset_color
-                    elif content_count[word] > 20:
-                        output_string = output_string + red_color +\
-                                        " " + word + reset_color
-                    else:
-                        output_string = output_string + " " + word
-
-                if len(words) > 3:
-                    output_string = output_string + " " + line[line.index(words[3]):]
-                print("\t%s" % output_string, end="")
-
-
-    sorted_content = sorted(content_count.items(),
-                            key=operator.itemgetter(1), reverse=True)
-    min_number = 10
-    print("\n\t%s%s%s" % (blue_color, "Mostly appeared contents", reset_color))
-    print("\t%s" % ("-" * 40))
-    for i in range(0, min(len(sorted_content) - 1, min_number)):
-        ascii_str = exec_crash_command("ascii %s" % sorted_content[i][0])
-        print("\t%s %5d %s" % (sorted_content[i][0], sorted_content[i][1],
-                               ascii_str[ascii_str.index(":") + 2:]), end="")
-'''
 
 
 def show_percpu(options):
@@ -1527,12 +1615,15 @@ SLAB_RED_ZONE=0x00000400
 alloc_func_list = defaultdict(int)
 alloc_pid_list = defaultdict(int)
 alloc_count = 0
+total_objects = 0
 
 free_func_list = defaultdict(int)
 free_pid_list = defaultdict(int)
 free_count = 0
 
 calltrace_list = defaultdict(int)
+
+ALLOC_COUNT_UNIT = 2000
 
 def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
@@ -1544,7 +1635,15 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global free_count
 
     global calltrace_list
+    global total_objects
 
+
+    if options.progress:
+        percent = (alloc_count / total_objects) * 100
+        print(f"Checked {alloc_count:,} objects out of {total_objects:,}. {percent:.2f}%", end='\r')
+        if alloc_count > 0 and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+            print()
+            show_slab_alloc_result(options, kmem_cache)
 
     track_addr = obj_addr + offset
     track = readSU("struct track", track_addr)
@@ -1556,6 +1655,7 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     else:
         free_count = free_count + 1
         free_func_list[track.addr] += 1
+
 
     if options.details:
         # Use tuples for memory efficiency and direct assignment
@@ -1630,9 +1730,14 @@ def show_alloc_track(options, kmem_cache, addr, slab_addr, offset):
     total_slab = page.objects & 0xff # Make sure it only uses a byte
     alloc_item = True
 
+    if options.debug:
+        print("show_alloc_track")
     for idx in range(0, total_slab):
         obj_addr = addr + kmem_cache.size * idx
         read_a_track(options, kmem_cache, obj_addr, offset, alloc_item)
+
+    if options.debug:
+        print("show_alloc_track done")
 
 
 def show_partial_alloc_track(options, kmem_cache, slab_addr, offset):
@@ -1708,6 +1813,8 @@ def show_slub_debug_user(options):
     global free_func_list
     global free_pid_list
     global free_count
+    global total_objects
+
 
     # Clear previous data to prevent accumulation
     alloc_func_list.clear()
@@ -1723,6 +1830,7 @@ def show_slub_debug_user(options):
         return
     words = lines.splitlines()[1].split()
     kmem_cache = readSU("struct kmem_cache", int(words[0], 16))
+    total_objects = int(words[2])
 
     if kmem_cache.offset >= kmem_cache.object_size:
         offset = kmem_cache.offset + getSizeOf("long")
@@ -1737,6 +1845,10 @@ def show_slub_debug_user(options):
 
     if ((kmem_cache.flags & SLAB_STORE_USER) != SLAB_STORE_USER):
         print("Please use 'slub_deubg=U' to collect alloc tracking")
+        return
+
+
+    if show_objects_in_slab(options, kmem_cache, offset):
         return
 
     lines = exec_crash_command("kmem -S %s" % options.user_alloc).splitlines()
@@ -1816,70 +1928,10 @@ def show_slub_debug_user(options):
             break
 
 
-    sorted_alloc_func_list = sorted(alloc_func_list.items(),
-                          key=operator.itemgetter(1), reverse=True)
-    print_count = 0
+
     if alloc_count > 0:
-        print("%10s %10s : %s" % ("OBJ_COUNT", "TOTAL_SIZE", "FUNCTION"))
-    for addr, count in sorted_alloc_func_list:
-        if addr == 0:
-            continue
-        sym_name = get_function_name(addr)
-        print("%10d (%8s) : %s" %
-              (count, get_size_str(count * kmem_cache.object_size),
-               sym_name))
-        print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_alloc_func_list) > 10:
-                print("\n%15s %d %s" % (
-                        "... < skiped ",
-                        len(sorted_alloc_func_list) - 10,
-                        " items > ..."))
-            break
+        show_slab_alloc_result(options, kmem_cache)
 
-    print("")
-    print("Total allocated object count = %d" % (alloc_count))
-    print("      allocated object size  = %s" %
-          (get_size_str(alloc_count * kmem_cache.object_size, True)))
-    print("\n\t", end="")
-    crashcolor.set_color(crashcolor.LIGHTGRAY + crashcolor.UNDERLINE)
-    print("Caution: This size doesn't include data structure and padding, etc")
-    crashcolor.set_color(crashcolor.RESET)
-
-    if not options.details:
-        return
-
-    # Some further details
-    show_alloc_pid_list(options)
-
-    print("\nFrequence of calltraces:")
-    if options.memory_limit > 0 and len(calltrace_list) >= options.memory_limit:
-        print("  (Limited to %d unique patterns for memory optimization)" % options.memory_limit)
-    print("=" * 60)
-    sorted_calltrace_list = sorted(calltrace_list.items(),
-                          key=operator.itemgetter(1), reverse=True)
-    print_count = 0
-    for addr_tuple, count in sorted_calltrace_list:
-        crashcolor.set_color(crashcolor.BLUE)
-        print("%d times:" % (count))
-        crashcolor.set_color(crashcolor.RESET)
-        # Convert tuple back to function names for output
-        for addr in addr_tuple:
-            if addr != 0:  # Skip zero addresses
-                sym_name = get_function_name(addr)
-                if sym_name != None:
-                    print(sym_name)
-        print()
-        print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_calltrace_list) > 10:
-                print("\n%15s %d %s" % (
-                        "... < skiped ",
-                        len(sorted_calltrace_list) - 10,
-                        " items > ..."))
-            break
-
-    # Show optimization summary
     '''
     print("\nOptimization Summary:")
     print("===================")
@@ -2695,7 +2747,7 @@ def show_oom_events(op):
                 is_first_oom = False
                 continue
 
-            if "Out of memory: Killed process" in line:
+            if "Out of memory: Kill" in line or "Killed process" in line:
                 crashcolor.set_color(crashcolor.GREEN)
                 print(line)
                 crashcolor.set_color(crashcolor.RESET)
@@ -2845,6 +2897,8 @@ def show_oom_events(op):
 
 
 def meminfo():
+    global debug_mode
+
     sys.setrecursionlimit(10000000)
 
     op = OptionParser()
@@ -2860,6 +2914,9 @@ def meminfo():
     op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="Show detailed output")
+    op.add_option("--debug", dest="debug", default=0,
+                  action="store_true",
+                  help="Show debug output")
     op.add_option("-e", "--error", dest="error_code", default="",
                   action="store",
                   type="string",
@@ -2885,6 +2942,12 @@ def meminfo():
     op.add_option("-m", "--numa", dest="numa", default=0,
                   action="store_true",
                   help="Show NUMA info")
+    op.add_option("--maxcount", dest="maxcount", default=0,
+                  action="store", type="int",
+                  help="Check only maxcount")
+    op.add_option("--memory_limit", dest="memory_limit", default=0,
+                  action="store", type="int",
+                  help="Limit call trace storage to reduce memory usage (default: 0, no limit)")
     op.add_option("-n", "--nogroup", dest="nogroup", default=0,
                   action="store_true",
                   help="Show data in individual tasks")
@@ -2900,6 +2963,9 @@ def meminfo():
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Convert percpu address into virtual address")
+    op.add_option("--progress", dest="progress", default=0,
+                  action="store_true",
+                  help="Show progress results while handling operation")
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
@@ -2915,12 +2981,6 @@ def meminfo():
     op.add_option("-U", "--user_alloc", dest="user_alloc", default="",
                   action="store", type="string",
                   help="Show slub_debug=U usage")
-    op.add_option("--maxcount", dest="maxcount", default=0,
-                  action="store", type="int",
-                  help="Check only maxcount")
-    op.add_option("--memory_limit", dest="memory_limit", default=0,
-                  action="store", type="int",
-                  help="Limit call trace storage to reduce memory usage (default: 0, no limit)")
     op.add_option("-v", "--vm", dest="vmshow", default=0,
                   action="store_true",
                   help="Show 'vm' output with more details")
@@ -2933,6 +2993,8 @@ def meminfo():
 
 
     (o, args) = op.parse_args()
+
+    debug_mode = o.debug
 
     if (o.pte_flags != ""):
         show_pte_flags(o)
