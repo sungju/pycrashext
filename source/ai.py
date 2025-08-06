@@ -19,6 +19,37 @@ from io import StringIO
 import crashcolor
 import crashhelper
 
+sysinfo = {}
+sys_str = ""
+
+def get_system_info():
+    global sysinfo
+    global sys_str
+
+    if (len(sysinfo) > 0):
+        return
+
+    sys_str = exec_crash_command("sys")
+    resultlines = sys_str.splitlines()
+    for line in resultlines:
+        words = line.split(":")
+        sysinfo[words[0].strip()] = line[len(words[0]) + 2:].strip()
+
+
+
+def get_taskid():
+    global sysinfo
+
+    get_system_info()
+    dump_path = sysinfo["DUMPFILE"]
+
+    task_id = "UNKNOWN_ID"
+    if "/tasks/" in dump_path:
+        task_id = dump_path[dump_path.find("/tasks/") + 7:]
+        task_id = task_id[:task_id.find("/")]
+
+    return task_id
+
 
 question_dict = {}
 
@@ -136,6 +167,9 @@ def ai_send(o, args, cmd_path_list):
 
     options = ""
     cmd_options = ""
+    if o.taskid != "":
+        cmd_options = cmd_options + " -t " + o.taskid
+
     if o.ai_model != "":
         cmd_options = cmd_options + " -m " + o.ai_model
 
@@ -219,8 +253,17 @@ def ai():
                   default="",
                   dest="ai_model",
                   help="Choose AI model to use")
+
+    op.add_option("-t", "--taskid",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="taskid",
+                  help="vmcore taskid")
     (o, args) = op.parse_args()
 
+    if o.taskid == "":
+        o.taskid = get_taskid()
 
     if o.cmd_str != "" or len(args) != 0 or o.input_file != "":
         ai_send(o, args, os.environ["PYKDUMPPATH"])

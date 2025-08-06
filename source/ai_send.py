@@ -1,4 +1,4 @@
-
+import json
 import sys
 import base64
 import requests as r
@@ -34,6 +34,12 @@ def ai_send():
                   default="",
                   dest="ai_model",
                   help="Set AI model to run")
+    op.add_option("-t", "--taskid",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="taskid",
+                  help="vmcore taskid")
     (o, args) = op.parse_args()
 
 
@@ -49,22 +55,23 @@ def ai_send():
 
     encoded_query = base64.b64encode(orig_query.encode())
 
-    data = {"query_str" : encoded_query}
-
+    data = {"query" : encoded_query}
+    data["session_id"] = o.taskid
 
     try:
         model_str = os.environ['AI_MODEL']
         if model_str != '':
-            data['model_str'] = model_str
+            data['model'] = model_str
     except:
         pass
 
     if o.ai_model != "":
-        data['model_str'] = o.ai_model
+        data['model'] = o.ai_model
 
 
     try:
         res = r.post(encode_url, data = data).text
+        parsed = json.loads(res)
     except r.exceptions.RequestException as e:
         res = "\tServer is not reachable.\n" + \
               "\tServer address is <" + encode_url + ">" + \
@@ -74,7 +81,7 @@ def ai_send():
               "\n" + orig_query
 
     # Print the result
-    print (res, end='')
+    print (parsed['response'], end='')
 
 
 
