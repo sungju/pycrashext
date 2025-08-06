@@ -1,3 +1,4 @@
+requests
 Flask>=1.0.0
 pyopenssl
 pyyaml
