@@ -14,3 +14,14 @@ CMD: edis
 - Please shows meaningful register values in table format. Consider to display in 80 columns.
 - Summarise what had happened in the code until to the end.
 CMD_END: edis
+
+CMD: log
+Please anlayse the kernel log.
+
+- Shows memory allocations in table format.
+	- BIOS reservation
+	- Hardware allocation
+	- Kernel allocation
+	- Anything shown in log
+- Find any unusual activities
+CMD_END: log
