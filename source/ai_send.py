@@ -100,8 +100,14 @@ def ai_send():
               "\n" + orig_query
 
     # Print the result
-    print (parsed['response'], end='')
-
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+        console = Console()
+        console.print(Markdown(parsed['response'], code_theme="monokai"))
+    except:
+        print(parsed['response'])
+        print("\nNotes) 'pip install rich' can enhance the output", end='')
 
 
 if ( __name__ == '__main__'):
