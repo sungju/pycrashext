@@ -54,7 +54,7 @@ class SessionThread:
             self.last_activity = datetime.now()
             if reset_history or self.message_history.isEmpty():
                 self.message_history = [{"role": "system",\
-                      "content": "Please provide results in Markdown format. Make result concise"}]
+                      "content": "Provided data is from Linux Kernel memory dump. Please provide concise results in Markdown format."}]
 
             self.message_history.append({"role": "user", "content": prompt})
             self.message_history = self.message_history[-MAX_HISTORY * 2:]
