@@ -745,6 +745,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         print (disasm_str)
         return
 
+
     result_str = ""
     if (o.noaction or not disasm_str.startswith("/")):
         result_str = disasm_str
@@ -766,6 +767,10 @@ def disasm(ins_addr, o, args, cmd_path_list):
                                                     (disasm_str, python_cmd, \
                                                      disasm_path, cmd_options))
                 break
+
+    if (o.fullsource):
+        print(result_str)
+        return
 
     if (o.graph):
         result_str = draw_branches(result_str, o.jump_op_list)

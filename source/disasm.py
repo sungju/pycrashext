@@ -61,6 +61,26 @@ def disasm():
               "\n" + orig_asm
 
     # Print the result
+    if o.fullsource:
+        # Print source code in pretty format
+        '''
+        code_theme options:
+        "manni": Another dark theme with a distinct color palette.
+        "default": A basic theme, often suitable for light terminals.
+        "colorful": A theme designed for a more vibrant appearance.
+        "friendly": A theme with a softer, more approachable color scheme.
+        "solarized-dark": A popular dark theme based on the Solarized color palette.
+        "solarized-light": The light version of the Solarized theme.
+        '''
+        try:
+            from rich.console import Console
+            from rich.markdown import Markdown
+            console = Console(color_system="truecolor")
+            console.print(Markdown("```c\n" + res + "```", code_theme="friendly"))
+            return
+        except Exception as e:
+            pass
+
     print (res, end='')
 
 
