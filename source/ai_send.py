@@ -22,6 +22,12 @@ def ai_send():
 
     # Additional options that can pass to the server
     op = OptionParser()
+    op.add_option("-e", "--engine",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="ai_engine",
+                  help="Set AI engine to run")
     op.add_option("-i", "--input",
                   action="store",
                   type="string",
@@ -58,6 +64,19 @@ def ai_send():
     data = {"query" : encoded_query}
     data["session_id"] = o.taskid
 
+    # AI Engine
+    try:
+        engine_str = os.environ['AI_ENGINE']
+        if engine_str != '':
+            data['engine'] = engine_str
+    except:
+        pass
+
+    if o.ai_engine != "":
+        data['engine'] = o.ai_engine
+
+
+    # AI model
     try:
         model_str = os.environ['AI_MODEL']
         if model_str != '':

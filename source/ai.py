@@ -175,6 +175,9 @@ def ai_send(o, args, cmd_path_list):
 
     options = ""
     cmd_options = ""
+    if o.ai_engine != "":
+        cmd_options = cmd_options + " -e " + o.ai_engine
+
     if o.taskid != "":
         cmd_options = cmd_options + " -t " + o.taskid
 
@@ -249,6 +252,13 @@ def ai():
                   default="",
                   dest="cmd_str",
                   help="The output of this command will be anlaysed")
+
+    op.add_option("-e", "--engine",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="ai_engine",
+                  help="Choose AI engine to use")
 
     op.add_option("-i", "--input",
                   action="store",
