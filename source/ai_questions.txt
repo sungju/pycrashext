@@ -15,6 +15,11 @@ CMD: edis
 - Summarise what had happened in the code until to the end.
 CMD_END: edis
 
+CMD: edis -lr, edis -rl, edis -r, edis -lrn, edis -rln, edis -nrl, edis -nlr
+Please shows what is happening until the end with register value details.
+CMD_END: edis -lr, edis -rl, edis -r, edis -lrn, edis -rln, edis -nrl, edis -nlr
+
+
 CMD: log
 Please anlayse the kernel log.
 

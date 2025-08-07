@@ -15,6 +15,7 @@ import time
 import base64
 import tempfile
 from io import StringIO
+import re
 
 import crashcolor
 import crashhelper
@@ -53,30 +54,6 @@ def get_taskid():
 
 question_dict = {}
 
-def read_ai_questions_from_a_file(filepath):
-    global question_dict
-
-    try:
-        with open(filepath, 'r', encoding="utf-8") as f:
-            lines = f.readlines()
-            cmd_str = ""
-            q_str = ""
-            for line in lines:
-                if line.startswith("CMD:"):
-                    cmd_str = line.split(":")[1].strip()
-                    q_str = ""
-                    continue
-                elif line.startswith("CMD_END:"):
-                    if line.split(":")[1].strip() == cmd_str:
-                        question_dict[cmd_str] = q_str.strip()
-                        cmd_str = q_str = ""
-                        continue
-
-                q_str = q_str + line + "\n"
-    except:
-        pass
-
-
 def read_ai_questions():
     global question_dict
 
@@ -91,7 +68,6 @@ def read_ai_questions():
     except:
         pass
 
-
     user_questions_file = "~/.ai_questions.cfg"
     try:
         user_questions_file = expanduser("~") + "/.ai_questions.cfg"
@@ -100,8 +76,7 @@ def read_ai_questions():
 
     question_dict = {}
     for fpath in [default_file, user_questions_file]:
-        read_ai_questions_from_a_file(fpath)
-
+        question_dict = question_dict | parse_commands(fpath)
 
 
 def is_command_exist(name):
@@ -152,11 +127,49 @@ def get_crash_command_output(cmd_str):
 
 
 
-def find_best_match(d, cmd_str):
-    matching_items = [(k, v) for k, v in d.items() if cmd_str.startswith(k)]
-    if not matching_items:
+def parse_commands(filename):
+    cmd_re = re.compile(r'^\s*CMD:\s*(.+?)\s*$')
+    end_re = re.compile(r'^\s*CMD_END:\s*(.+?)\s*$')
+
+    commands = {}
+    current_variants = None
+    buffer = []
+
+    with open(filename, 'r') as f:
+        for lineno, line in enumerate(f, start=1):
+            cmd_match = cmd_re.match(line)
+            if cmd_match:
+                raw = cmd_match.group(1)
+                variants = [v.strip() for v in raw.split(',')]
+                current_variants = variants
+                buffer = []
+                continue
+
+            end_match = end_re.match(line)
+            if end_match and current_variants:
+                content = ''.join(buffer).strip()
+                for cmd in current_variants:
+                    commands[cmd] = content
+                current_variants = None
+                buffer = []
+                continue
+
+            if current_variants:
+                buffer.append(line)
+
+    return commands
+
+
+def find_best_match(commands, full_input):
+    # Split off parameters — only match the base command
+    base = full_input.split()[0]
+
+    matches = [(cmd, content)
+               for cmd, content in commands.items()
+               if cmd.startswith(base)]
+    if not matches:
         return None
-    return max(matching_items, key=lambda item: len(item[0]))
+    return max(matches, key=lambda x: len(x[0]))
 
 
 def ai_send(o, args, cmd_path_list):
@@ -207,7 +220,7 @@ def ai_send(o, args, cmd_path_list):
                     pass
 
             read_ai_questions()
-            _, match_question = find_best_match(question_dict, o.cmd_str)
+            key, match_question = find_best_match(question_dict, o.cmd_str)
 
             if len(args) != 0:
                 result_str = " ".join(args) + "\n" + result_str
