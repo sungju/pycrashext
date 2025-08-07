@@ -18,7 +18,7 @@ OLLAMA_API_URL = "http://localhost:11434/api/chat"
 PODMAN_API_URL = "http://localhost:65445/v1/chat/completions"
 MODEL_NAME = "llama3.2"
 INACTIVITY_TIMEOUT = timedelta(days=1)
-MAX_HISTORY = 10
+MAX_HISTORY = 15
 
 
 def add_plugin_rule(app):
@@ -54,7 +54,7 @@ class SessionThread:
             self.last_activity = datetime.now()
             if reset_history or self.message_history.isEmpty():
                 self.message_history = [{"role": "system",\
-                      "content": "Please provide results in Markdown format"}]
+                      "content": "Please provide results in Markdown format. Make result concise"}]
 
             self.message_history.append({"role": "user", "content": prompt})
             self.message_history = self.message_history[-MAX_HISTORY * 2:]
