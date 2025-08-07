@@ -197,6 +197,9 @@ def ai_send(o, args, cmd_path_list):
     if o.ai_model != "":
         cmd_options = cmd_options + " -m " + o.ai_model
 
+    if o.reset:
+        cmd_options = cmd_options + " -r "
+
     result_str = ""
     python_list = { "python", "python3", "python2" }
     for python_cmd in python_list:
@@ -286,6 +289,12 @@ def ai():
                   default="",
                   dest="ai_model",
                   help="Choose AI model to use")
+
+    op.add_option("-r", "--reset",
+                  action="store_true",
+                  dest="reset",
+                  default=False,
+                  help="Reset AI prompt history")
 
     op.add_option("-t", "--taskid",
                   action="store",

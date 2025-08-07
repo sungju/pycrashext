@@ -28,18 +28,27 @@ def ai_send():
                   default="",
                   dest="ai_engine",
                   help="Set AI engine to run")
+
     op.add_option("-i", "--input",
                   action="store",
                   type="string",
                   default="",
                   dest="input_file",
                   help="Use file for input data")
+
     op.add_option("-m", "--model",
                   action="store",
                   type="string",
                   default="",
                   dest="ai_model",
                   help="Set AI model to run")
+
+    op.add_option("-r", "--reset",
+                  action="store_true",
+                  dest="reset",
+                  default=False,
+                  help="Reset AI prompt history")
+
     op.add_option("-t", "--taskid",
                   action="store",
                   type="string",
@@ -87,6 +96,8 @@ def ai_send():
     if o.ai_model != "":
         data['model'] = o.ai_model
 
+    if o.reset:
+        data['reset'] = 'reset'
 
     try:
         res = r.post(encode_url, data = data).text
