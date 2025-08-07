@@ -114,8 +114,9 @@ def ai_send():
     try:
         from rich.console import Console
         from rich.markdown import Markdown
-        console = Console()
+        console = Console(color_system="truecolor")
         console.print(Markdown(parsed['response'], code_theme="monokai"))
+        #console.print(Markdown(parsed['response'], code_theme="manni"))
     except:
         print(parsed['response'])
         print("\nNotes) 'pip install rich' can enhance the output", end='')
