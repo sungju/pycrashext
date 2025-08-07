@@ -65,18 +65,21 @@ def disasm():
         # Print source code in pretty format
         '''
         code_theme options:
-        "manni": Another dark theme with a distinct color palette.
-        "default": A basic theme, often suitable for light terminals.
-        "colorful": A theme designed for a more vibrant appearance.
-        "friendly": A theme with a softer, more approachable color scheme.
-        "solarized-dark": A popular dark theme based on the Solarized color palette.
-        "solarized-light": The light version of the Solarized theme.
+        ['abap', 'algol', 'algol_nu', 'arduino', 'autumn', 'bw', 'borland', 'coffee', 'colorful', 'default', 'dracula', 'emacs', 'friendly_grayscale', 'friendly', 'fruity', 'bb', 'gruvbox-dark', 'gruvbox-light', 'igor', 'inkpot', 'lightbulb', 'lilypond', 'lovelace', 'manni', 'material', 'monokai', 'murphy', 'native', 'nord-darker', 'nord', 'one-dark', 'paraiso-dark', 'paraiso-light', 'pastie', 'perldoc', 'rainbow_dash', 'rrt', 'sas', 'solarized-dark', 'solarized-light', 'staroffice', 'stata-dark', 'stata-light', 'tango', 'trac', 'vim', 'vs', 'xcode', 'zenburn']
         '''
         try:
             from rich.console import Console
             from rich.markdown import Markdown
             console = Console(color_system="truecolor")
-            console.print(Markdown("```c\n" + res + "```", code_theme="friendly"))
+            '''
+            # Checking code_theme options with result code
+            from pygments.styles import get_all_styles
+            print(list(get_all_styles()))
+            for style in get_all_styles():
+                console.print("Style: %s" % (style))
+                console.print(Markdown("```c\n" + res + "```", code_theme=style))
+            '''
+            console.print(Markdown("```c\n" + res + "```", code_theme="tango"))
             return
         except Exception as e:
             pass
