@@ -15,6 +15,7 @@ import subprocess
 
 
 OLLAMA_API_URL = "http://localhost:11434/api/chat"
+PODMAN_API_URL = "http://localhost:65445/v1/chat/completions"
 MODEL_NAME = "llama3.2"
 INACTIVITY_TIMEOUT = timedelta(days=1)
 MAX_HISTORY = 10
@@ -48,24 +49,34 @@ class SessionThread:
         self.last_activity = datetime.now()
         self.lock = threading.Lock()
 
-    def send_message(self, prompt, model):
+    def send_message(self, prompt, engine, model):
         with self.lock:
             self.last_activity = datetime.now()
             self.message_history.append({"role": "user", "content": prompt})
             trimmed_history = self.message_history[-MAX_HISTORY * 2:]
+            if engine == "ollama":
+                engine_url = OLLAMA_API_URL
+            elif engine == "podman":
+                engine_url = PODMAN_API_URL
+            else:
+                engine_url = OLLAMA_API_URL
 
             try:
                 response = requests.post(
-                    OLLAMA_API_URL,
+                    engine_url,
                     json={
                         "model": model,
                         "messages": trimmed_history,
                         "stream": False
                     },
-                    timeout=60
+                    timeout=120
                 )
                 json_data = response.json()
-                reply = json_data["message"]["content"]
+                if "choices" in json_data:
+                    reply = json_data["choices"][0]["message"]["content"]
+                else:
+                    reply = json_data["message"]["content"]
+
             except Exception as e:
                 reply = f"Error: {e}"
 
@@ -101,6 +112,11 @@ def ai_analyse():
     data = get_normalized_request_data()
     session_id = data.get("session_id")
     prompt = data.get("query")
+
+    engine = data.get("engine")
+    if not engine:
+        engine = "ollama"
+
     model = data.get("model")
     if not model:
         model = MODEL_NAME
@@ -114,7 +130,7 @@ def ai_analyse():
         return jsonify({"error": "Missing session_id or prompt"}), 400
 
     session = get_or_create_session(session_id)
-    reply = session.send_message(prompt, model)
+    reply = session.send_message(prompt, engine, model)
     return jsonify({"response": reply})
 
 
