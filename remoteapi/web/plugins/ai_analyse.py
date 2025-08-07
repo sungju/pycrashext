@@ -49,11 +49,14 @@ class SessionThread:
         self.last_activity = datetime.now()
         self.lock = threading.Lock()
 
-    def send_message(self, prompt, engine, model):
+    def send_message(self, prompt, engine, model, reset_history=False):
         with self.lock:
             self.last_activity = datetime.now()
             self.message_history.append({"role": "user", "content": prompt})
-            trimmed_history = self.message_history[-MAX_HISTORY * 2:]
+            if reset_history:
+                trimmed_history = self.message_history[-MAX_HISTORY * 2:]
+            else:
+                trimmed_history = []
             if engine == "ollama":
                 engine_url = OLLAMA_API_URL
             elif engine == "podman":
@@ -121,6 +124,12 @@ def ai_analyse():
     if not model:
         model = MODEL_NAME
 
+    reset = data.get("reset")
+    if reset != "":
+        reset_history = True
+    else:
+        reset_history = False
+
     try:
         prompt = base64.b64decode(prompt).decode("utf-8")
     except Exception as e:
@@ -130,7 +139,7 @@ def ai_analyse():
         return jsonify({"error": "Missing session_id or prompt"}), 400
 
     session = get_or_create_session(session_id)
-    reply = session.send_message(prompt, engine, model)
+    reply = session.send_message(prompt, engine, model, reset_history)
     return jsonify({"response": reply})
 
 
