@@ -52,11 +52,13 @@ class SessionThread:
     def send_message(self, prompt, engine, model, reset_history=False):
         with self.lock:
             self.last_activity = datetime.now()
+            if reset_history or self.message_history.isEmpty():
+                self.message_history = [{"role": "system",\
+                      "content": "Please provide results in Markdown format"}]
+
             self.message_history.append({"role": "user", "content": prompt})
-            if reset_history:
-                trimmed_history = self.message_history[-MAX_HISTORY * 2:]
-            else:
-                trimmed_history = []
+            self.message_history = self.message_history[-MAX_HISTORY * 2:]
+
             if engine == "ollama":
                 engine_url = OLLAMA_API_URL
             elif engine == "podman":
@@ -69,7 +71,7 @@ class SessionThread:
                     engine_url,
                     json={
                         "model": model,
-                        "messages": trimmed_history,
+                        "messages": self.message_history,
                         "stream": False
                     },
                     timeout=120
