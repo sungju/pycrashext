@@ -7,7 +7,11 @@ Please analyse the following backtrace from vmcore. Check if there's any known i
 CMD_END: bt
 
 CMD: edis -f
-Please summarise this function.
+Shows the code in pretty format with markdown format.
+
+- Shows full source code
+- Summarize the function's role
+- Any possible buggy code
 CMD_END: edis -f
 
 CMD: edis
