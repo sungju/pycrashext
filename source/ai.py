@@ -135,27 +135,30 @@ def parse_commands(filename):
     current_variants = None
     buffer = []
 
-    with open(filename, 'r') as f:
-        for lineno, line in enumerate(f, start=1):
-            cmd_match = cmd_re.match(line)
-            if cmd_match:
-                raw = cmd_match.group(1)
-                variants = [v.strip() for v in raw.split(',')]
-                current_variants = variants
-                buffer = []
-                continue
+    try:
+        with open(filename, 'r') as f:
+            for lineno, line in enumerate(f, start=1):
+                cmd_match = cmd_re.match(line)
+                if cmd_match:
+                    raw = cmd_match.group(1)
+                    variants = [v.strip() for v in raw.split(',')]
+                    current_variants = variants
+                    buffer = []
+                    continue
 
-            end_match = end_re.match(line)
-            if end_match and current_variants:
-                content = ''.join(buffer).strip()
-                for cmd in current_variants:
-                    commands[cmd] = content
-                current_variants = None
-                buffer = []
-                continue
+                end_match = end_re.match(line)
+                if end_match and current_variants:
+                    content = ''.join(buffer).strip()
+                    for cmd in current_variants:
+                        commands[cmd] = content
+                    current_variants = None
+                    buffer = []
+                    continue
 
-            if current_variants:
-                buffer.append(line)
+                if current_variants:
+                    buffer.append(line)
+    except:
+        pass
 
     return commands
 
