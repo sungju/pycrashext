@@ -79,7 +79,12 @@ def disasm():
                 console.print("Style: %s" % (style))
                 console.print(Markdown("```c\n" + res + "```", code_theme=style))
             '''
-            console.print(Markdown("```c\n" + res + "```", code_theme="tango"))
+            try:
+                code_theme = os.environ['CODE_THEME']
+            except:
+                code_theme = "tango"
+
+            console.print(Markdown("```c\n" + res + "```", code_theme=code_theme))
             return
         except Exception as e:
             pass

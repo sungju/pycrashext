@@ -114,8 +114,13 @@ def ai_send():
     try:
         from rich.console import Console
         from rich.markdown import Markdown
+        try:
+            code_theme = os.environ['CODE_THEME']
+        except:
+            code_theme = "tango"
+
         console = Console(color_system="truecolor")
-        console.print(Markdown(parsed['response'], code_theme="monokai"))
+        console.print(Markdown(parsed['response'], code_theme=code_theme))
         #console.print(Markdown(parsed['response'], code_theme="manni"))
     except:
         print(parsed['response'])
