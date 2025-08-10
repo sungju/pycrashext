@@ -225,9 +225,13 @@ def ai_send(o, args, cmd_path_list):
                     print(e)
                     pass
 
-            read_ai_questions()
-            matchset = find_best_match(question_dict, o.cmd_str)
-            key, match_question  = matchset if matchset != None else ('', '')
+            if o.cmd_str != "":
+                read_ai_questions()
+                matchset = find_best_match(question_dict, o.cmd_str)
+                key, match_question  = matchset if matchset != None else ('', '')
+            else:
+                key = match_question = ""
+
 
             if len(args) != 0:
                 result_str = " ".join(args) + "\n" + result_str
