@@ -1321,6 +1321,8 @@ def show_objects_in_slab(options, kmem_cache, offset):
             show_slabs_in_node(options, kmem_cache, n, offset)
 
         return True
+    except KeyboardInterrupt:
+        return True
     except Exception as e:
         print(e)
         return False
