@@ -1805,6 +1805,8 @@ def show_slub_debug_user_all(options):
         print("")
 
 
+BIG_OBJ_COUNT = 100000
+
 def show_slub_debug_user(options):
     global alloc_func_list
     global alloc_count
@@ -1841,16 +1843,22 @@ def show_slub_debug_user(options):
         offset = offset + kmem_cache.red_left_pad
         offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
 
-    if total_objects > 10000 and options.progress == False:
+    if total_objects > BIG_OBJ_COUNT and options.progress == False:
+        response = ""
         try:
             response = input(f"⚠️ There is {total_objects:,} allocated objects.\nShow progress every how many objects? (0 : no shows): ")
+            if response == "":
+                response = "0"
             pager = int(response)
             print()
             if pager > 0:
                 options.progress = True
                 options.pager = pager
         except:
+            if response == None or response.strip() == "":
+                return
             print(f"Invalid number '{response}'")
+            return
 
     print_slab_layout(kmem_cache, offset)
 
