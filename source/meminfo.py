@@ -1623,8 +1623,6 @@ free_count = 0
 
 calltrace_list = defaultdict(int)
 
-ALLOC_COUNT_UNIT = 2000
-
 def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     global alloc_func_list
     global alloc_pid_list
@@ -1641,7 +1639,7 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
     if options.progress:
         percent = (alloc_count / total_objects) * 100
         print(f"Checked {alloc_count:,} objects out of {total_objects:,}. {percent:.2f}%", end='\r')
-        if alloc_count > 0 and (alloc_count % ALLOC_COUNT_UNIT) == 0:
+        if alloc_count > 0 and (alloc_count % options.pager) == 0:
             print()
             show_slab_alloc_result(options, kmem_cache)
 
@@ -1841,6 +1839,17 @@ def show_slub_debug_user(options):
         offset = offset + kmem_cache.red_left_pad
         offset = offset + (kmem_cache.inuse - kmem_cache.object_size)
 
+    if total_objects > 10000 and options.progress == False:
+        try:
+            response = input(f"⚠️ There is {total_objects:,} allocated objects.\nShow progress every how many objects? (0 : no shows): ")
+            pager = int(response)
+            print()
+            if pager > 0:
+                options.progress = True
+                options.pager = pager
+        except:
+            print(f"Invalid number '{response}'")
+
     print_slab_layout(kmem_cache, offset)
 
     if ((kmem_cache.flags & SLAB_STORE_USER) != SLAB_STORE_USER):
@@ -1871,7 +1880,8 @@ def show_slub_debug_user(options):
     # Process slabs with progress reporting
     processed_slabs = 0
     last_progress = 0
-    batch_size = max(1, total_slabs // 20)  # Report progress every 5%
+    #batch_size = max(1, total_slabs // 20)  # Report progress every 5%
+    batch_size = options.pager
     
     alloc_count = 0
 
@@ -2963,6 +2973,9 @@ def meminfo():
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Convert percpu address into virtual address")
+    op.add_option("--pager", dest="pager", default=2000,
+                  action="store", type="int",
+                  help="Show progress per specified term. default=2000")
     op.add_option("--progress", dest="progress", default=0,
                   action="store_true",
                   help="Show progress results while handling operation")
