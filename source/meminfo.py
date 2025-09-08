@@ -1968,10 +1968,15 @@ def show_slub_debug_user(options):
         print("- Memory limit set to %d (not reached)" % options.memory_limit)
     '''
 
+function_name_dict = {}
 
 def get_function_name(addr):
+    global function_name_dict
+
     if addr == 0:
         return None
+    if addr in function_name_dict:
+        return function_name_dict[addr]
     sym_name = exec_crash_command("sym 0x%x" % (addr))
     words = sym_name.split()
     if len(words) == 5:
@@ -1980,6 +1985,7 @@ def get_function_name(addr):
         sym_name = sym_name[:sym_name.find(" /")] # Don't require source code info
 
     sym_name = sym_name.strip()
+    function_name_dict[addr] = sym_name
     return sym_name
 
 
@@ -2425,8 +2431,9 @@ def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
         if page_ext == 0:
             return None
 
-        #if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
-        #    return None
+        if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
+            return None
+
         page_owner_offset = 0
         if page_owner_ops != None and \
                 member_offset("struct page_ext_operations", "offset") > -1:
@@ -2696,6 +2703,12 @@ def show_page_owner_all(options):
             if options.all and options.details: # shows raw call trace
                 show_page_owner(pfn, page_owner, pageblock_order)
 
+
+    try:
+        with open('/dev/tty', 'w') as tty:
+            print(" " * 70, end="\r", file=tty) # clear the line
+    except:
+        pass
 
     page_usage_dict = {}
     for alloc_func in page_owner_dict:
