@@ -85,3 +85,19 @@ def run_gdb_command_with_file(command, file_content):
 
 def run_crash_command_with_file(command, file_content):
     return run_command_with_file(exec_crash_command, command, file_content)
+
+
+def get_sizeof_struct(struct_name):
+    result_size = 0
+    try:
+        result_str = run_crsh_command(struct_name).splitlines()[-1]
+        size_str = result_str.split()[1]
+        if size_str.startswith("0x"):
+            result_size = int(size_str, 16)
+        else:
+            result_size = int(size_str)
+    except:
+        pass
+
+    return result_size
+

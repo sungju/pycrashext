@@ -13,6 +13,7 @@ import gc  # For garbage collection
 from collections import defaultdict
 
 import crashcolor
+from crashhelper import *
 
 
 debug_mode = False
@@ -62,12 +63,11 @@ def get_machine_symbol(symbol):
                     minus_one_addr = (1 << int(value)) - 1
                 if key == "pagesize":
                     page_size = int(value)
-
-        if symbol in machine_symbols:
-            return machine_symbols[symbol]
-
     except Exception as e:
         pass
+
+    if symbol in machine_symbols:
+        return machine_symbols[symbol]
 
     return ""
 
@@ -2353,20 +2353,18 @@ def section_nr_to_root(sec):
 
 
 def __nr_to_section(nr):
+    global mem_sections
+    global sections_per_root
+    global addr_size
+    global section_root_mask
+
     try:
         root = section_nr_to_root(nr)
-        mem_section_addr = readULong(sym2addr("mem_section"))
-        if mem_section_addr == 0:
-            print("no mem_section")
-            return
-        sections_per_root = int(get_machine_symbol("sections_per_root"))
-        section_root_mask = sections_per_root - 1
+        if len(mem_sections) <= root:
+            return None
 
-
-        addr_size = int(get_machine_symbol("bits")) // 8
-        mem_section_addr = mem_section_addr + (root * addr_size)
-        mem_section_addr = readULong(mem_section_addr)
-        mem_section_array = readSUArray("struct mem_section", mem_section_addr, addr_size)
+        mem_section_addr = mem_sections[root]
+        mem_section_array = readSUArray("struct mem_section", mem_section_addr, sections_per_root)
         mem_section = mem_section_array[nr & section_root_mask]
         return mem_section
     except Exception as e:
@@ -2392,19 +2390,35 @@ PAGE_EXT_YOUNG = 3
 PAGE_EXT_IDLE = 4
 
 
+def __pfn_to_section(pfn):
+    nr = pfn_to_section_nr(pfn)
+    mem_section = __nr_to_section(nr)
+    return mem_section
+
+
 def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
+    global mem_sections
+    '''
+    # Check 'kmem -n' that shows section to pfn
+    # crash> help -v | grep max_mem
+    # max_mem_section_nr: 271
+    '''
+
     try:
-        nr = pfn_to_section_nr(pfn)
-        mem_section = valid_section_nr(nr)
+        mem_section = __pfn_to_section(pfn)
         if mem_section == 0:
             return None
 
         if mem_section == -1:
             return -1
 
+        page_cgroup_size = get_sizeof_struct("struct page_cgroup")
+
+        page_ext = 0
         if member_offset("struct mem_section", "page_cgroup") > -1:
-            page_cgroup = mem_section.page_cgroup + pfn
-            page_ext = page_cgroup.ext
+            if mem_section.page_cgroup != 0:
+                page_cgroup = mem_section.page_cgroup + pfn
+                page_ext = page_cgroup.ext
         else:
             page_ext = mem_section.page_ext
 
@@ -2414,7 +2428,8 @@ def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
         #if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
         #    return None
         page_owner_offset = 0
-        if page_owner_ops != None:
+        if page_owner_ops != None and \
+                member_offset("struct page_ext_operations", "offset") > -1:
             page_owner_offset = page_owner_ops.offset
 
         if member_offset("struct page_ext", "owner") > -1:
@@ -2500,10 +2515,13 @@ def save_page_owner(page_owner):
         trace_entries = get_stack_entries(page_owner)
         nr_entries = len(trace_entries)
 
-    for i in range(nr_entries):
-        alloc_func = trace_entries[nr_entries - i - 1]
-        if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
-            break
+    try:
+        for i in range(nr_entries):
+            alloc_func = trace_entries[nr_entries - i - 1]
+            if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
+                break
+    except:
+        alloc_func = minus_one_addr
 
     if alloc_func == minus_one_addr:
         return
@@ -2557,6 +2575,11 @@ def is_aligned(value, align):
     return ((value & (align - 1)) == 0)
 
 
+mem_sections = []
+sections_per_root = 128
+section_root_mask = 0
+addr_size = 8
+
 def show_page_owner_all(options):
     global page_owner_dict
     global stack_pools
@@ -2565,6 +2588,10 @@ def show_page_owner_all(options):
     global offset_bits
     global valid_bits
     global extra_bits
+    global mem_sections
+    global sections_per_root
+    global section_root_mask
+    global addr_size
 
     page_owner_on = 0
 
@@ -2628,6 +2655,21 @@ def show_page_owner_all(options):
     pfn = min_low_pfn
     max_order = get_max_order()
     pageblock_order = max_order - 1
+
+    sections_per_root = int(get_machine_symbol("sections_per_root"))
+    section_root_mask = sections_per_root - 1
+    addr_size = int(get_machine_symbol("bits")) // 8
+
+    # Get mem_section from crash
+    mem_section_addr = sym2addr("mem_section")
+    mem_section = readULong(mem_section_addr)
+    while True:
+        if mem_section == 0:
+            break
+        mem_sections.append(mem_section)
+        mem_section_addr += 8
+        mem_section = readULong(mem_section_addr)
+
     while pfn < max_pfn:
         page_owner = pfn_to_page_owner(pfn, page_ext_size, page_owner_ops)
         pfn = pfn + 1
