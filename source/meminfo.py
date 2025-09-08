@@ -2543,6 +2543,17 @@ def save_page_owner(page_owner):
 def show_page_owner(pfn, page_owner, pageblock_order):
     global page_owner_dict
 
+    if member_offset("struct page_owner", "nr_entries") > -1:
+        nr_entries = page_owner.nr_entries
+        trace_entries = page_owner.trace_entries
+    else:
+        trace_entries = get_stack_entries(page_owner)
+        nr_entries = len(trace_entries)
+
+
+    if nr_entries == 0:
+        return
+
     if member_offset("struct page_owner", "pid") < 0: # RHEL7
         print('Page allocated via order %d, mask 0x%x' %
               (page_owner.order, page_owner.gfp_mask))
@@ -2557,15 +2568,10 @@ def show_page_owner(pfn, page_owner, pageblock_order):
         print('PFN %d type ... Block %d' %
               (pfn, pfn >> pageblock_order))
 
-    if member_offset("struct page_owner", "nr_entries") > -1:
-        nr_entries = page_owner.nr_entries
-        trace_entries = page_owner.trace_entries
-    else:
-        trace_entries = get_stack_entries(page_owner)
-        nr_entries = len(trace_entries)
-
     for i in range(nr_entries):
         trace_entry = trace_entries[i]
+        if trace_entry == -1 or trace_entry == 0xffffffffffffffff:
+            break
         print("  [<%x>] %s" %
               (trace_entry, ' '.join(get_function_name(trace_entry).split()[2:])))
     print("")
@@ -2672,6 +2678,12 @@ def show_page_owner_all(options):
 
     while pfn < max_pfn:
         page_owner = pfn_to_page_owner(pfn, page_ext_size, page_owner_ops)
+        try:
+            with open('/dev/tty', 'w') as tty:
+                print(f"{pfn:,} out of {max_pfn:,} pages processed."
+                        f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
+        except:
+            pass # ignore if it doesn't work
         pfn = pfn + 1
         if page_owner == -1:
             continue
