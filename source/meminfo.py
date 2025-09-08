@@ -2202,9 +2202,15 @@ def get_swap_from_mm(options, task):
     if member_offset("struct mm_struct", "rss_stat") < 0:
         return 0 # Not available. May need to find another way.
 
-    swap_usage = mm.rss_stat.count[MM_SWAPENTS].counter
-    if swap_usage < 0:
-        swap_usage = mm.rss_stat.count[1].counter
+    swap_usage = 0
+    try:
+        swap_usage = mm.rss_stat.count[MM_SWAPENTS].counter
+        if swap_usage < 0:
+            swap_usage = mm.rss_stat.count[1].counter
+    except:
+        swap_usage = mm.rss_stat[MM_SWAPENTS].count
+        if swap_usage < 0:
+            swap_usage = mm.rss_stat[1].count
 
     return swap_usage * page_size
 
