@@ -37,13 +37,13 @@
 			"help"    : "scheduling information\n\n --classes    - Show scheduling classes\n --details    - Show details"
 		},
 		{
-			"command" : "epstree",
+			"command" : "pstree",
 			"desc"    : "Print process list in tree format",
 			"options" : "-h   - list available options",
 			"help"    : "Print process list in tree format.\n\n -p          - Print process ID\n-g          - Print number of threads\n-s          - Print task state\n-t          - Print a specific task and its children"
 		},
 		{
-			"command" : "emodinfo",
+			"command" : "modinfo",
 			"desc"    : "Module related information",
 			"options" : "-h   - list available options",
 			"help"    : "Module related information.\n\n--disasm <module name>    - Disassemble functions in a module\n--details <module name>   - Show details"
