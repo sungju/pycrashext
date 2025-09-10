@@ -11,7 +11,7 @@ import operator
 import signal
 
 import crashcolor
-import epstree
+import pstree
 import crashhelper
 from datetime import datetime, timedelta
 
@@ -186,7 +186,7 @@ def convert_to_ps_state(state, task_struct):
     st = convert_state(state)
     if task_struct.sessionid == task_struct.tgid:
         st = st + "s"  # is a session leader
-    if epstree.get_thread_count(task_struct) > 0 and \
+    if pstree.get_thread_count(task_struct) > 0 and \
        task_struct == task_struct.group_leader: # Compare the address
         st = st + "l"
 
