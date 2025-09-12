@@ -96,7 +96,8 @@ def get_sizeof_struct(struct_name):
             result_size = int(size_str, 16)
         else:
             result_size = int(size_str)
-    except:
+    except Exception as e:
+        print(e)
         pass
 
     return result_size

@@ -2352,7 +2352,8 @@ def pfn_to_section_nr(pfn):
         pfn_to_section_nr = pfn >> pfn_section_shift
 
         return pfn_to_section_nr
-    except:
+    except Exception as e:
+        print(e)
         return 0
 
 
@@ -2400,6 +2401,7 @@ PAGE_EXT_DEBUG_GUARD = 1
 PAGE_EXT_OWNER = 2
 PAGE_EXT_YOUNG = 3
 PAGE_EXT_IDLE = 4
+PAGE_EXT_OWNER_ALLOCATED = -1
 
 
 def __pfn_to_section(pfn):
@@ -2408,8 +2410,13 @@ def __pfn_to_section(pfn):
     return mem_section
 
 
-def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
+def pfn_to_page_owner(pfn):
     global mem_sections
+    global page_owner_offset
+    global page_ext_size
+    global PAGE_EXT_OWNER
+    global PAGE_EXT_OWNER_ALLOCATED
+
     '''
     # Check 'kmem -n' that shows section to pfn
     # crash> help -v | grep max_mem
@@ -2423,8 +2430,6 @@ def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
 
         if mem_section == -1:
             return -1
-
-        page_cgroup_size = get_sizeof_struct("struct page_cgroup")
 
         page_ext = 0
         if member_offset("struct mem_section", "page_cgroup") > -1:
@@ -2440,16 +2445,16 @@ def pfn_to_page_owner(pfn, page_ext_size, page_owner_ops):
         if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
             return None
 
-        page_owner_offset = 0
-        if page_owner_ops != None and \
-                member_offset("struct page_ext_operations", "offset") > -1:
-            page_owner_offset = page_owner_ops.offset
+        # If it's RHEL8 or above and page_ext is for free, we don't care
+        if PAGE_EXT_OWNER_ALLOCATED > 0 and \
+            (page_ext.flags & (1 << PAGE_EXT_OWNER_ALLOCATED)) == 0:
+            return None
 
         if member_offset("struct page_ext", "owner") > -1:
             page_owner = page_ext.owner
         else:
             page_owner = readSU("struct page_owner", 
-                            Addr(page_ext) + (page_ext_size * pfn) + \
+                            page_ext + (page_ext_size * pfn) + \
                                     page_owner_offset)
 
         return page_owner
@@ -2598,6 +2603,9 @@ mem_sections = []
 sections_per_root = 128
 section_root_mask = 0
 addr_size = 8
+page_owner_offset = 0
+page_owner_ops = None
+page_ext_size = 0
 
 def show_page_owner_all(options):
     global page_owner_dict
@@ -2611,8 +2619,37 @@ def show_page_owner_all(options):
     global sections_per_root
     global section_root_mask
     global addr_size
+    global page_owner_offset
+    global page_owner_ops
+    global page_ext_size
+    global PAGE_EXT_OWNER
+    global PAGE_EXT_OWNER_ALLOCATED
 
     page_owner_on = 0
+    sections_per_root = int(get_machine_symbol("sections_per_root"))
+    section_root_mask = sections_per_root - 1
+    addr_size = int(get_machine_symbol("bits")) // 8
+
+    try:
+        page_ext_flags = EnumInfo("enum page_ext_flags")
+        for enum_name in page_ext_flags:
+            if enum_name == "PAGE_EXT_OWNER":
+                PAGE_EXT_OWNER = page_ext_flags[enum_name]
+            elif enum_name == "PAGE_EXT_OWNER_ALLOCATED":
+                PAGE_EXT_OWNER_ALLOCATED = page_ext_flags[enum_name]
+    except Exception as e:
+        print(e)
+
+
+    try:
+        page_owner_ops = readSymbol("page_owner_ops")
+    except:
+        page_owner_ops = None
+
+    page_owner_offset = 0
+    if page_owner_ops != None and \
+            member_offset("struct page_ext_operations", "offset") > -1:
+        page_owner_offset = page_owner_ops.offset
 
     try:
         page_owner_inited = readSymbol("page_owner_inited")
@@ -2646,11 +2683,6 @@ def show_page_owner_all(options):
         except:
             page_ext_size = -1 # use old RHEL7 method
 
-    try:
-        page_owner_ops = readSymbol("page_owner_ops")
-    except:
-        page_owner_ops = None
-
 
     if symbol_exists("stack_pools"):
         stack_pools = readSymbol("stack_pools")
@@ -2675,28 +2707,32 @@ def show_page_owner_all(options):
     max_order = get_max_order()
     pageblock_order = max_order - 1
 
-    sections_per_root = int(get_machine_symbol("sections_per_root"))
-    section_root_mask = sections_per_root - 1
-    addr_size = int(get_machine_symbol("bits")) // 8
-
     # Get mem_section from crash
-    mem_section_addr = sym2addr("mem_section")
-    mem_section = readULong(mem_section_addr)
+    if PAGE_EXT_OWNER_ALLOCATED == -1:
+        mem_section_addr = sym2addr("mem_section")
+        mem_section = readULong(mem_section_addr)
+    else:
+        mem_section_addr = readSymbol("mem_section")
+        mem_section = readULong(mem_section_addr)
+
     while True:
         if mem_section == 0:
             break
         mem_sections.append(mem_section)
-        mem_section_addr += 8
+        mem_section_addr += addr_size
         mem_section = readULong(mem_section_addr)
 
+
+    try:
+        tty = open('/dev/tty', 'w')
+    except:
+        tty = None
     while pfn < max_pfn:
-        page_owner = pfn_to_page_owner(pfn, page_ext_size, page_owner_ops)
-        try:
-            with open('/dev/tty', 'w') as tty:
-                print(f"{pfn:,} out of {max_pfn:,} pages processed."
+        if tty != None:
+            print(f"{pfn:,} out of {max_pfn:,} pages processed."
                         f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
-        except:
-            pass # ignore if it doesn't work
+
+        page_owner = pfn_to_page_owner(pfn)
         pfn = pfn + 1
         if page_owner == -1:
             continue
@@ -2710,11 +2746,9 @@ def show_page_owner_all(options):
                 show_page_owner(pfn, page_owner, pageblock_order)
 
 
-    try:
-        with open('/dev/tty', 'w') as tty:
-            print(" " * 70, end="\r", file=tty) # clear the line
-    except:
-        pass
+    if tty != None:
+        print(" " * 70, end="\r", file=tty) # clear the line
+        close(tty)
 
     page_usage_dict = {}
     for alloc_func in page_owner_dict:
