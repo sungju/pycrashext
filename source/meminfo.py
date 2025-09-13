@@ -2533,14 +2533,16 @@ def save_page_owner(page_owner):
 
     alloc_func = minus_one_addr # 0xffffffffffffffff
 
-    if member_offset("struct page_owner", "nr_entries") > -1:
-        nr_entries = page_owner.nr_entries
-        trace_entries = page_owner.trace_entries
-    elif member_offset("struct page_owner", "handle") > -1:
-        trace_entries = get_stack_entries(page_owner)
-        nr_entries = len(trace_entries)
-
     try:
+        if member_offset("struct page_owner", "nr_entries") > -1:
+            nr_entries = page_owner.nr_entries
+            trace_entries = page_owner.trace_entries
+        elif member_offset("struct page_owner", "handle") > -1:
+            trace_entries = get_stack_entries(page_owner)
+            nr_entries = len(trace_entries)
+        else:
+            return
+
         for i in range(nr_entries):
             alloc_func = trace_entries[nr_entries - i - 1]
             if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
@@ -2753,16 +2755,19 @@ def show_page_owner_all(options):
 
         page_owner = pfn_to_page_owner(pfn)
         pfn = pfn + 1
-        if page_owner == -1:
+        if page_owner == -1 or page_owner == 0:
             continue
         if page_owner != None and page_owner.order < nr_free_areas:
             #if not is_aligned(pfn, 1 << page_owner.order):
             #    continue
-            save_page_owner(page_owner)
             pfn = pfn + (2 ** page_owner.order) - 1
+            try:
+                save_page_owner(page_owner)
 
-            if options.all and options.details: # shows raw call trace
-                show_page_owner(pfn, page_owner, pageblock_order)
+                if options.all and options.details: # shows raw call trace
+                    show_page_owner(pfn, page_owner, pageblock_order)
+            except Exception as e:
+                print(e)
 
 
     if tty != None:
