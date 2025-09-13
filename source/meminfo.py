@@ -2474,6 +2474,9 @@ def pfn_to_page_owner(pfn):
 
 
 page_owner_dict = {}
+alloc_by_dict = {}
+alloc_type_dict = {}
+alloc_module_dict = {}
 nr_free_areas = 11
 
 pool_index_bits = 21
@@ -2563,40 +2566,63 @@ def get_trace_entries(page_owner):
 
 
 def save_page_owner(page_owner, nr_entries, trace_entries):
-    global page_owner_dict
+    global alloc_by_dict
+    global alloc_type_dict
+    global alloc_module_dict
     global minus_one_addr
     global nr_free_areas
 
     alloc_func = minus_one_addr # 0xffffffffffffffff
 
+    by_whom = ""
+    mod_name = ""
+    by_type = ""
+
+    if member_offset("struct page_owner", "pid") >= 0:
+        by_type = "%d (%s)" % (page_owner.pid, page_owner.comm)
+
     try:
         for i in range(nr_entries):
-            alloc_func = trace_entries[nr_entries - i - 1]
-            if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
+            trace_entry = trace_entries[i]
+            if trace_entry == -1 or trace_entry == minus_one_addr:
                 break
+            trace_name = ' '.join(get_function_name(trace_entry).split()[2:])
+            words = trace_name.split()
+            if "[" in words[-1] and mod_name == "":
+                mod_name = words[-1][1:-1]
+
+            by_whom = by_whom + ("\n\t  [<%x>] %s" % (trace_entry,\
+                      ' '.join(get_function_name(trace_entry).split()[2:])))
     except:
-        alloc_func = minus_one_addr
+        pass
 
-    if alloc_func == minus_one_addr:
-        return
+    size = (2 ** page_owner.order) * page_size
+    if by_whom != "":
+        pages = size
+        if by_whom in alloc_by_dict:
+            pages = pages + alloc_by_dict[by_whom]
 
-    if alloc_func not in page_owner_dict:
-        size = 0
-        page_owner_list = []
-    else:
-       page_owner_entry = page_owner_dict[alloc_func]
-       size = page_owner_entry["total_size"]
-       page_owner_list = page_owner_entry["page_owner_list"]
+        alloc_by_dict[by_whom] = size
 
-    size = size + (2 ** page_owner.order) * page_size
-    page_owner_list.append(page_owner)
-    page_owner_dict[alloc_func] = { "total_size" : size,
-                                    "page_owner_list" : page_owner_list }
+    if by_type != "":
+        pages = size
+        if by_type in alloc_type_dict:
+            pages = pages + alloc_type_dict[by_type]
+
+        alloc_type_dict[by_type] = pages
+
+    if mod_name != "":
+        pages = size
+        if mod_name in alloc_module_dict:
+            pages = pages + alloc_module_dict[mod_name]
+
+        alloc_module_dict[mod_name] = pages
+
+
 
 
 def show_page_owner(pfn, page_owner, pageblock_order,\
         nr_entries, trace_entries):
-    global page_owner_dict
     global nr_free_areas
 
     if member_offset("struct page_owner", "pid") < 0: # RHEL7
@@ -2638,8 +2664,155 @@ kernel_end_addr = 0x0
 modules_start_addr = 0x0
 modules_end_addr = 0x0
 
+
+def print_page_owner_summary(options, file):
+    global alloc_by_dict
+    global alloc_type_dict
+    global alloc_module_dict
+
+    if options.maxcount > 0:
+        n_items = options.maxcount
+    else:
+        n_items = 10
+    n_items = n_items - 1
+
+    if len(alloc_by_dict) > 0:
+        print("By call trace", file)
+        print("=============", file)
+        sorted_usage = sorted(alloc_by_dict.items(),
+                key=operator.itemgetter(1), reverse=options.reverse)
+
+        sum_size = 0
+        print_count = 0
+        total_count = len(sorted_usage) - 1
+        if options.all:
+            print_start = 0
+            print_end = total_count
+        else:
+            if options.reverse:
+                print_start = 0
+                print_end = min(total_count, n_items)
+            else:
+                print_start = total_count - n_items
+                if print_start < 0:
+                    print_start = 0
+                print_end = total_count
+
+        skip_printed = False
+
+        for by_whom, pages in sorted_usage:
+            sum_size = sum_size + pages
+
+            if print_start <= print_count <= print_end:
+                print("\n%s : %s" % (get_size_str(pages * page_size), by_whom), file)
+            else:
+                if len(sorted_usage) > n_items:
+                    if not skip_printed:
+                        print("\n%15s %d %s" % ("... < skipped ",
+                                        len(sorted_usage) - n_items,
+                                        " items > ..."), file)
+                    skip_printed = True
+
+            print_count = print_count + 1
+
+        if sum_size > 0:
+            print("\nTotal allocated size : %s (%s kB)" % \
+                          (get_size_str(sum_size * page_size),
+                           '{:,.0f}'.format(sum_size * page_size / 1024)), file)
+
+
+    if len(alloc_module_dict) > 0:
+        print("\nBy allocated modules", file)
+        print(  "====================", file)
+        sorted_usage = sorted(alloc_module_dict.items(),
+                key=operator.itemgetter(1), reverse=options.reverse)
+
+        sum_size = 0
+        print_count = 0
+        total_count = len(sorted_usage) - 1
+        if options.all:
+            print_start = 0
+            print_end = total_count
+        else:
+            if options.reverse:
+                print_start = 0
+                print_end = min(total_count, n_items)
+            else:
+                print_start = total_count - n_items
+                if print_start < 0:
+                    print_start = 0
+                print_end = total_count
+
+        skip_printed = False
+        for mod_name, pages in sorted_usage:
+            sum_size = sum_size + pages
+
+            if print_start <= print_count <= print_end:
+                print("%10s : %s" % \
+                      (get_size_str(pages * page_size), mod_name), file)
+            else:
+                if len(sorted_usage) > n_items:
+                    if not skip_printed:
+                        print("\n%15s %d %s" % ( "... < skipped ",
+                                        len(sorted_usage) - n_items,
+                                        " items > ..."), file)
+                    skip_printed = True
+
+            print_count = print_count + 1
+
+        if sum_size > 0:
+            print("\nTotal allocated by modules : %s (%s kB)" % \
+                              (get_size_str(sum_size * page_size),
+                               '{:,.0f}'.format(sum_size * page_size / 1024)), file)
+
+
+    if len(alloc_type_dict) > 0:
+        print("\nBy allocation type", file)
+        print(  "==================", file)
+        sorted_usage = sorted(alloc_type_dict.items(),
+                key=operator.itemgetter(1), reverse=options.reverse)
+
+        sum_size = 0
+        print_count = 0
+        total_count = len(sorted_usage) - 1
+        if options.all:
+            print_start = 0
+            print_end = total_count
+        else:
+            if options.reverse:
+                print_start = 0
+                print_end = min(total_count, n_items)
+            else:
+                print_start = total_count - n_items
+                if print_start < 0:
+                    print_start = 0
+                print_end = total_count
+
+        skip_printed = False
+        for by_type, pages in sorted_usage:
+            sum_size = sum_size + pages
+
+            if print_start <= print_count <= print_end:
+                print("%10s : %s" % \
+                        (get_size_str(pages * page_size), by_type), file)
+            else:
+                if len(sorted_usage) > n_items:
+                    if not skip_printed:
+                        print("\n%15s %d %s" % ("... < skipped ",
+                                    len(sorted_usage) - n_items,
+                                    " items > ..."), file)
+                    skip_printed = True
+
+            print_count = print_count + 1
+
+    print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file)
+
+
 def show_page_owner_all(options):
-    global page_owner_dict
+    global alloc_by_dict
+    global alloc_type_dict
+    global alloc_module_dict
+
     global stack_pools
     global stack_handle_version
     global pool_index_bits
@@ -2662,6 +2835,9 @@ def show_page_owner_all(options):
     global modules_end_addr
 
     page_owner_on = 0
+    alloc_by_dict = {}
+    alloc_type_dict = {}
+    alloc_module_dict = {}
 
     kernel_start_addr = sym2addr("_stext")
     kernel_end_addr = sym2addr("_etext")
@@ -2805,32 +2981,8 @@ def show_page_owner_all(options):
     if tty != None:
         print(" " * 70, end="\r", file=tty) # clear the line
 
-    page_usage_dict = {}
-    for alloc_func in page_owner_dict:
-        page_usage_dict[alloc_func] = page_owner_dict[alloc_func]["total_size"]
+    print_page_owner_summary(options, tty)
 
-
-    sorted_usage = sorted(page_usage_dict.items(),
-                          key=operator.itemgetter(1), reverse=not options.all)
-
-    print_count = 0
-    sum_size = 0
-    for alloc_func, total_size in sorted_usage:
-        sum_size = sum_size + total_size
-
-        print("%10s : %s" % (get_size_str(total_size), get_function_name(alloc_func)), file=tty)
-        print_count = print_count + 1
-        if not options.all and print_count > 9:
-            if len(sorted_usage) > 10:
-                print("\n%15s %d %s" % (
-                        "... < skiped ",
-                        len(sorted_usage) - 10,
-                        " items > ..."), file=tty)
-                sum_size = -1
-                break
-
-    if sum_size > 0:
-        print("\nTotal allocated size : %s" % (get_size_str(sum_size)), file=tty)
     if tty != None:
         tty.close()
 
@@ -3153,6 +3305,9 @@ def meminfo():
     op.add_option("--progress", dest="progress", default=0,
                   action="store_true",
                   help="Show progress results while handling operation")
+    op.add_option("--reverse", dest="reverse", default=0,
+                  action="store_true",
+                  help="Show results in reverse order")
     op.add_option("-s", "--slabtop", dest="slabtop", default=0,
                   action="store_true",
                   help="Show slabtop-like output")
