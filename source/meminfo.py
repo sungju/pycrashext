@@ -2447,7 +2447,7 @@ def pfn_to_page_owner(pfn):
         else:
             if mem_section.page_ext > 0:
                 page_ext = readSU("struct page_ext",
-                            (mem_section.page_ext) + (page_ext_size * pfn))
+                            Addr(mem_section.page_ext) + (page_ext_size * pfn))
 
         if page_ext == 0:
             return None
