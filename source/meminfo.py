@@ -2489,7 +2489,11 @@ def get_stack_entries(page_owner):
     global stack_pools
     global stack_handle_version
 
+    entries = []
+
     handle = page_owner.handle
+    if handle == 0:
+        return entries
 
     pool_index = extract_bits(handle, 0, pool_index_bits)
     pool_index -= 1
@@ -2510,7 +2514,6 @@ def get_stack_entries(page_owner):
     else:
         extra = 0
 
-    entries = []
     try:
         pool = stack_pools[pool_index]
         if pool == None:
@@ -2526,13 +2529,7 @@ def get_stack_entries(page_owner):
     return entries
 
 
-def save_page_owner(page_owner):
-    global page_owner_dict
-    global minus_one_addr
-    global nr_free_areas
-
-    alloc_func = minus_one_addr # 0xffffffffffffffff
-
+def get_trace_entries(page_owner):
     try:
         if member_offset("struct page_owner", "nr_entries") > -1:
             nr_entries = page_owner.nr_entries
@@ -2541,8 +2538,23 @@ def save_page_owner(page_owner):
             trace_entries = get_stack_entries(page_owner)
             nr_entries = len(trace_entries)
         else:
-            return
+            nr_entries = 0
+            trace_entries = []
+    except:
+        nr_entries = 0
+        trace_entries = []
 
+    return (nr_entries, trace_entries)
+
+
+def save_page_owner(page_owner, nr_entries, trace_entries):
+    global page_owner_dict
+    global minus_one_addr
+    global nr_free_areas
+
+    alloc_func = minus_one_addr # 0xffffffffffffffff
+
+    try:
         for i in range(nr_entries):
             alloc_func = trace_entries[nr_entries - i - 1]
             if alloc_func != minus_one_addr: # skip invalid kernel symbol : 0xffffffffffffffff
@@ -2567,22 +2579,10 @@ def save_page_owner(page_owner):
                                     "page_owner_list" : page_owner_list }
 
 
-def show_page_owner(pfn, page_owner, pageblock_order):
+def show_page_owner(pfn, page_owner, pageblock_order,\
+        nr_entries, trace_entries):
     global page_owner_dict
     global nr_free_areas
-
-    if member_offset("struct page_owner", "nr_entries") > -1:
-        nr_entries = page_owner.nr_entries
-        trace_entries = page_owner.trace_entries
-    elif member_offset("struct page_owner", "handle") > -1:
-        trace_entries = get_stack_entries(page_owner)
-        nr_entries = len(trace_entries)
-    else:
-        return
-
-
-    if nr_entries == 0:
-        return
 
     if member_offset("struct page_owner", "pid") < 0: # RHEL7
         print('Page allocated via order %d, mask 0x%x' %
@@ -2760,12 +2760,17 @@ def show_page_owner_all(options):
         if page_owner != None and page_owner.order < nr_free_areas:
             #if not is_aligned(pfn, 1 << page_owner.order):
             #    continue
+            (nr_entries, trace_entries) = get_trace_entries(page_owner)
+            if nr_entries == 0:
+                continue
+
             pfn = pfn + (2 ** page_owner.order) - 1
             try:
-                save_page_owner(page_owner)
+                save_page_owner(page_owner, nr_entries, trace_entries)
 
                 if options.all and options.details: # shows raw call trace
-                    show_page_owner(pfn, page_owner, pageblock_order)
+                    show_page_owner(pfn, page_owner, pageblock_order,\
+                            nr_entries, trace_entries)
             except Exception as e:
                 print(e)
 
