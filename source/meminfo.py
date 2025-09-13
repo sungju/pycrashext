@@ -2441,7 +2441,8 @@ def pfn_to_page_owner(pfn):
                 page_cgroup = mem_section.page_cgroup + pfn
                 page_ext = page_cgroup.ext
         else:
-            page_ext = mem_section.page_ext + (page_ext_size * pfn)
+            if mem_section.page_ext > 0:
+                page_ext = mem_section.page_ext + (page_ext_size * pfn)
 
         if page_ext == 0:
             return None
@@ -2450,8 +2451,8 @@ def pfn_to_page_owner(pfn):
             return None
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
-        if PAGE_EXT_OWNER_ALLOCATED > 0 and \
-            (page_ext.flags & (1 << PAGE_EXT_OWNER_ALLOCATED)) == 0:
+        if (PAGE_EXT_OWNER_ALLOCATED >= 0) and \
+            ((page_ext.flags & (1 << PAGE_EXT_OWNER_ALLOCATED)) == 0):
             return None
 
         if member_offset("struct page_ext", "owner") > -1:
