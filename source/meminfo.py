@@ -7,6 +7,7 @@ from pykdump.API import *
 from LinuxDump import Tasks
 from LinuxDump import percpu
 
+import os
 import sys
 import operator
 import gc  # For garbage collection
@@ -45,16 +46,19 @@ def check_global_symbols():
 machine_symbols = {}
 minus_one_addr = 0
 
-def get_machine_symbol(symbol):
+def get_machine_symbol(symbol, cmd="help -m"):
     global machine_symbols
     global minus_one_addr
     global page_size
 
     try:
-        if len(machine_symbols) == 0:
-            help_s_out = exec_crash_command("help -m")
+        #if len(machine_symbols) == 0:
+        if (len(machine_symbols) == 0) or (symbol not in machine_symbols):
+            help_s_out = exec_crash_command(cmd)
             lines = help_s_out.splitlines()
             for line in lines:
+                if ":" not in line:
+                    continue
                 words = line.split(":")
                 key = words[0].strip()
                 value = words[1].strip()
@@ -2437,7 +2441,7 @@ def pfn_to_page_owner(pfn):
                 page_cgroup = mem_section.page_cgroup + pfn
                 page_ext = page_cgroup.ext
         else:
-            page_ext = mem_section.page_ext
+            page_ext = mem_section.page_ext + (page_ext_size * pfn)
 
         if page_ext == 0:
             return None
@@ -2454,8 +2458,7 @@ def pfn_to_page_owner(pfn):
             page_owner = page_ext.owner
         else:
             page_owner = readSU("struct page_owner", 
-                            page_ext + (page_ext_size * pfn) + \
-                                    page_owner_offset)
+                            Addr(page_ext) + page_owner_offset)
 
         return page_owner
     except Exception as e:
@@ -2464,11 +2467,12 @@ def pfn_to_page_owner(pfn):
 
 
 page_owner_dict = {}
+nr_free_areas = 11
 
 pool_index_bits = 21
 offset_bits = 10
 valid_bits = 1
-extra_bits = 0
+extra_bits = 5
 
 DEPOT_STACK_ALIGN = 4
 
@@ -2487,6 +2491,7 @@ def get_stack_entries(page_owner):
     handle = page_owner.handle
 
     pool_index = extract_bits(handle, 0, pool_index_bits)
+    pool_index -= 1
 
     offset = extract_bits(handle,\
             pool_index_bits,\
@@ -2523,13 +2528,17 @@ def get_stack_entries(page_owner):
 def save_page_owner(page_owner):
     global page_owner_dict
     global minus_one_addr
+    global nr_free_areas
+
+    if page_owner.order >= nr_free_areas:
+        return
 
     alloc_func = minus_one_addr # 0xffffffffffffffff
 
     if member_offset("struct page_owner", "nr_entries") > -1:
         nr_entries = page_owner.nr_entries
         trace_entries = page_owner.trace_entries
-    else:
+    elif member_offset("struct page_owner", "handle") > -1:
         trace_entries = get_stack_entries(page_owner)
         nr_entries = len(trace_entries)
 
@@ -2560,13 +2569,20 @@ def save_page_owner(page_owner):
 
 def show_page_owner(pfn, page_owner, pageblock_order):
     global page_owner_dict
+    global nr_free_areas
+
+    if page_owner.order >= nr_free_areas:
+        return
+
 
     if member_offset("struct page_owner", "nr_entries") > -1:
         nr_entries = page_owner.nr_entries
         trace_entries = page_owner.trace_entries
-    else:
+    elif member_offset("struct page_owner", "handle") > -1:
         trace_entries = get_stack_entries(page_owner)
         nr_entries = len(trace_entries)
+    else:
+        return
 
 
     if nr_entries == 0:
@@ -2624,8 +2640,11 @@ def show_page_owner_all(options):
     global page_ext_size
     global PAGE_EXT_OWNER
     global PAGE_EXT_OWNER_ALLOCATED
+    global nr_free_areas
 
     page_owner_on = 0
+
+    nr_free_areas = int(get_machine_symbol("nr_free_areas", "help -v"))
     sections_per_root = int(get_machine_symbol("sections_per_root"))
     section_root_mask = sections_per_root - 1
     addr_size = int(get_machine_symbol("bits")) // 8
@@ -2688,10 +2707,16 @@ def show_page_owner_all(options):
         stack_pools = readSymbol("stack_pools")
         stack_handle_version = 2
 
-        pool_index_bits = 16
-        offset_bits = 10
-        valid_bits = 1
-        extra_bits = 5
+        if member_offset("union handle_parts", "valid_bits") > -1:
+            pool_index_bits = 16
+            offset_bits = 10
+            valid_bits = 1
+            extra_bits = 5
+        else:
+            pool_index_bits = 17
+            offset_bits = 10
+            valid_bits = 0
+            extra_bits = 5
     elif symbol_exists("stack_slabs"):
         stack_pools = readSymbol("stack_slabs")
         stack_handle_version = 1
@@ -2726,7 +2751,7 @@ def show_page_owner_all(options):
     try:
         tty = open('/dev/tty', 'w')
     except:
-        tty = None
+        tty = os.fdopen(os.dup(sys.stdout.fileno()), 'w')
     while pfn < max_pfn:
         if tty != None:
             print(f"{pfn:,} out of {max_pfn:,} pages processed."
@@ -2748,7 +2773,6 @@ def show_page_owner_all(options):
 
     if tty != None:
         print(" " * 70, end="\r", file=tty) # clear the line
-        close(tty)
 
     page_usage_dict = {}
     for alloc_func in page_owner_dict:
@@ -2763,19 +2787,21 @@ def show_page_owner_all(options):
     for alloc_func, total_size in sorted_usage:
         sum_size = sum_size + total_size
 
-        print("%10s : %s" % (get_size_str(total_size), get_function_name(alloc_func)))
+        print("%10s : %s" % (get_size_str(total_size), get_function_name(alloc_func)), file=tty)
         print_count = print_count + 1
         if not options.all and print_count > 9:
             if len(sorted_usage) > 10:
                 print("\n%15s %d %s" % (
                         "... < skiped ",
                         len(sorted_usage) - 10,
-                        " items > ..."))
+                        " items > ..."), file=tty)
                 sum_size = -1
                 break
 
     if sum_size > 0:
-        print("\nTotal allocated size : %s" % (get_size_str(sum_size)))
+        print("\nTotal allocated size : %s" % (get_size_str(sum_size)), file=tty)
+    if tty != None:
+        tty.close()
 
 
 def show_oom_meminfo(op, meminfo_dict):
