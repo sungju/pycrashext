@@ -2414,6 +2414,10 @@ def __pfn_to_section(pfn):
     return mem_section
 
 
+def test_bit(bit_index, flags):
+    return (flags >> bit_index) & 1
+
+
 def pfn_to_page_owner(pfn):
     global mem_sections
     global page_owner_offset
@@ -2447,12 +2451,13 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0:
             return None
 
-        if (page_ext.flags & (1 << PAGE_EXT_OWNER)) == 0:
+
+        if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
             return None
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
         if (PAGE_EXT_OWNER_ALLOCATED >= 0) and \
-            ((page_ext.flags & (1 << PAGE_EXT_OWNER_ALLOCATED)) == 0):
+                not test_bit(PAGE_EXT_OWNER_ALLOCATED, page_ext.flags):
             return None
 
         if member_offset("struct page_ext", "owner") > -1:
@@ -2488,6 +2493,10 @@ def extract_bits(number, low_bit, length):
 def get_stack_entries(page_owner):
     global stack_pools
     global stack_handle_version
+    global kernel_start_addr
+    global kernel_end_addr
+    global modules_start_addr
+    global modules_end_addr
 
     entries = []
 
@@ -2522,7 +2531,12 @@ def get_stack_entries(page_owner):
         stack_record = readSU("struct stack_record", pool + offset)
 
         for i in range(stack_record.size):
-            entries.append(stack_record.entries[i])
+            sym_addr = stack_record.entries[i]
+            if (kernel_start_addr <= sym_addr <= kernel_end_addr) or \
+                (modules_start_addr <= sym_addr <= modules_end_addr):
+                entries.append(stack_record.entries[i])
+            else:
+                break
     except:
         pass
 
@@ -2618,6 +2632,10 @@ addr_size = 8
 page_owner_offset = 0
 page_owner_ops = None
 page_ext_size = 0
+kernel_start_addr = 0x0
+kernel_end_addr = 0x0
+modules_start_addr = 0x0
+modules_end_addr = 0x0
 
 def show_page_owner_all(options):
     global page_owner_dict
@@ -2637,9 +2655,17 @@ def show_page_owner_all(options):
     global PAGE_EXT_OWNER
     global PAGE_EXT_OWNER_ALLOCATED
     global nr_free_areas
+    global kernel_start_addr
+    global kernel_end_addr
+    global modules_start_addr
+    global modules_end_addr
 
     page_owner_on = 0
 
+    kernel_start_addr = sym2addr("_stext")
+    kernel_end_addr = sym2addr("_etext")
+    modules_start_addr = int(get_machine_symbol("modules_vaddr"), 16)
+    modules_end_addr = int(get_machine_symbol("modules_end"), 16)
     nr_free_areas = int(get_machine_symbol("nr_free_areas", "help -v"))
     sections_per_root = int(get_machine_symbol("sections_per_root"))
     section_root_mask = sections_per_root - 1
