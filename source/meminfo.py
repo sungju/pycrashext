@@ -2531,9 +2531,6 @@ def save_page_owner(page_owner):
     global minus_one_addr
     global nr_free_areas
 
-    if page_owner.order >= nr_free_areas:
-        return
-
     alloc_func = minus_one_addr # 0xffffffffffffffff
 
     if member_offset("struct page_owner", "nr_entries") > -1:
@@ -2571,10 +2568,6 @@ def save_page_owner(page_owner):
 def show_page_owner(pfn, page_owner, pageblock_order):
     global page_owner_dict
     global nr_free_areas
-
-    if page_owner.order >= nr_free_areas:
-        return
-
 
     if member_offset("struct page_owner", "nr_entries") > -1:
         nr_entries = page_owner.nr_entries
@@ -2762,7 +2755,7 @@ def show_page_owner_all(options):
         pfn = pfn + 1
         if page_owner == -1:
             continue
-        if page_owner != None:
+        if page_owner != None and page_owner.order < nr_free_areas:
             #if not is_aligned(pfn, 1 << page_owner.order):
             #    continue
             save_page_owner(page_owner)
