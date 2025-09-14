@@ -2452,7 +2452,6 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0:
             return None
 
-
         if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
             return None
 
@@ -2467,6 +2466,7 @@ def pfn_to_page_owner(pfn):
             page_owner = readSU("struct page_owner", 
                             Addr(page_ext) + page_owner_offset)
 
+        page_ext = None
         return page_owner
     except Exception as e:
         print(e)
@@ -2971,11 +2971,13 @@ def show_page_owner_all(options):
                 continue
 
             try:
-                save_page_owner(page_owner, nr_entries, trace_entries)
-
+                # to get summary use 'meminfo -o' or 'meminfo -oa'
+                # to get full page_owner list, 'meminfo -oda'
                 if options.all and options.details: # shows raw call trace
                     show_page_owner(pfn, page_owner, pageblock_order,\
                             nr_entries, trace_entries)
+                else: # save for summary output
+                    save_page_owner(page_owner, nr_entries, trace_entries)
 
                 pfn = pfn + (2 ** page_owner.order) - 1
             except Exception as e:
@@ -2983,11 +2985,17 @@ def show_page_owner_all(options):
 
         pfn = pfn + 1
 
+        trace_entries = []
+        page_owner = None
+        if (pfn % 100000) == 0:
+            gc.collect()
+
 
     if tty != None:
         print(" " * 70, end="\r", file=tty) # clear the line
 
-    print_page_owner_summary(options, tty)
+    if not (options.all and options.details): # shows summary
+        print_page_owner_summary(options, tty)
 
     if tty != None:
         tty.close()
