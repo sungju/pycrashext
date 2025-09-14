@@ -2971,13 +2971,11 @@ def show_page_owner_all(options):
                 continue
 
             try:
-                # to get summary use 'meminfo -o' or 'meminfo -oa'
-                # to get full page_owner list, 'meminfo -oda'
+                save_page_owner(page_owner, nr_entries, trace_entries)
+
                 if options.all and options.details: # shows raw call trace
                     show_page_owner(pfn, page_owner, pageblock_order,\
                             nr_entries, trace_entries)
-                else: # save for summary output
-                    save_page_owner(page_owner, nr_entries, trace_entries)
 
                 pfn = pfn + (2 ** page_owner.order) - 1
             except Exception as e:
@@ -2994,8 +2992,7 @@ def show_page_owner_all(options):
     if tty != None:
         print(" " * 70, end="\r", file=tty) # clear the line
 
-    if not (options.all and options.details): # shows summary
-        print_page_owner_summary(options, tty)
+    print_page_owner_summary(options, tty)
 
     if tty != None:
         tty.close()
