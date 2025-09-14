@@ -2596,13 +2596,13 @@ def save_page_owner(page_owner, nr_entries, trace_entries):
     except:
         pass
 
-    size = (2 ** page_owner.order) * page_size
+    size = (2 ** page_owner.order)
     if by_whom != "":
         pages = size
         if by_whom in alloc_by_dict:
             pages = pages + alloc_by_dict[by_whom]
 
-        alloc_by_dict[by_whom] = size
+        alloc_by_dict[by_whom] = pages
 
     if by_type != "":
         pages = size
@@ -2677,8 +2677,8 @@ def print_page_owner_summary(options, file):
     n_items = n_items - 1
 
     if len(alloc_by_dict) > 0:
-        print("By call trace", file)
-        print("=============", file)
+        print("By call trace", file=file)
+        print("=============", file=file)
         sorted_usage = sorted(alloc_by_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -2704,13 +2704,13 @@ def print_page_owner_summary(options, file):
             sum_size = sum_size + pages
 
             if print_start <= print_count <= print_end:
-                print("\n%s : %s" % (get_size_str(pages * page_size), by_whom), file)
+                print("\n%s : %s" % (get_size_str(pages * page_size), by_whom), file=file)
             else:
                 if len(sorted_usage) > n_items:
                     if not skip_printed:
                         print("\n%15s %d %s" % ("... < skipped ",
                                         len(sorted_usage) - n_items,
-                                        " items > ..."), file)
+                                        " items > ..."), file=file)
                     skip_printed = True
 
             print_count = print_count + 1
@@ -2718,12 +2718,12 @@ def print_page_owner_summary(options, file):
         if sum_size > 0:
             print("\nTotal allocated size : %s (%s kB)" % \
                           (get_size_str(sum_size * page_size),
-                           '{:,.0f}'.format(sum_size * page_size / 1024)), file)
+                           '{:,.0f}'.format(sum_size * page_size / 1024)), file=file)
 
 
     if len(alloc_module_dict) > 0:
-        print("\nBy allocated modules", file)
-        print(  "====================", file)
+        print("\nBy allocated modules", file=file)
+        print(  "====================", file=file)
         sorted_usage = sorted(alloc_module_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -2749,13 +2749,13 @@ def print_page_owner_summary(options, file):
 
             if print_start <= print_count <= print_end:
                 print("%10s : %s" % \
-                      (get_size_str(pages * page_size), mod_name), file)
+                      (get_size_str(pages * page_size), mod_name), file=file)
             else:
                 if len(sorted_usage) > n_items:
                     if not skip_printed:
                         print("\n%15s %d %s" % ( "... < skipped ",
                                         len(sorted_usage) - n_items,
-                                        " items > ..."), file)
+                                        " items > ..."), file=file)
                     skip_printed = True
 
             print_count = print_count + 1
@@ -2763,12 +2763,12 @@ def print_page_owner_summary(options, file):
         if sum_size > 0:
             print("\nTotal allocated by modules : %s (%s kB)" % \
                               (get_size_str(sum_size * page_size),
-                               '{:,.0f}'.format(sum_size * page_size / 1024)), file)
+                               '{:,.0f}'.format(sum_size * page_size / 1024)), file=file)
 
 
     if len(alloc_type_dict) > 0:
-        print("\nBy allocation type", file)
-        print(  "==================", file)
+        print("\nBy allocation type", file=file)
+        print(  "==================", file=file)
         sorted_usage = sorted(alloc_type_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -2794,19 +2794,21 @@ def print_page_owner_summary(options, file):
 
             if print_start <= print_count <= print_end:
                 print("%10s : %s" % \
-                        (get_size_str(pages * page_size), by_type), file)
+                        (get_size_str(pages * page_size), by_type), file=file)
             else:
                 if len(sorted_usage) > n_items:
                     if not skip_printed:
                         print("\n%15s %d %s" % ("... < skipped ",
                                     len(sorted_usage) - n_items,
-                                    " items > ..."), file)
+                                    " items > ..."), file=file)
                     skip_printed = True
 
             print_count = print_count + 1
 
-    print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file)
+    print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file=file)
 
+
+import gc
 
 def show_page_owner_all(options):
     global alloc_by_dict
@@ -2838,6 +2840,8 @@ def show_page_owner_all(options):
     alloc_by_dict = {}
     alloc_type_dict = {}
     alloc_module_dict = {}
+
+    gc.collect()
 
     kernel_start_addr = sym2addr("_stext")
     kernel_end_addr = sym2addr("_etext")
@@ -2957,7 +2961,6 @@ def show_page_owner_all(options):
                         f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
 
         page_owner = pfn_to_page_owner(pfn)
-        pfn = pfn + 1
         if page_owner == -1 or page_owner == 0:
             continue
         if page_owner != None and page_owner.order < nr_free_areas:
@@ -2967,15 +2970,18 @@ def show_page_owner_all(options):
             if nr_entries == 0:
                 continue
 
-            pfn = pfn + (2 ** page_owner.order) - 1
             try:
                 save_page_owner(page_owner, nr_entries, trace_entries)
 
                 if options.all and options.details: # shows raw call trace
                     show_page_owner(pfn, page_owner, pageblock_order,\
                             nr_entries, trace_entries)
+
+                pfn = pfn + (2 ** page_owner.order) - 1
             except Exception as e:
                 print(e)
+
+        pfn = pfn + 1
 
 
     if tty != None:
