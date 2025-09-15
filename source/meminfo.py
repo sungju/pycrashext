@@ -2494,6 +2494,14 @@ def extract_bits(number, low_bit, length):
     return number
 
 
+def entries_len(entries, size):
+    for i in range(size):
+        sym_addr = entries[i]
+        if sym_addr == 0:
+            return i
+    return size  # All entries are within range
+
+
 def get_stack_entries(page_owner):
     global stack_pools
     global stack_handle_version
@@ -2503,10 +2511,11 @@ def get_stack_entries(page_owner):
     global modules_end_addr
 
     entries = []
+    entry_len = 0
 
     handle = page_owner.handle
     if handle == 0:
-        return entries
+        return (entry_len, entries)
 
     pool_index = extract_bits(handle, 0, pool_index_bits)
     pool_index -= 1
@@ -2530,21 +2539,15 @@ def get_stack_entries(page_owner):
     try:
         pool = stack_pools[pool_index]
         if pool == None:
-            return entries
+            return (entry_len, entries)
 
         stack_record = readSU("struct stack_record", pool + offset)
-
-        for i in range(stack_record.size):
-            sym_addr = stack_record.entries[i]
-            if (kernel_start_addr <= sym_addr <= kernel_end_addr) or \
-                (modules_start_addr <= sym_addr <= modules_end_addr):
-                entries.append(stack_record.entries[i])
-            else:
-                break
-    except:
+        entry_len = entries_len(stack_record.entries, stack_record.size)
+    except Exception as e:
+        print(e)
         pass
 
-    return entries
+    return (entry_len, stack_record.entries)
 
 
 def get_trace_entries(page_owner):
@@ -2553,12 +2556,12 @@ def get_trace_entries(page_owner):
             nr_entries = page_owner.nr_entries
             trace_entries = page_owner.trace_entries
         elif member_offset("struct page_owner", "handle") > -1:
-            trace_entries = get_stack_entries(page_owner)
-            nr_entries = len(trace_entries)
+            nr_entries, trace_entries = get_stack_entries(page_owner)
         else:
             nr_entries = 0
             trace_entries = []
-    except:
+    except Exception as e:
+        print(e)
         nr_entries = 0
         trace_entries = []
 
@@ -2569,10 +2572,7 @@ def save_page_owner(page_owner, nr_entries, trace_entries):
     global alloc_by_dict
     global alloc_type_dict
     global alloc_module_dict
-    global minus_one_addr
     global nr_free_areas
-
-    alloc_func = minus_one_addr # 0xffffffffffffffff
 
     by_whom = ""
     mod_name = ""
@@ -2841,8 +2841,6 @@ def show_page_owner_all(options):
     alloc_type_dict = {}
     alloc_module_dict = {}
 
-    gc.collect()
-
     kernel_start_addr = sym2addr("_stext")
     kernel_end_addr = sym2addr("_etext")
     modules_start_addr = int(get_machine_symbol("modules_vaddr"), 16)
@@ -2966,7 +2964,7 @@ def show_page_owner_all(options):
         if page_owner != None and page_owner.order < nr_free_areas:
             #if not is_aligned(pfn, 1 << page_owner.order):
             #    continue
-            (nr_entries, trace_entries) = get_trace_entries(page_owner)
+            nr_entries, trace_entries = get_trace_entries(page_owner)
             if nr_entries == 0:
                 continue
 
@@ -2982,11 +2980,6 @@ def show_page_owner_all(options):
                 print(e)
 
         pfn = pfn + 1
-
-        trace_entries = []
-        page_owner = None
-        if (pfn % 100000) == 0:
-            gc.collect()
 
 
     if tty != None:
