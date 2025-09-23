@@ -50,6 +50,8 @@ def set_kernel_version(asm_str):
         gitdir = 'rhel8'
     elif release_version.find(".el9_") >= 0:
         gitdir = 'rhel9'
+    elif release_version.find(".el10_") >= 0:
+        gitdir = 'rhel10'
     elif first_line.find(".rt") >= 0:
         gitdir = "kernel-rt"
         kernel_version = "kernel-rt-" + release_version
