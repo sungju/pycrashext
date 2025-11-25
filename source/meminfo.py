@@ -2452,8 +2452,10 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0:
             return None
 
+        '''
         if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
             return None
+        '''
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
         if (PAGE_EXT_OWNER_ALLOCATED >= 0) and \
@@ -2502,6 +2504,44 @@ def entries_len(entries, size):
     return size  # All entries are within range
 
 
+import ctypes
+
+def make_handle_union(bits_slab, bits_offset, bits_valid):
+    # sanity check
+    total = bits_slab + bits_offset + bits_valid
+    if total > 32:
+        raise ValueError(f"Too many bits ({total}), must be <= 32")
+
+    class HandleBits(ctypes.LittleEndianStructure):
+        _fields_ = [
+            ("slabindex", ctypes.c_uint32, bits_slab),
+            ("offset",    ctypes.c_uint32, bits_offset),
+            ("valid",     ctypes.c_uint32, bits_valid),
+        ]
+
+    class HandleUnion(ctypes.Union):
+        _fields_ = [
+            ("handle", ctypes.c_uint32),
+            ("parts",  HandleBits),
+        ]
+        _anonymous_ = ("parts",)
+
+        def __init__(self, *, slabindex=0, offset=0, valid=0, handle=None):
+            super().__init__()
+            if handle is not None:
+                # create from raw 32-bit handle
+                self.handle = handle
+            else:
+                # create from fields
+                self.slabindex = slabindex
+                self.offset = offset
+                self.valid = valid
+
+    # nice name for debugging
+    HandleUnion.__name__ = f"HandleUnion_{bits_slab}_{bits_offset}_{bits_valid}"
+    return HandleUnion
+
+
 def get_stack_entries(page_owner):
     global stack_pools
     global stack_handle_version
@@ -2509,6 +2549,7 @@ def get_stack_entries(page_owner):
     global kernel_end_addr
     global modules_start_addr
     global modules_end_addr
+    global addr_size
 
     entries = []
     entry_len = 0
@@ -2517,8 +2558,21 @@ def get_stack_entries(page_owner):
     if handle == 0:
         return (entry_len, entries)
 
+
+    HandleUnion = make_handle_union(pool_index_bits, offset_bits, valid_bits)
+    u = HandleUnion()
+    u.handle = handle
+
+    pool_index = u.slabindex
+    offset = u.offset << DEPOT_STACK_ALIGN
+    valid = u.valid
+    extra = 0
+    
+    '''
     pool_index = extract_bits(handle, 0, pool_index_bits)
     pool_index -= 1
+    if pool_index < 0:
+        pool_index = 0
 
     offset = extract_bits(handle,\
             pool_index_bits,\
@@ -2535,19 +2589,27 @@ def get_stack_entries(page_owner):
                 extra_bits)
     else:
         extra = 0
+    '''
 
     try:
         pool = stack_pools[pool_index]
-        if pool == None:
+        if pool == None or valid == 0:
             return (entry_len, entries)
 
-        stack_record = readSU("struct stack_record", pool + offset)
-        entry_len = entries_len(stack_record.entries, stack_record.size)
+        stack_record_addr = pool + offset
+        stack_record = readSU("struct stack_record", stack_record_addr)
+        entries = []
+        stack_record_offset = member_offset("struct stack_record", "entries")
+        for i in range(stack_record.size):
+            entry_addr = Addr(stack_record) + stack_record_offset + (i * addr_size)
+            func_addr = readULong(entry_addr)
+            entries.append(func_addr)
+        entry_len = entries_len(entries, stack_record.size)
     except Exception as e:
-        print(e)
+        #print(e)
         pass
 
-    return (entry_len, stack_record.entries)
+    return (entry_len, entries)
 
 
 def get_trace_entries(page_owner):
@@ -2925,6 +2987,7 @@ def show_page_owner_all(options):
         pool_index_bits = 21
         offset_bits = 10
         valid_bits = 1
+        extra_bits = 0
     else:
         stack_pools = None
 
@@ -2960,12 +3023,14 @@ def show_page_owner_all(options):
 
         page_owner = pfn_to_page_owner(pfn)
         if page_owner == -1 or page_owner == 0:
+            pfn = pfn + 1
             continue
         if page_owner != None and page_owner.order < nr_free_areas:
             #if not is_aligned(pfn, 1 << page_owner.order):
             #    continue
             nr_entries, trace_entries = get_trace_entries(page_owner)
             if nr_entries == 0:
+                pfn = pfn + 1
                 continue
 
             try:
