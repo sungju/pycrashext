@@ -2506,9 +2506,9 @@ def entries_len(entries, size):
 
 import ctypes
 
-def make_handle_union(bits_slab, bits_offset, bits_valid):
+def make_handle_union(bits_slab, bits_offset, bits_valid, bits_extra):
     # sanity check
-    total = bits_slab + bits_offset + bits_valid
+    total = bits_slab + bits_offset + bits_valid + bits_extra
     if total > 32:
         raise ValueError(f"Too many bits ({total}), must be <= 32")
 
@@ -2516,8 +2516,11 @@ def make_handle_union(bits_slab, bits_offset, bits_valid):
         _fields_ = [
             ("slabindex", ctypes.c_uint32, bits_slab),
             ("offset",    ctypes.c_uint32, bits_offset),
-            ("valid",     ctypes.c_uint32, bits_valid),
         ]
+        if bits_valid > 0:
+            _fields_.append(("valid",     ctypes.c_uint32, bits_valid))
+        if bits_extra > 0:
+            _fields_.append(("extra",     ctypes.c_uint32, bits_extra))
 
     class HandleUnion(ctypes.Union):
         _fields_ = [
@@ -2526,7 +2529,7 @@ def make_handle_union(bits_slab, bits_offset, bits_valid):
         ]
         _anonymous_ = ("parts",)
 
-        def __init__(self, *, slabindex=0, offset=0, valid=0, handle=None):
+        def __init__(self, *, slabindex=0, offset=0, valid=0, extra=0, handle=None):
             super().__init__()
             if handle is not None:
                 # create from raw 32-bit handle
@@ -2536,9 +2539,10 @@ def make_handle_union(bits_slab, bits_offset, bits_valid):
                 self.slabindex = slabindex
                 self.offset = offset
                 self.valid = valid
+                self.extra = extra
 
     # nice name for debugging
-    HandleUnion.__name__ = f"HandleUnion_{bits_slab}_{bits_offset}_{bits_valid}"
+    HandleUnion.__name__ = f"HandleUnion_{bits_slab}_{bits_offset}_{bits_valid}_{bits_extra}"
     return HandleUnion
 
 
@@ -2559,14 +2563,19 @@ def get_stack_entries(page_owner):
         return (entry_len, entries)
 
 
-    HandleUnion = make_handle_union(pool_index_bits, offset_bits, valid_bits)
+    HandleUnion = make_handle_union(pool_index_bits, offset_bits, valid_bits, extra_bits)
     u = HandleUnion()
     u.handle = handle
 
     pool_index = u.slabindex
     offset = u.offset << DEPOT_STACK_ALIGN
-    valid = u.valid
+    valid = 0
+    if valid_bits > 0:
+        valid = u.valid
+
     extra = 0
+    if extra_bits > 0:
+        extra = u.extra
     
     '''
     pool_index = extract_bits(handle, 0, pool_index_bits)
