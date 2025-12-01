@@ -1126,10 +1126,17 @@ def show_slabs_in_node(options, kmem_cache, kc_node, offset):
 
     alloc_count = 0
     try:
+        if member_offset("struct slab", "slab_list") >= 0:
+            offset_name = "slab_list"
+            struct_name = "struct slab"
+        else:
+            offset_name = "lru"
+            struct_name = "struct page"
+
         if member_offset("struct kmem_cache_node", "partial") >= 0:
             for page in readSUListFromHead(kc_node.partial,
-                                            "lru",
-                                            "struct page",
+                                            offset_name,
+                                            struct_name,
                                             maxel=1000000000):
                 show_one_slab(options, kmem_cache, Addr(page), False, offset)
 
@@ -1139,8 +1146,8 @@ def show_slabs_in_node(options, kmem_cache, kc_node, offset):
 
         if member_offset("struct kmem_cache_node", "full") >= 0:
             for page in readSUListFromHead(kc_node.full,
-                                            "lru",
-                                            "struct page",
+                                            offset_name,
+                                            struct_name,
                                             maxel=1000000000):
                 show_one_slab(options, kmem_cache, Addr(page), False, offset)
 
@@ -1247,12 +1254,15 @@ def show_slab_alloc_result(options, kmem_cache):
         for addr in addr_tuple:
             if addr != 0:  # Skip zero addresses
                 sym_name = get_function_name(addr)
-                if sym_name != None:
+                if sym_name != None and not sym_name.startswith("sym: invalid address"):
                     parts = sym_name.split(maxsplit=2)
                     if len(parts) == 3:
-                        addr_str, type_str, rest = parts
-                        addr_int = int(addr_str, 16)
-                        print(f"  0x{addr_int:014x} {type_str:>3} {rest}")
+                        try:
+                            addr_str, type_str, rest = parts
+                            addr_int = int(addr_str, 16)
+                            print(f"  0x{addr_int:014x} {type_str:>3} {rest}")
+                        except Exception as e:
+                            print(e)
                     #print(sym_name)
         print()
         print_count = print_count + 1
@@ -1669,15 +1679,24 @@ def read_a_track(options, kmem_cache, obj_addr, offset, alloc_item=True):
         else:
             free_pid_list[pid_key] += 1
 
-        # Memory optimization: use tuple of addresses instead of string
-        # Apply memory limit to prevent excessive memory usage
-        addr_tuple = tuple(track.addrs)
-        if options.memory_limit == 0 or len(calltrace_list) < options.memory_limit:
-            # No limit or under limit - store all patterns
-            calltrace_list[addr_tuple] += 1
-        elif addr_tuple in calltrace_list:
-            # When limit reached, only update existing entries
-            calltrace_list[addr_tuple] += 1
+        if member_offset("struct track", "addrs") >= 0:
+            # Memory optimization: use tuple of addresses instead of string
+            # Apply memory limit to prevent excessive memory usage
+            addr_tuple = tuple(track.addrs)
+        elif member_offset("struct track", "handle") >= 0:
+            nr_entries, trace_entries = get_stack_entries(track.handle)
+            addr_tuple = tuple(trace_entries)
+        else:
+            addr_tuple = None
+
+        if addr_tuple != None:
+            if options.memory_limit == 0 or len(calltrace_list) < options.memory_limit:
+                # No limit or under limit - store all patterns
+                calltrace_list[addr_tuple] += 1
+            elif addr_tuple in calltrace_list:
+                # When limit reached, only update existing entries
+                calltrace_list[addr_tuple] += 1
+
 
         if options.all:
             if alloc_item:
@@ -1870,6 +1889,7 @@ def show_slub_debug_user(options):
         print("Please use 'slub_deubg=U' to collect alloc tracking")
         return
 
+    get_stack_bits()
 
     if show_objects_in_slab(options, kmem_cache, offset):
         return
@@ -2546,7 +2566,7 @@ def make_handle_union(bits_slab, bits_offset, bits_valid, bits_extra):
     return HandleUnion
 
 
-def get_stack_entries(page_owner):
+def get_stack_entries(handle):
     global stack_pools
     global stack_handle_version
     global kernel_start_addr
@@ -2555,14 +2575,20 @@ def get_stack_entries(page_owner):
     global modules_end_addr
     global addr_size
 
+    global pool_index_bits
+    global offset_bits
+    global valid_bits
+    global extra_bits
+
     entries = []
     entry_len = 0
 
-    handle = page_owner.handle
+    handle = handle
     if handle == 0:
         return (entry_len, entries)
 
 
+    '''
     HandleUnion = make_handle_union(pool_index_bits, offset_bits, valid_bits, extra_bits)
     u = HandleUnion()
     u.handle = handle
@@ -2598,17 +2624,27 @@ def get_stack_entries(page_owner):
                 extra_bits)
     else:
         extra = 0
-    '''
 
     try:
         pool = stack_pools[pool_index]
-        if pool == None or valid == 0:
+        if pool == None:
             return (entry_len, entries)
 
         stack_record_addr = pool + offset
         stack_record = readSU("struct stack_record", stack_record_addr)
         entries = []
         stack_record_offset = member_offset("struct stack_record", "entries")
+
+        '''
+        print(pool_index)
+        print(offset)
+        print(valid)
+        print(extra)
+        print(pool)
+        print(offset)
+        print(stack_record)
+        '''
+
         for i in range(stack_record.size):
             entry_addr = Addr(stack_record) + stack_record_offset + (i * addr_size)
             func_addr = readULong(entry_addr)
@@ -2627,7 +2663,7 @@ def get_trace_entries(page_owner):
             nr_entries = page_owner.nr_entries
             trace_entries = page_owner.trace_entries
         elif member_offset("struct page_owner", "handle") > -1:
-            nr_entries, trace_entries = get_stack_entries(page_owner)
+            nr_entries, trace_entries = get_stack_entries(page_owner.handle)
         else:
             nr_entries = 0
             trace_entries = []
@@ -2879,6 +2915,51 @@ def print_page_owner_summary(options, file):
     print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file=file)
 
 
+def get_stack_bits():
+    global stack_pools
+    global stack_handle_version
+    global pool_index_bits
+    global offset_bits
+    global valid_bits
+    global extra_bits
+    global addr_size
+
+    addr_size = int(get_machine_symbol("bits")) // 8
+
+    if symbol_exists("stack_pools"):
+        stack_pools_addr = sym2addr("stack_pools")
+        stack_pools = []
+        while True:
+            pool_addr = readULong(stack_pools_addr)
+            stack_pools_addr = stack_pools_addr + addr_size
+            if pool_addr == 0:
+                break
+            stack_pools.append(pool_addr)
+
+        stack_handle_version = 2
+
+        if member_offset("union handle_parts", "valid_bits") > -1:
+            pool_index_bits = 16
+            offset_bits = 10
+            valid_bits = 1
+            extra_bits = 5
+        else:
+            pool_index_bits = 17
+            offset_bits = 10
+            valid_bits = 0
+            extra_bits = 5
+    elif symbol_exists("stack_slabs"):
+        stack_pools = readSymbol("stack_slabs")
+        stack_handle_version = 1
+
+        pool_index_bits = 21
+        offset_bits = 10
+        valid_bits = 1
+        extra_bits = 0
+    else:
+        stack_pools = None
+
+
 import gc
 
 def show_page_owner_all(options):
@@ -2975,31 +3056,7 @@ def show_page_owner_all(options):
             page_ext_size = -1 # use old RHEL7 method
 
 
-    if symbol_exists("stack_pools"):
-        stack_pools = readSymbol("stack_pools")
-        stack_handle_version = 2
-
-        if member_offset("union handle_parts", "valid_bits") > -1:
-            pool_index_bits = 16
-            offset_bits = 10
-            valid_bits = 1
-            extra_bits = 5
-        else:
-            pool_index_bits = 17
-            offset_bits = 10
-            valid_bits = 0
-            extra_bits = 5
-    elif symbol_exists("stack_slabs"):
-        stack_pools = readSymbol("stack_slabs")
-        stack_handle_version = 1
-
-        pool_index_bits = 21
-        offset_bits = 10
-        valid_bits = 1
-        extra_bits = 0
-    else:
-        stack_pools = None
-
+    get_stack_bits()
 
     pfn = min_low_pfn
     max_order = get_max_order()
