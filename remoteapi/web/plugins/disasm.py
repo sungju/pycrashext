@@ -10,6 +10,7 @@ import re
 import os
 import base64
 import subprocess
+import textwrap
 
 cur_kernel_version = ""
 cur_release_version = ""
@@ -78,8 +79,8 @@ def set_kernel_version(asm_str):
         err = b"".join(process.stderr.readlines())
         if err != None and \
            (err.startswith(b"error:") or err.startswith(b"fatal:")):
-            return 'FAILED to git checkout\n' + err.decode("utf-8") +\
-                    kernel_version + ", " + cur_rhel_path + "\n"
+            return 'FAILED to git checkout\n' + err.decode("utf-8").rstrip() +\
+                    kernel_version + " at " + cur_rhel_path + "\n"
 
         cur_kernel_version = kernel_version
         cur_release_version = release_version.split("/")[0]
@@ -370,6 +371,28 @@ def read_a_function(asm_str):
     return result
 
 
+def wrap_text_preserving_all_newlines(text, width=75):
+    """
+    Wraps text to a specific width while respecting all original newlines.
+    """
+    lines = text.splitlines(True) # keeps the newline endings
+    wrapped_text = ""
+    wrapper = textwrap.TextWrapper(width=width, break_long_words=True, replace_whitespace=False)
+
+    for line in lines:
+        if line.strip(): # Check if line has actual content
+            # wrap returns a list of lines, join them back
+            wrapped_line = '\n'.join(wrapper.wrap(line))
+            wrapped_text += wrapped_line
+            # If the original line ended with a newline, add it back (TextWrapper removes it)
+            if line.endswith('\n'):
+                 # Check for specific line ending to preserve type if needed, but '\n' works generally
+                 wrapped_text += '\n'
+        else:
+            wrapped_text += line # Keep blank lines as they are
+
+    return wrapped_text
+
 
 def disasm():
     # First line can be used to identify kernel version
@@ -401,10 +424,12 @@ def disasm():
 
     result = set_kernel_version(asm_str)
     if result.startswith("FAIL"):
-        error_str = error_str + result + "\n"
+        str_width = 75
+        bound_str = "=" * str_width + "\n"
+        error_str = error_str + bound_str + wrap_text_preserving_all_newlines(result, str_width) + bound_str
 
     if full_source != "":
-        return error_str + read_a_function(asm_str) # Read function and return
+        return read_a_function(asm_str) + "\n" + error_str # Read function and return
 
 
     result = ""
@@ -426,4 +451,4 @@ def disasm():
             source_line = read_source_line(line, has_header)
             result = result + source_line
 
-    return error_str + result.rstrip()
+    return result + "\n" + error_str
