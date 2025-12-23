@@ -913,10 +913,12 @@ def show_tasks_memusage(options):
         if (len(result_line) < 9):
             continue
         pid = result_line[0]
+        cmd = result_line[8]
+        cmd = result_lines[i][result_lines[i].find(cmd):].strip()
         if options.all:
-            pname = "%s (%s)" % (result_line[8], pid)
+            pname = "%s (%s)" % (cmd, pid)
         else:
-            pname = result_line[8]
+            pname = cmd
         rss = int(result_line[7])
         if options.memusage_pss:
             rss = get_pss_for_task(result_line[3])
