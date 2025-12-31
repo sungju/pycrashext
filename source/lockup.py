@@ -247,8 +247,9 @@ def lockup_display(reverse_sort, show_tasks, options):
                (rq.cpu, delayed_time,
                 rq.curr, rq.curr.comm,
                 get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
+
+        task_pid = rq.curr
         if options.details:
-            task_pid = rq.curr
             task_time = exec_crash_command("ps -m 0x%x" % (task_pid)).splitlines()[0]
             task_time = task_time.split("]")[0][1:]
             days_str, time_str = task_time.split()
@@ -268,6 +269,10 @@ def lockup_display(reverse_sort, show_tasks, options):
                 crashcolor.set_color(crashcolor.RESET)
             print(" └──> ps -m %-8s : %s" % (rq.curr.pid, task_time))
             crashcolor.set_color(crashcolor.RESET)
+
+        if options.backtrace:
+            bt_output = exec_crash_command("bt 0x%x" % (task_pid))
+            print("\t%s" % (bt_output.replace('\n', '\n\t')))
 
         if (show_tasks):
             show_task_list(rq, reverse_sort, options)
@@ -339,6 +344,9 @@ include/asm-generic/qspinlock_types.h
 
 def lockup():
     op = OptionParser()
+    op.add_option("-b", "--backtrace", dest="backtrace", default=0,
+                  action="store_true",
+                  help="Shows backtrace of the process")
     op.add_option("-c", "--compact", dest="compact", default=0,
                   action="store_true",
                   help="Exclude swapper/* from the list")
