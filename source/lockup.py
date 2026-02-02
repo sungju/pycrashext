@@ -272,6 +272,8 @@ def lockup_display(reverse_sort, show_tasks, options):
 
         if options.backtrace:
             bt_output = exec_crash_command("bt 0x%x" % (task_pid))
+            if options.user and bt_output.find("CS: 0010") >= 0:
+                continue
             print("\t%s" % (bt_output.replace('\n', '\n\t')))
 
         if (show_tasks):
@@ -365,6 +367,9 @@ def lockup():
     op.add_option("-q", "--qspinlock", dest="qspinlock", default="",
                   action="store", type="string",
                   help="Shows qspinlock details")
+    op.add_option("-u", "--user", dest="user", default=0,
+                  action="store_true",
+                  help="show user space running only")
 
     (o, args) = op.parse_args()
 
