@@ -863,7 +863,7 @@ def find_module_struct(module_addr):
             offset = offset + member_offset("struct kobject", "ktype")
             module = readSU("struct module", ktype_location - offset)
             if module.state == MODULE_STATE_LIVE:
-                loaded_module = "loaded"
+                loaded_module = "unloaded, not cleared yet"
             return module, loaded_module
     except:
         pass
