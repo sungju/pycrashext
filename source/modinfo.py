@@ -635,6 +635,9 @@ def try_get_module_struct(options):
         print("\tstruct module 0x%x" % module)
         print("\tname : %s" % module.name)
         print("\tstatus : %s" % loaded_module)
+        baseaddr = module.core_layout.base
+        print("\tcore range 0x%x - 0x%x" % (baseaddr,\
+                                baseaddr + module.core_layout.size))
         if options.show_symtab:
             show_manual_module_detail(options, module)
     else:
