@@ -522,6 +522,17 @@ def get_task_from_pid(pid):
     return task
 
 
+def show_audit_backlog(options):
+    if not symbol_exists("audit_backlog_wait"):
+        print("No audit_backlog_wait symbol exist")
+        return
+
+    audit_backlog_wait = readSymbol("audit_backlog_wait")
+    print("audit_backlog_wait :", audit_backlog_wait)
+    result = exec_crash_command("waitq 0x%x" % (audit_backlog_wait))
+    print(result)
+
+
 def show_audit_status(options):
     audit_enabled = readSymbol("audit_enabled")
     audit_failure = readSymbol("audit_failure")
@@ -576,15 +587,18 @@ def show_audit_status(options):
 
 def auditinfo():
     op = OptionParser()
+    op.add_option("-b", "--backlog", dest="show_backlog", default=False,
+                  action="store_true",
+                  help="Show backlog process list")
+    op.add_option("-d", "--details", dest="show_details", default=False,
+                  action="store_true",
+                  help="Show details if possible")
     op.add_option("-r", "--rules", dest="show_rules", default=False,
                   action="store_true",
                   help="Show audit rules")
     op.add_option("-s", "--status", dest="show_audit_status", default=False,
                   action="store_true",
                   help="Show audit status")
-    op.add_option("-d", "--details", dest="show_details", default=False,
-                  action="store_true",
-                  help="Show details if possible")
 
     (o, args) = op.parse_args()
 
@@ -593,6 +607,9 @@ def auditinfo():
     # Default action. Should be at the bottom
     if (o.show_rules):
         show_audit_rules(o)
+        sys.exit(0)
+    if (o.show_backlog):
+        show_audit_backlog(o)
         sys.exit(0)
 
     show_audit_status(o)
