@@ -2489,14 +2489,16 @@ def page_owner_is_valid(page_owner):
         if page_owner is None or page_owner == 0 or page_owner == -1:
             return False
 
-        # Check order - should be reasonable (typically < 11, max 20)
-        # Only reject clearly invalid values
+        # We MUST be able to read the order field - if we can't, it's invalid
         try:
-            if page_owner.order < 0 or page_owner.order > 30:
+            order = page_owner.order
+            # Check order - should be reasonable (typically < 11, max 20)
+            # Only reject clearly invalid values
+            if order < 0 or order > 30:
                 return False
         except:
-            # If we can't read order, skip validation but don't reject
-            pass
+            # If we can't read order field, the object is definitely invalid
+            return False
 
         # Cache the member_offset check (only check once)
         if _has_page_owner_pid is None:
@@ -2522,14 +2524,14 @@ def page_owner_is_valid(page_owner):
                 if hasattr(page_owner, 'free_ts_nsec') and page_owner.free_ts_nsec > 10**19:
                     return False
             except:
-                # If we can't read pid/tgid fields, it might be legitimate
-                # Don't automatically reject - let it through
-                pass
+                # If we can't read pid/tgid fields, the object might be invalid
+                # Be conservative and reject it
+                return False
 
         return True
     except:
-        # Don't reject on generic exceptions - be permissive
-        return True
+        # If any unexpected error occurs, assume invalid
+        return False
 
 
 def pfn_to_page_owner(pfn):
@@ -3226,10 +3228,17 @@ def show_page_owner_all(options):
                         f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
 
         page_owner = pfn_to_page_owner(pfn)
-        if page_owner == -1 or page_owner == 0:
+        if page_owner == -1 or page_owner == 0 or page_owner == None:
             pfn = pfn + 1
             continue
-        if page_owner != None and page_owner.order < nr_free_areas:
+
+        # Wrap entire page_owner processing in try-except to handle invalid objects
+        try:
+            # Access page_owner.order - this might fail if page_owner is invalid
+            if page_owner.order >= nr_free_areas:
+                pfn = pfn + 1
+                continue
+
             # Skip tail pages of multi-page allocations
             # Only process the head page (aligned to allocation order)
             if not is_aligned(pfn, 1 << page_owner.order):
@@ -3250,6 +3259,11 @@ def show_page_owner_all(options):
 
             except Exception as e:
                 print(e)
+
+        except:
+            # page_owner object is invalid or points to bad memory
+            # Skip this PFN and continue
+            pass
 
         pfn = pfn + 1
 
