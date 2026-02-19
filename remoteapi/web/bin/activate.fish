@@ -33,7 +33,7 @@ end
 # Unset irrelevant variables.
 deactivate nondestructive
 
-set -gx VIRTUAL_ENV /Users/sungju/source/pycrashext/remoteapi/web
+set -gx VIRTUAL_ENV /Users/sungju/source/Pycrashext/remoteapi/web
 
 set -gx _OLD_VIRTUAL_PATH $PATH
 set -gx PATH "$VIRTUAL_ENV/"bin $PATH

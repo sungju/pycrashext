@@ -2383,6 +2383,17 @@ def pfn_to_section_nr(pfn):
         return 0
 
 
+def section_nr_to_pfn(section_nr):
+    """Convert section number to base PFN of that section"""
+    try:
+        pageshift = int(get_machine_symbol("pageshift"))
+        section_size_bits = int(get_machine_symbol("section_size_bits"))
+        pfn_section_shift = (section_size_bits - pageshift)
+        return section_nr << pfn_section_shift
+    except Exception as e:
+        return 0
+
+
 def section_nr_to_root(sec):
     try:
         return int((sec / int(get_machine_symbol("sections_per_root"))))
@@ -2468,8 +2479,13 @@ def pfn_to_page_owner(pfn):
                 page_ext = page_cgroup.ext
         else:
             if mem_section.page_ext > 0:
+                # Calculate PFN offset within the section
+                section_nr = pfn_to_section_nr(pfn)
+                base_pfn = section_nr_to_pfn(section_nr)
+                pfn_offset = pfn - base_pfn
+
                 page_ext = readSU("struct page_ext",
-                            Addr(mem_section.page_ext) + (page_ext_size * pfn))
+                            Addr(mem_section.page_ext) + (page_ext_size * pfn_offset))
 
         if page_ext == 0 or page_ext == None:
             return None
@@ -3093,8 +3109,12 @@ def show_page_owner_all(options):
             pfn = pfn + 1
             continue
         if page_owner != None and page_owner.order < nr_free_areas:
-            #if not is_aligned(pfn, 1 << page_owner.order):
-            #    continue
+            # Skip tail pages of multi-page allocations
+            # Only process the head page (aligned to allocation order)
+            if not is_aligned(pfn, 1 << page_owner.order):
+                pfn = pfn + 1
+                continue
+
             nr_entries, trace_entries = get_trace_entries(page_owner)
             if nr_entries == 0:
                 pfn = pfn + 1
@@ -3103,11 +3123,10 @@ def show_page_owner_all(options):
             try:
                 save_page_owner(page_owner, nr_entries, trace_entries)
 
-                if options.all and options.details: # shows raw call trace
+                if options.details:  # shows raw call trace
                     show_page_owner(pfn, page_owner, pageblock_order,\
                             nr_entries, trace_entries)
 
-                pfn = pfn + (2 ** page_owner.order) - 1
             except Exception as e:
                 print(e)
 

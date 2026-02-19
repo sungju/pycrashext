@@ -41,12 +41,12 @@ case "$(uname)" in
     CYGWIN*|MSYS*|MINGW*)
         # transform D:\path\to\venv to /d/path/to/venv on MSYS and MINGW
         # and to /cygdrive/d/path/to/venv on Cygwin
-        VIRTUAL_ENV=$(cygpath /Users/sungju/source/pycrashext/remoteapi/web)
+        VIRTUAL_ENV=$(cygpath /Users/sungju/source/Pycrashext/remoteapi/web)
         export VIRTUAL_ENV
         ;;
     *)
         # use the path as-is
-        export VIRTUAL_ENV=/Users/sungju/source/pycrashext/remoteapi/web
+        export VIRTUAL_ENV=/Users/sungju/source/Pycrashext/remoteapi/web
         ;;
 esac
 
