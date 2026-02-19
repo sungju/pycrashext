@@ -2404,49 +2404,31 @@ def section_nr_to_root(sec):
 
 def get_pages_per_section():
     """Get the number of pages in a section"""
+    global _pages_per_section
+
+    # Return cached value if available
+    if _pages_per_section is not None:
+        return _pages_per_section
+
     try:
         pageshift = int(get_machine_symbol("pageshift"))
         section_size_bits = int(get_machine_symbol("section_size_bits"))
         pfn_section_shift = (section_size_bits - pageshift)
-        return 1 << pfn_section_shift
+        _pages_per_section = 1 << pfn_section_shift
+        return _pages_per_section
     except Exception as e:
+        _pages_per_section = 0
         return 0
 
 
 def section_is_present(mem_section):
-    """Check if a section has valid memory (SECTION_MARKED_PRESENT bit)"""
-    try:
-        if mem_section is None or mem_section == 0 or mem_section == -1:
-            return False
-
-        # SECTION_MARKED_PRESENT is bit 0 of section_mem_map
-        # SECTION_HAS_MEM_MAP is bit 1
-        SECTION_MARKED_PRESENT = (1 << 0)
-        SECTION_HAS_MEM_MAP = (1 << 1)
-
-        # Check if mem_section has section_mem_map field
-        if member_offset("struct mem_section", "section_mem_map") > -1:
-            section_mem_map = mem_section.section_mem_map
-            # The low bits are flags, check if PRESENT bit is set
-            # Also ensure section_mem_map is not 0 (completely uninitialized)
-            if section_mem_map == 0:
-                return False
-            return (section_mem_map & SECTION_MARKED_PRESENT) != 0
-
-        # Fallback: if no section_mem_map field, check if page_ext/page_cgroup exists
-        # But be conservative - only return True if the pointer is reasonable
-        if member_offset("struct mem_section", "page_ext") > -1:
-            if mem_section.page_ext > 0:
-                # Additional check: page_ext should be a kernel address
-                # Kernel addresses typically start with 0xffff on x86_64
-                return True
-        if member_offset("struct mem_section", "page_cgroup") > -1:
-            if mem_section.page_cgroup != 0:
-                return True
-
+    """Check if a section has valid memory"""
+    # Simple check - just verify the section object itself is valid
+    # Don't try to access its fields as that might hang on invalid sections
+    # Let the readSU calls handle detailed validation
+    if mem_section is None or mem_section == 0 or mem_section == -1:
         return False
-    except Exception as e:
-        return False
+    return True
 
 
 def __nr_to_section(nr):
@@ -2855,6 +2837,12 @@ kernel_start_addr = 0x0
 kernel_end_addr = 0x0
 modules_start_addr = 0x0
 modules_end_addr = 0x0
+
+# Cache for performance optimization
+_pages_per_section = None
+_has_section_mem_map = None
+_has_page_ext = None
+_has_page_cgroup = None
 
 
 def print_page_owner_summary(options, file):
