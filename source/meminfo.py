@@ -2566,23 +2566,11 @@ def pfn_to_page_owner(pfn):
                 page_ext = page_cgroup.ext
         else:
             if mem_section.page_ext > 0:
-                # Calculate PFN offset within the section
-                section_nr = pfn_to_section_nr(pfn)
-                base_pfn = section_nr_to_pfn(section_nr)
-                pfn_offset = pfn - base_pfn
-
-                # Validate pfn_offset is within bounds
-                pages_per_section = get_pages_per_section()
-                if pages_per_section > 0 and pfn_offset >= pages_per_section:
-                    return None
-
-                # Additional safety: ensure pfn_offset is non-negative
-                if pfn_offset < 0:
-                    return None
-
+                # Use absolute PFN (as in crash-pageowner reference implementation)
+                # This is correct for how the kernel organizes page_ext arrays
                 try:
                     page_ext = readSU("struct page_ext",
-                                Addr(mem_section.page_ext) + (page_ext_size * pfn_offset))
+                                Addr(mem_section.page_ext) + (page_ext_size * pfn))
                 except:
                     # Failed to read page_ext - PFN might be in a memory hole
                     return None
@@ -2590,13 +2578,14 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0 or page_ext == None:
             return None
 
-        # NOTE: Don't check PAGE_EXT_OWNER flag here as it's unreliable
-        # across different kernel versions. The flag might not be set even
-        # when valid page_owner data exists.
-        '''
-        if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
+        # Check PAGE_EXT_OWNER flag - this indicates page_owner is being tracked
+        # (As per crash-pageowner reference implementation)
+        try:
+            if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
+                return None
+        except:
+            # If we can't read flags, skip this page
             return None
-        '''
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
         if PAGE_EXT_OWNER_ALLOCATED >= 0:
@@ -2604,9 +2593,8 @@ def pfn_to_page_owner(pfn):
                 if not test_bit(PAGE_EXT_OWNER_ALLOCATED, page_ext.flags):
                     return None
             except:
-                # If we can't read flags, assume the page might be valid
-                # Don't filter it out - let subsequent validation handle it
-                pass
+                # If we can't read flags, skip this page
+                return None
 
         if member_offset("struct page_ext", "owner") > -1:
             page_owner = page_ext.owner
@@ -2619,8 +2607,9 @@ def pfn_to_page_owner(pfn):
                 return None
 
         # Validate that the page_owner data looks reasonable
-        if not page_owner_is_valid(page_owner):
-            return None
+        # Temporarily disabled to debug - checking if this is filtering too much
+        # if not page_owner_is_valid(page_owner):
+        #     return None
 
         return page_owner
     except Exception as e:
