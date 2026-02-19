@@ -2480,6 +2480,49 @@ def test_bit(bit_index, flags):
     return (flags >> bit_index) & 1
 
 
+def page_owner_is_valid(page_owner):
+    """Validate that page_owner structure contains reasonable data"""
+    try:
+        # Check if page_owner is None or invalid
+        if page_owner is None or page_owner == 0 or page_owner == -1:
+            return False
+
+        # Check order - should be reasonable (typically < 11)
+        if hasattr(page_owner, 'order'):
+            if page_owner.order < 0 or page_owner.order > 20:
+                return False
+
+        # Check pid/tgid if they exist (RHEL8+)
+        if member_offset("struct page_owner", "pid") > -1:
+            try:
+                # pid should be reasonable: either > 0 (user process) or 0 (kernel thread)
+                # or -1 in some cases. Definitely not large negative numbers
+                # PID_MAX_DEFAULT is usually 32768, PID_MAX_LIMIT is 4194304
+                # Negative values less than -100 are definitely garbage
+                if page_owner.pid < -100 or page_owner.pid > 10000000:
+                    return False
+
+                if page_owner.tgid < -100 or page_owner.tgid > 10000000:
+                    return False
+
+                # Check timestamps - they should be reasonable
+                # A timestamp of 0 is OK (not set), but ridiculously large values indicate garbage
+                # Reasonable nsec values are less than ~10^18 (years 2000-2200 approx)
+                if hasattr(page_owner, 'ts_nsec'):
+                    if page_owner.ts_nsec > 10**18:
+                        return False
+                if hasattr(page_owner, 'free_ts_nsec'):
+                    if page_owner.free_ts_nsec > 10**18:
+                        return False
+            except:
+                # If we can't read these fields, consider it invalid
+                return False
+
+        return True
+    except:
+        return False
+
+
 def pfn_to_page_owner(pfn):
     global mem_sections
     global page_owner_offset
@@ -2536,10 +2579,14 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0 or page_ext == None:
             return None
 
-        '''
-        if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
+        # Check if PAGE_EXT_OWNER bit is set in flags
+        # This indicates the page_ext has valid page_owner data
+        try:
+            if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
+                return None
+        except:
+            # If we can't read flags, assume invalid
             return None
-        '''
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
         if (PAGE_EXT_OWNER_ALLOCATED >= 0) and \
@@ -2555,6 +2602,10 @@ def pfn_to_page_owner(pfn):
             except:
                 # Failed to read page_owner
                 return None
+
+        # Validate that the page_owner data looks reasonable
+        if not page_owner_is_valid(page_owner):
+            return None
 
         return page_owner
     except Exception as e:
