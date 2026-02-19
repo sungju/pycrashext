@@ -2482,45 +2482,54 @@ def test_bit(bit_index, flags):
 
 def page_owner_is_valid(page_owner):
     """Validate that page_owner structure contains reasonable data"""
+    global _has_page_owner_pid
+
     try:
         # Check if page_owner is None or invalid
         if page_owner is None or page_owner == 0 or page_owner == -1:
             return False
 
-        # Check order - should be reasonable (typically < 11)
-        if hasattr(page_owner, 'order'):
-            if page_owner.order < 0 or page_owner.order > 20:
+        # Check order - should be reasonable (typically < 11, max 20)
+        # Only reject clearly invalid values
+        try:
+            if page_owner.order < 0 or page_owner.order > 30:
                 return False
+        except:
+            # If we can't read order, skip validation but don't reject
+            pass
+
+        # Cache the member_offset check (only check once)
+        if _has_page_owner_pid is None:
+            _has_page_owner_pid = member_offset("struct page_owner", "pid") > -1
 
         # Check pid/tgid if they exist (RHEL8+)
-        if member_offset("struct page_owner", "pid") > -1:
+        # Only filter out clearly garbage values like -1869574000
+        if _has_page_owner_pid:
             try:
-                # pid should be reasonable: either > 0 (user process) or 0 (kernel thread)
-                # or -1 in some cases. Definitely not large negative numbers
-                # PID_MAX_DEFAULT is usually 32768, PID_MAX_LIMIT is 4194304
-                # Negative values less than -100 are definitely garbage
-                if page_owner.pid < -100 or page_owner.pid > 10000000:
+                # Only reject extremely negative or extremely large values
+                # Normal range: -1 to 4194304, but be permissive
+                # Reject values that are clearly garbage (outside 32-bit int range)
+                if page_owner.pid < -1000000 or page_owner.pid > 100000000:
                     return False
 
-                if page_owner.tgid < -100 or page_owner.tgid > 10000000:
+                if page_owner.tgid < -1000000 or page_owner.tgid > 100000000:
                     return False
 
-                # Check timestamps - they should be reasonable
-                # A timestamp of 0 is OK (not set), but ridiculously large values indicate garbage
-                # Reasonable nsec values are less than ~10^18 (years 2000-2200 approx)
-                if hasattr(page_owner, 'ts_nsec'):
-                    if page_owner.ts_nsec > 10**18:
-                        return False
-                if hasattr(page_owner, 'free_ts_nsec'):
-                    if page_owner.free_ts_nsec > 10**18:
-                        return False
+                # Check timestamps - only reject ridiculously large values
+                # Allow 0 (not set) and any reasonable timestamp
+                if hasattr(page_owner, 'ts_nsec') and page_owner.ts_nsec > 10**19:
+                    return False
+                if hasattr(page_owner, 'free_ts_nsec') and page_owner.free_ts_nsec > 10**19:
+                    return False
             except:
-                # If we can't read these fields, consider it invalid
-                return False
+                # If we can't read pid/tgid fields, it might be legitimate
+                # Don't automatically reject - let it through
+                pass
 
         return True
     except:
-        return False
+        # Don't reject on generic exceptions - be permissive
+        return True
 
 
 def pfn_to_page_owner(pfn):
@@ -2579,19 +2588,23 @@ def pfn_to_page_owner(pfn):
         if page_ext == 0 or page_ext == None:
             return None
 
-        # Check if PAGE_EXT_OWNER bit is set in flags
-        # This indicates the page_ext has valid page_owner data
-        try:
-            if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
-                return None
-        except:
-            # If we can't read flags, assume invalid
+        # NOTE: Don't check PAGE_EXT_OWNER flag here as it's unreliable
+        # across different kernel versions. The flag might not be set even
+        # when valid page_owner data exists.
+        '''
+        if not test_bit(PAGE_EXT_OWNER, page_ext.flags):
             return None
+        '''
 
         # If it's RHEL8 or above and page_ext is for free, we don't care
-        if (PAGE_EXT_OWNER_ALLOCATED >= 0) and \
-                not test_bit(PAGE_EXT_OWNER_ALLOCATED, page_ext.flags):
-            return None
+        if PAGE_EXT_OWNER_ALLOCATED >= 0:
+            try:
+                if not test_bit(PAGE_EXT_OWNER_ALLOCATED, page_ext.flags):
+                    return None
+            except:
+                # If we can't read flags, assume the page might be valid
+                # Don't filter it out - let subsequent validation handle it
+                pass
 
         if member_offset("struct page_ext", "owner") > -1:
             page_owner = page_ext.owner
@@ -2894,6 +2907,7 @@ _pages_per_section = None
 _has_section_mem_map = None
 _has_page_ext = None
 _has_page_cgroup = None
+_has_page_owner_pid = None
 
 
 def print_page_owner_summary(options, file):
