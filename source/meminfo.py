@@ -972,36 +972,41 @@ def show_tasks_memusage(options):
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
 
-    # Calculate separator width based on whether graph is shown
-    separator_width = 70
-    if options.graph:
-        separator_width = 42 + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
-
-    # Print header
-    print("=" * separator_width)
-    if options.graph:
-        print("%-42s %-24s %15s" % ("Process_Name", "Percent", "RSS_Usage"))
-    else:
-        print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
-    print("=" * separator_width)
-
     min_number = 10
     if (options.all):
         min_number = len(sorted_usage) - 1
 
     print_count = min(len(sorted_usage) - 1, min_number)
 
+    # Calculate optimal column width based on longest process name
+    if options.graph:
+        max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
+        pname_width = max(20, min(60, max_pname_len + 2))  # Min 20, max 60 chars
+        separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
+    else:
+        separator_width = 70
+
+    # Print header
+    print("=" * separator_width)
+    if options.graph:
+        format_str = "%-" + str(pname_width) + "s %-24s %15s"
+        print(format_str % ("Process_Name", "Percent", "RSS_Usage"))
+    else:
+        print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
+    print("=" * separator_width)
+
     for i in range(0, print_count):
         pname = sorted_usage[i][0]
-        # Truncate process name to fit column width
-        if options.graph and len(pname) > 42:
-            pname = pname[:39] + "..."
         rss_kb = sorted_usage[i][1]
 
         if options.graph:
+            # Truncate process name to fit column width
+            if len(pname) > pname_width:
+                pname = pname[:pname_width-3] + "..."
             percentage = (rss_kb * 100.0 / total_rss) if total_rss > 0 else 0
             bar = get_memory_bar(percentage, width=20)
-            print("%-42s %s %15s" % (pname, bar, get_size_str(rss_kb * 1024)))
+            format_str = "%-" + str(pname_width) + "s %s %15s"
+            print(format_str % (pname, bar, get_size_str(rss_kb * 1024)))
             crashcolor.set_color(crashcolor.RESET)
         else:
             print("%14s (%10.2f KiB)   %-s" %
@@ -1047,23 +1052,31 @@ def show_slabtop(options):
     # Calculate total for percentage
     total_slab = sum([item[1] for item in sorted_slabtop[:print_count]])
 
-    # Calculate separator width based on whether graph is shown
-    separator_width = 70
+    # Calculate optimal column width based on longest SLAB name
     if options.graph:
-        separator_width = 18 + 29 + 24 + 12 + 8 + 8  # All columns + padding
+        # First pass: collect all SLAB names to find longest
+        slab_names = []
+        for i in range(0, print_count):
+            kmem_cache = readSU("struct kmem_cache", int(sorted_slabtop[i][0], 16))
+            slab_names.append(kmem_cache.name)
+
+        max_slab_len = max(len(name) for name in slab_names) if slab_names else 20
+        slab_width = max(20, min(50, max_slab_len + 2))  # Min 20, max 50 chars
+        separator_width = 18 + slab_width + 24 + 12 + 8 + 8  # All columns + padding
+    else:
+        slab_width = 29  # Default width when not using graph
+        separator_width = 70
 
     print("=" * separator_width)
     if options.graph:
-        print("%-18s %-29s %-24s %12s %8s" %
-              ("kmem_cache", "NAME", "Percent", "TOTAL", "OBJSIZE"))
+        format_str = "%-18s %-" + str(slab_width) + "s %-24s %12s %8s"
+        print(format_str % ("kmem_cache", "NAME", "Percent", "TOTAL", "OBJSIZE"))
     else:
-        print("%-18s %-29s %12s %8s" %
-              ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
+        print("%-18s %-29s %12s %8s" % ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
     print("=" * separator_width)
 
     for i in range(0, print_count):
-        kmem_cache = readSU("struct kmem_cache",
-                            int(sorted_slabtop[i][0], 16))
+        kmem_cache = readSU("struct kmem_cache", int(sorted_slabtop[i][0], 16))
         obj_size = 0
         if (member_offset('struct kmem_cache', 'buffer_size') >= 0):
             obj_size = kmem_cache.buffer_size
@@ -1072,18 +1085,15 @@ def show_slabtop(options):
 
         slab_name = kmem_cache.name
         # Truncate SLAB name to fit column width
-        if options.graph and len(slab_name) > 29:
-            slab_name = slab_name[:26] + "..."
+        if len(slab_name) > slab_width:
+            slab_name = slab_name[:slab_width-3] + "..."
 
         if options.graph:
             percentage = (sorted_slabtop[i][1] * 100.0 / total_slab) if total_slab > 0 else 0
             bar = get_memory_bar(percentage, width=20)
-            print("0x%16s %-29s %s %12s %8d" %
-                    (sorted_slabtop[i][0],
-                     slab_name,
-                     bar,
-                     get_size_str(sorted_slabtop[i][1] * 1024),
-                     obj_size))
+            format_str = "0x%16s %-" + str(slab_width) + "s %s %12s %8d"
+            print(format_str % (sorted_slabtop[i][0], slab_name, bar,
+                               get_size_str(sorted_slabtop[i][1] * 1024), obj_size))
             crashcolor.set_color(crashcolor.RESET)
         else:
             print("0x%16s %-29s %12s %8d" %
@@ -3381,37 +3391,45 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     if (op.all):
         min_number = len(sorted_oom_dict)
 
+    print_count = min(len(sorted_oom_dict), min_number)
+
+    # Calculate optimal column width based on longest process name
+    max_pname_len = max(len(sorted_oom_dict[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
+    pname_width = max(20, min(60, max_pname_len + 2))  # Min 20, max 60 chars
+
     # Check if graph mode is enabled
     show_graph = getattr(op, 'graph', False)
 
     # Calculate separator width based on graph mode
-    separator_width = 42 + 15 + 3
+    separator_width = pname_width + 15 + 3
     if show_graph:
-        separator_width = 42 + 24 + 15 + 6
+        separator_width = pname_width + 24 + 15 + 6
 
     print("=" * separator_width)
     if show_graph:
-        print("%-42s %-24s %15s" % ("Process_Name", "Percent", "Usage"))
+        format_str = "%-" + str(pname_width) + "s %-24s %15s"
+        print(format_str % ("Process_Name", "Percent", "Usage"))
     else:
-        print("%-42s %15s" % ("NAME", "Usage"))
+        format_str = "%-" + str(pname_width) + "s %15s"
+        print(format_str % ("NAME", "Usage"))
     print("=" * separator_width)
-
-    print_count = min(len(sorted_oom_dict), min_number)
 
     for i in range(0, print_count):
         pname = sorted_oom_dict[i][0]
         # Truncate process name to fit column width
-        if len(pname) > 42:
-            pname = pname[:39] + "..."
+        if len(pname) > pname_width:
+            pname = pname[:pname_width-3] + "..."
 
         mem_usage = sorted_oom_dict[i][1]
 
         if show_graph:
             percentage = (mem_usage * 100.0 / total_usage) if total_usage > 0 else 0
             bar = get_memory_bar(percentage, width=20)
-            print("%-42s %s %15s" % (pname, bar, get_size_str(mem_usage, True)))
+            format_str = "%-" + str(pname_width) + "s %s %15s"
+            print(format_str % (pname, bar, get_size_str(mem_usage, True)))
         else:
-            print("%-42s %15s" % (pname, get_size_str(mem_usage, True)))
+            format_str = "%-" + str(pname_width) + "s %15s"
+            print(format_str % (pname, get_size_str(mem_usage, True)))
         crashcolor.set_color(crashcolor.RESET)
 
     if print_count < len(sorted_oom_dict) - 1:
