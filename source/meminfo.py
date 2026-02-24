@@ -12,6 +12,7 @@ import sys
 import operator
 import gc  # For garbage collection
 from collections import defaultdict
+import shutil
 
 import crashcolor
 from crashhelper import *
@@ -835,6 +836,67 @@ def get_size_str(size, coloring = False):
     return size_str
 
 
+def get_terminal_width():
+    """
+    Get terminal width from shutil.
+
+    Returns:
+        int: Terminal width in columns, or 80 if unable to determine
+    """
+    try:
+        # Try to get terminal size from shutil (works in most cases)
+        terminal_size = shutil.get_terminal_size()
+        return terminal_size.columns
+    except:
+        # Fallback to 80 columns if unable to determine
+        return 80
+
+
+def get_optimal_max_widths(show_graph=False):
+    """
+    Calculate optimal maximum column widths based on terminal width.
+
+    Args:
+        show_graph: If True, account for graph column in calculations
+
+    Returns:
+        dict: Maximum widths for different column types
+            - 'process_name': Max width for process names
+            - 'slab_name': Max width for SLAB names
+    """
+    terminal_width = get_terminal_width()
+
+    # Reserve space for other columns and padding
+    if show_graph:
+        # With graph: Process_Name + Percent(24) + Usage(15) + padding(~10)
+        reserved_space = 24 + 15 + 10
+    else:
+        # Without graph: Process_Name + Usage(15) + padding(~10)
+        reserved_space = 15 + 10
+
+    available_width = terminal_width - reserved_space
+
+    # Set reasonable bounds
+    # Process names: minimum 20, maximum based on available space (but cap at 100)
+    process_max = max(20, min(100, available_width))
+
+    # SLAB names: slightly smaller to account for additional columns
+    if show_graph:
+        # SLAB table has: kmem_cache(18) + NAME + Percent(24) + TOTAL(12) + OBJSIZE(8) + padding
+        slab_reserved = 18 + 24 + 12 + 8 + 12
+    else:
+        # SLAB table has: kmem_cache(18) + NAME + TOTAL(12) + OBJSIZE(8) + padding
+        slab_reserved = 18 + 12 + 8 + 10
+
+    slab_available = terminal_width - slab_reserved
+    slab_max = max(20, min(80, slab_available))
+
+    return {
+        'process_name': process_max,
+        'slab_name': slab_max
+    }
+
+
 def get_memory_bar(percentage, width=20):
     """
     Generate ASCII bar chart for memory usage percentage
@@ -978,10 +1040,11 @@ def show_tasks_memusage(options):
 
     print_count = min(len(sorted_usage) - 1, min_number)
 
-    # Calculate optimal column width based on longest process name
+    # Calculate optimal column width based on terminal width and longest process name
     if options.graph:
+        max_widths = get_optimal_max_widths(show_graph=True)
         max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
-        pname_width = max(20, min(60, max_pname_len + 2))  # Min 20, max 60 chars
+        pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
         separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
     else:
         separator_width = 70
@@ -1052,8 +1115,11 @@ def show_slabtop(options):
     # Calculate total for percentage
     total_slab = sum([item[1] for item in sorted_slabtop[:print_count]])
 
-    # Calculate optimal column width based on longest SLAB name
+    # Calculate optimal column width based on terminal width and longest SLAB name
     if options.graph:
+        # Get terminal-aware maximum widths
+        max_widths = get_optimal_max_widths(show_graph=True)
+
         # First pass: collect all SLAB names to find longest
         slab_names = []
         for i in range(0, print_count):
@@ -1061,7 +1127,7 @@ def show_slabtop(options):
             slab_names.append(kmem_cache.name)
 
         max_slab_len = max(len(name) for name in slab_names) if slab_names else 20
-        slab_width = max(20, min(50, max_slab_len + 2))  # Min 20, max 50 chars
+        slab_width = max(20, min(max_widths['slab_name'], max_slab_len + 2))
         separator_width = 18 + slab_width + 24 + 12 + 8 + 8  # All columns + padding
     else:
         slab_width = 29  # Default width when not using graph
@@ -3393,12 +3459,13 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
 
     print_count = min(len(sorted_oom_dict), min_number)
 
-    # Calculate optimal column width based on longest process name
-    max_pname_len = max(len(sorted_oom_dict[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
-    pname_width = max(20, min(60, max_pname_len + 2))  # Min 20, max 60 chars
-
     # Check if graph mode is enabled
     show_graph = getattr(op, 'graph', False)
+
+    # Calculate optimal column width based on terminal width and longest process name
+    max_widths = get_optimal_max_widths(show_graph)
+    max_pname_len = max(len(sorted_oom_dict[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
+    pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
 
     # Calculate separator width based on graph mode
     separator_width = pname_width + 15 + 3
