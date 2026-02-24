@@ -1040,14 +1040,17 @@ def show_tasks_memusage(options):
 
     print_count = min(len(sorted_usage) - 1, min_number)
 
+    # Detect terminal width fresh right before display to catch any resizes
     # Calculate optimal column width based on terminal width and longest process name
     if options.graph:
+        initial_terminal_width = get_terminal_width()
         max_widths = get_optimal_max_widths(show_graph=True)
         max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
         pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
         separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
     else:
         separator_width = 70
+        initial_terminal_width = 80
 
     # Print header
     print("=" * separator_width)
@@ -1059,6 +1062,28 @@ def show_tasks_memusage(options):
     print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
+        # Check for terminal resize every 10 rows (to avoid excessive system calls)
+        if options.graph and i > 0 and i % 10 == 0:
+            current_width = get_terminal_width()
+            if abs(current_width - initial_terminal_width) > 5:
+                # Terminal resized significantly - restart table with new width
+                print("=" * separator_width)
+                crashcolor.set_color(crashcolor.YELLOW)
+                print("\n[Terminal resized - adjusting table width]\n")
+                crashcolor.set_color(crashcolor.RESET)
+
+                # Recalculate widths
+                initial_terminal_width = current_width
+                max_widths = get_optimal_max_widths(show_graph=True)
+                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+                separator_width = pname_width + 24 + 15 + 6
+
+                # Reprint header
+                print("=" * separator_width)
+                format_str = "%-" + str(pname_width) + "s %-24s %15s"
+                print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
+                print("-" * separator_width)
+
         pname = sorted_usage[i][0]
         rss_kb = sorted_usage[i][1]
 
@@ -1118,7 +1143,8 @@ def show_slabtop(options):
     # Calculate optimal column width based on terminal width and longest SLAB name
     if options.graph:
         # Get terminal width and calculate available space for NAME column
-        terminal_width = get_terminal_width()
+        initial_terminal_width = get_terminal_width()
+        terminal_width = initial_terminal_width
 
         # Reserve space for: kmem_cache(18) + spaces + graph(24) + TOTAL(12) + OBJSIZE(8) + padding
         kmem_cache_width = 18  # "0x" + 16 hex digits
@@ -1147,6 +1173,7 @@ def show_slabtop(options):
     else:
         slab_width = 29  # Default width when not using graph
         separator_width = 70
+        initial_terminal_width = 80
 
     print("=" * separator_width)
     if options.graph:
@@ -1157,6 +1184,30 @@ def show_slabtop(options):
     print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
+        # Check for terminal resize every 10 rows (to avoid excessive system calls)
+        if options.graph and i > 0 and i % 10 == 0:
+            current_width = get_terminal_width()
+            if abs(current_width - initial_terminal_width) > 5:
+                # Terminal resized significantly - restart table with new width
+                print("=" * separator_width)
+                crashcolor.set_color(crashcolor.YELLOW)
+                print("\n[Terminal resized - adjusting table width]\n")
+                crashcolor.set_color(crashcolor.RESET)
+
+                # Recalculate widths
+                initial_terminal_width = current_width
+                terminal_width = current_width
+                available_for_name = terminal_width - reserved
+                slab_width = max(15, min(available_for_name - 2, max_slab_len + 2))
+                separator_width = kmem_cache_width + slab_width + graph_width + total_width + objsize_width + padding
+                separator_width = min(separator_width, terminal_width)
+
+                # Reprint header
+                print("=" * separator_width)
+                format_str = "%-18s %-" + str(slab_width) + "s %-24s %12s %8s"
+                print(format_str % ("kmem_cache", "NAME", "Usage_Percent", "TOTAL", "OBJSIZE"))
+                print("-" * separator_width)
+
         kmem_cache = readSU("struct kmem_cache", int(sorted_slabtop[i][0], 16))
         obj_size = 0
         if (member_offset('struct kmem_cache', 'buffer_size') >= 0):
@@ -3478,6 +3529,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     show_graph = getattr(op, 'graph', False)
 
     # Calculate optimal column width based on terminal width and longest process name
+    initial_terminal_width = get_terminal_width()
     max_widths = get_optimal_max_widths(show_graph)
     max_pname_len = max(len(sorted_oom_dict[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
     pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
@@ -3497,6 +3549,28 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
+        # Check for terminal resize every 10 rows (to avoid excessive system calls)
+        if show_graph and i > 0 and i % 10 == 0:
+            current_width = get_terminal_width()
+            if abs(current_width - initial_terminal_width) > 5:
+                # Terminal resized significantly - restart table with new width
+                print("=" * separator_width)
+                crashcolor.set_color(crashcolor.YELLOW)
+                print("\n[Terminal resized - adjusting table width]\n")
+                crashcolor.set_color(crashcolor.RESET)
+
+                # Recalculate widths
+                initial_terminal_width = current_width
+                max_widths = get_optimal_max_widths(show_graph)
+                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+                separator_width = pname_width + 24 + 15 + 6
+
+                # Reprint header
+                print("=" * separator_width)
+                format_str = "%-" + str(pname_width) + "s %-24s %15s"
+                print(format_str % ("Process_Name", "Usage_Percent", "Usage"))
+                print("-" * separator_width)
+
         pname = sorted_oom_dict[i][0]
         # Truncate process name to fit column width
         if len(pname) > pname_width:
