@@ -1056,7 +1056,7 @@ def show_tasks_memusage(options):
         print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
     else:
         print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
-    print("=" * separator_width)
+    print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
         pname = sorted_usage[i][0]
@@ -1117,8 +1117,18 @@ def show_slabtop(options):
 
     # Calculate optimal column width based on terminal width and longest SLAB name
     if options.graph:
-        # Get terminal-aware maximum widths
-        max_widths = get_optimal_max_widths(show_graph=True)
+        # Get terminal width and calculate available space for NAME column
+        terminal_width = get_terminal_width()
+
+        # Reserve space for: kmem_cache(18) + spaces + graph(24) + TOTAL(12) + OBJSIZE(8) + padding
+        kmem_cache_width = 18  # "0x" + 16 hex digits
+        graph_width = 24  # Graph column with brackets
+        total_width = 12  # TOTAL column
+        objsize_width = 8  # OBJSIZE column
+        padding = 8  # Spaces between columns
+
+        reserved = kmem_cache_width + graph_width + total_width + objsize_width + padding
+        available_for_name = terminal_width - reserved
 
         # First pass: collect all SLAB names to find longest
         slab_names = []
@@ -1126,9 +1136,14 @@ def show_slabtop(options):
             kmem_cache = readSU("struct kmem_cache", int(sorted_slabtop[i][0], 16))
             slab_names.append(kmem_cache.name)
 
-        max_slab_len = max(len(name) for name in slab_names) if slab_names else 20
-        slab_width = max(20, min(max_widths['slab_name'], max_slab_len + 2))
-        separator_width = 18 + slab_width + 24 + 12 + 8 + 8  # All columns + padding
+        max_slab_len = max(len(name) for name in slab_names) if slab_names else 15
+        # Ensure NAME width fits: min 15 chars, max based on available space, prefer actual max length
+        slab_width = max(15, min(available_for_name - 2, max_slab_len + 2))
+
+        # Calculate actual separator width to match terminal or be narrower
+        separator_width = kmem_cache_width + slab_width + graph_width + total_width + objsize_width + padding
+        # Cap at terminal width to prevent overflow
+        separator_width = min(separator_width, terminal_width)
     else:
         slab_width = 29  # Default width when not using graph
         separator_width = 70
@@ -1139,7 +1154,7 @@ def show_slabtop(options):
         print(format_str % ("kmem_cache", "NAME", "Usage_Percent", "TOTAL", "OBJSIZE"))
     else:
         print("%-18s %-29s %12s %8s" % ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
-    print("=" * separator_width)
+    print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
         kmem_cache = readSU("struct kmem_cache", int(sorted_slabtop[i][0], 16))
@@ -3479,7 +3494,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     else:
         format_str = "%-" + str(pname_width) + "s %15s"
         print(format_str % ("NAME", "Usage"))
-    print("=" * separator_width)
+    print("-" * separator_width)  # Add separator line between header and data
 
     for i in range(0, print_count):
         pname = sorted_oom_dict[i][0]
