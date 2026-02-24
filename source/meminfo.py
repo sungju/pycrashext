@@ -834,6 +834,44 @@ def get_size_str(size, coloring = False):
 
     return size_str
 
+
+def get_memory_bar(percentage, width=20):
+    """
+    Generate ASCII bar chart for memory usage percentage
+
+    Args:
+        percentage: Usage percentage (0-100)
+        width: Total width of bar in characters
+
+    Returns:
+        String representation of bar chart like: [████████░░░░]
+    """
+    if percentage < 0:
+        percentage = 0
+    if percentage > 100:
+        percentage = 100
+
+    filled_width = int((percentage / 100.0) * width)
+    empty_width = width - filled_width
+
+    # Use block characters for visual appeal
+    filled_char = '█'
+    empty_char = '░'
+
+    bar = '[' + (filled_char * filled_width) + (empty_char * empty_width) + ']'
+
+    # Add color coding based on usage level
+    if percentage >= 90:
+        crashcolor.set_color(crashcolor.RED)
+    elif percentage >= 70:
+        crashcolor.set_color(crashcolor.YELLOW)
+    elif percentage >= 50:
+        crashcolor.set_color(crashcolor.CYAN)
+    else:
+        crashcolor.set_color(crashcolor.GREEN)
+
+    return bar
+
 def get_pss_for_physical(paddr):
 #    print(paddr)
     result_lines = []
@@ -934,9 +972,19 @@ def show_tasks_memusage(options):
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
 
-    print("=" * 70)
-    print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
-    print("=" * 70)
+    # Calculate separator width based on whether graph is shown
+    separator_width = 70
+    if options.graph:
+        separator_width = 42 + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
+
+    # Print header
+    print("=" * separator_width)
+    if options.graph:
+        print("%-42s %-24s %15s" % ("Process_Name", "Percent", "RSS_Usage"))
+    else:
+        print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
+    print("=" * separator_width)
+
     min_number = 10
     if (options.all):
         min_number = len(sorted_usage) - 1
@@ -944,15 +992,27 @@ def show_tasks_memusage(options):
     print_count = min(len(sorted_usage) - 1, min_number)
 
     for i in range(0, print_count):
-        print("%14s (%10.2f KiB)   %-s" %
-                (get_size_str(sorted_usage[i][1] * 1024, True),
-                 sorted_usage[i][1],
-                 sorted_usage[i][0]))
-        crashcolor.set_color(crashcolor.RESET)
+        pname = sorted_usage[i][0]
+        # Truncate process name to fit column width
+        if options.graph and len(pname) > 42:
+            pname = pname[:39] + "..."
+        rss_kb = sorted_usage[i][1]
+
+        if options.graph:
+            percentage = (rss_kb * 100.0 / total_rss) if total_rss > 0 else 0
+            bar = get_memory_bar(percentage, width=20)
+            print("%-42s %s %15s" % (pname, bar, get_size_str(rss_kb * 1024)))
+            crashcolor.set_color(crashcolor.RESET)
+        else:
+            print("%14s (%10.2f KiB)   %-s" %
+                    (get_size_str(rss_kb * 1024, True),
+                     rss_kb,
+                     pname))
+            crashcolor.set_color(crashcolor.RESET)
 
     if print_count < len(sorted_usage) - 1:
         print("\t<...>")
-    print("=" * 70)
+    print("=" * separator_width)
     crashcolor.set_color(crashcolor.BLUE)
     print("Total memory usage from user-space = %s" %
           (get_size_str(total_rss * 1024)))
@@ -982,12 +1042,24 @@ def show_slabtop(options):
     if (options.all):
         min_number = len(sorted_slabtop) - 1
 
-    print("=" * 70)
-    print("%-18s %-29s %12s %8s" %
-          ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
-    print("=" * 70)
-
     print_count = min(len(sorted_slabtop) - 1, min_number)
+
+    # Calculate total for percentage
+    total_slab = sum([item[1] for item in sorted_slabtop[:print_count]])
+
+    # Calculate separator width based on whether graph is shown
+    separator_width = 70
+    if options.graph:
+        separator_width = 18 + 29 + 24 + 12 + 8 + 8  # All columns + padding
+
+    print("=" * separator_width)
+    if options.graph:
+        print("%-18s %-29s %-24s %12s %8s" %
+              ("kmem_cache", "NAME", "Percent", "TOTAL", "OBJSIZE"))
+    else:
+        print("%-18s %-29s %12s %8s" %
+              ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
+    print("=" * separator_width)
 
     for i in range(0, print_count):
         kmem_cache = readSU("struct kmem_cache",
@@ -998,17 +1070,32 @@ def show_slabtop(options):
         elif (member_offset('struct kmem_cache', 'object_size') >= 0):
             obj_size = kmem_cache.object_size
 
-        print("0x%16s %-29s %12s %8d" %
-                (sorted_slabtop[i][0],
-                 kmem_cache.name,
-                 get_size_str(sorted_slabtop[i][1] * 1024, True),
-                 obj_size))
+        slab_name = kmem_cache.name
+        # Truncate SLAB name to fit column width
+        if options.graph and len(slab_name) > 29:
+            slab_name = slab_name[:26] + "..."
 
-        crashcolor.set_color(crashcolor.RESET)
+        if options.graph:
+            percentage = (sorted_slabtop[i][1] * 100.0 / total_slab) if total_slab > 0 else 0
+            bar = get_memory_bar(percentage, width=20)
+            print("0x%16s %-29s %s %12s %8d" %
+                    (sorted_slabtop[i][0],
+                     slab_name,
+                     bar,
+                     get_size_str(sorted_slabtop[i][1] * 1024),
+                     obj_size))
+            crashcolor.set_color(crashcolor.RESET)
+        else:
+            print("0x%16s %-29s %12s %8d" %
+                    (sorted_slabtop[i][0],
+                     slab_name,
+                     get_size_str(sorted_slabtop[i][1] * 1024, True),
+                     obj_size))
+            crashcolor.set_color(crashcolor.RESET)
 
     if print_count < len(sorted_slabtop) - 1:
         print("\t<...>")
-    print("=" * 70)
+    print("=" * separator_width)
 
 
 def show_full_slab(options, kmem_cache, addr, slab_addr, offset):
@@ -3290,26 +3377,46 @@ def show_oom_meminfo(op, meminfo_dict):
 def show_oom_memory_usage(op, oom_dict, total_usage):
     sorted_oom_dict = sorted(oom_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
-    min_number = 10
+    min_number = getattr(op, 'oom_top', 10)
     if (op.all):
         min_number = len(sorted_oom_dict)
 
-    print("=" * 58)
-    print("%-42s %15s" % ("NAME", "Usage"))
-    print("=" * 58)
+    # Check if graph mode is enabled
+    show_graph = getattr(op, 'graph', False)
+
+    # Calculate separator width based on graph mode
+    separator_width = 42 + 15 + 3
+    if show_graph:
+        separator_width = 42 + 24 + 15 + 6
+
+    print("=" * separator_width)
+    if show_graph:
+        print("%-42s %-24s %15s" % ("Process_Name", "Percent", "Usage"))
+    else:
+        print("%-42s %15s" % ("NAME", "Usage"))
+    print("=" * separator_width)
 
     print_count = min(len(sorted_oom_dict), min_number)
 
     for i in range(0, print_count):
         pname = sorted_oom_dict[i][0]
+        # Truncate process name to fit column width
+        if len(pname) > 42:
+            pname = pname[:39] + "..."
 
         mem_usage = sorted_oom_dict[i][1]
-        print("%-42s %15s" % (pname, get_size_str(mem_usage, True)))
+
+        if show_graph:
+            percentage = (mem_usage * 100.0 / total_usage) if total_usage > 0 else 0
+            bar = get_memory_bar(percentage, width=20)
+            print("%-42s %s %15s" % (pname, bar, get_size_str(mem_usage, True)))
+        else:
+            print("%-42s %15s" % (pname, get_size_str(mem_usage, True)))
         crashcolor.set_color(crashcolor.RESET)
 
     if print_count < len(sorted_oom_dict) - 1:
         print("\t<...>")
-    print("=" * 58)
+    print("=" * separator_width)
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
     crashcolor.set_color(crashcolor.RESET)
 
@@ -3331,11 +3438,70 @@ def get_size(val):
 
 
 import traceback
+import re
+
+def build_process_filter_pattern(filter_str):
+    """
+    Build regex pattern from filter string.
+    Supports:
+    - Comma-separated: "java,python,VM" -> regex: (java|python|VM)
+    - Direct regex: "java.*" -> regex: java.*
+    """
+    if not filter_str:
+        return None
+
+    try:
+        # Check if it's already a regex pattern (contains regex special chars)
+        if any(c in filter_str for c in ['.*', '.+', '^', '$', '\\', '[', ']', '(', ')', '|']) and ',' not in filter_str:
+            # Treat as direct regex
+            return re.compile(filter_str, re.IGNORECASE)
+        else:
+            # Treat as comma-separated list
+            # Split by comma and strip whitespace
+            processes = [p.strip() for p in filter_str.split(',')]
+            # Build alternation pattern
+            pattern = '|'.join(processes)
+            return re.compile('(' + pattern + ')', re.IGNORECASE)
+    except re.error as e:
+        print("Invalid regex pattern: %s" % str(e))
+        return None
+
+
+def extract_invoker_process(line):
+    """Extract process name from 'invoked oom-killer' line"""
+    # Line format: "... processname invoked oom-killer: ..."
+    try:
+        parts = line.split("invoked oom-killer:")
+        if len(parts) > 0:
+            before = parts[0].strip()
+            # Get last word before "invoked"
+            words = before.split()
+            if len(words) > 0:
+                return words[-1]
+    except:
+        pass
+    return ""
+
+
 def show_oom_events(op):
     global page_size
 
     page_size = 1 << get_page_shift()
     is_first_oom = True
+    oom_event_counter = 0
+
+    # Initialize process filter
+    process_filter_pattern = None
+    process_filter = getattr(op, 'process_filter', "")
+    if process_filter:
+        process_filter_pattern = build_process_filter_pattern(process_filter)
+        if process_filter_pattern is None:
+            print("Invalid filter pattern: %s" % process_filter)
+            return
+
+    # Get count limit
+    oom_count = getattr(op, 'oom_count', 0)
+
     try:
         result_lines = exec_crash_command('log').splitlines()
         oom_invoked = False
@@ -3352,7 +3518,19 @@ def show_oom_events(op):
         total_usage = 0
         for line in result_lines:
             if "invoked oom-killer:" in line:
+                # Check if we've hit the count limit
+                if oom_count > 0 and oom_event_counter >= oom_count:
+                    break
+
+                # Check process filter
+                if process_filter_pattern:
+                    invoker = extract_invoker_process(line)
+                    if not process_filter_pattern.search(invoker):
+                        # Skip this OOM event - wrong process
+                        continue
+
                 oom_invoked = True
+                oom_event_counter += 1
                 if not is_first_oom:
                     print()
 
@@ -3548,6 +3726,9 @@ def meminfo():
                   action="store",
                   type="string",
                   help="Interpret gfp_mask value")
+    op.add_option("-G", "--graph", dest="graph", default=0,
+                  action="store_true",
+                  help="Show bar chart for memory usage visualization")
     op.add_option("-i", "--meminfo", dest="meminfo", default=0,
                   action="store_true",
                   help="Show /proc/meminfo-like output")
@@ -3572,6 +3753,18 @@ def meminfo():
     op.add_option("-O", "--OOM", dest="OOM", default=0,
                   action="store_true",
                   help="Analyse OOM messages in log")
+    op.add_option("--oom-summary", dest="oom_summary", default=0,
+                  action="store_true",
+                  help="Show OOM summary dashboard with pattern analysis")
+    op.add_option("--process-filter", dest="process_filter", default="",
+                  action="store", type="string",
+                  help="Filter OOM events by process name (comma-separated or regex)")
+    op.add_option("--oom-count", dest="oom_count", default=0,
+                  action="store", type="int",
+                  help="Limit number of OOM events to display")
+    op.add_option("--oom-top", dest="oom_top", default=10,
+                  action="store", type="int",
+                  help="Show top N memory consumers (default: 10)")
     op.add_option("-P", "--pss", dest="memusage_pss", default=0,
                   action="store_true",
                   help="Show memory usages(pss) by tasks")
