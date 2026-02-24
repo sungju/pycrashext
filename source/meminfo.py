@@ -990,7 +990,7 @@ def show_tasks_memusage(options):
     print("=" * separator_width)
     if options.graph:
         format_str = "%-" + str(pname_width) + "s %-24s %15s"
-        print(format_str % ("Process_Name", "Percent", "RSS_Usage"))
+        print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
     else:
         print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
     print("=" * separator_width)
@@ -1070,7 +1070,7 @@ def show_slabtop(options):
     print("=" * separator_width)
     if options.graph:
         format_str = "%-18s %-" + str(slab_width) + "s %-24s %12s %8s"
-        print(format_str % ("kmem_cache", "NAME", "Percent", "TOTAL", "OBJSIZE"))
+        print(format_str % ("kmem_cache", "NAME", "Usage_Percent", "TOTAL", "OBJSIZE"))
     else:
         print("%-18s %-29s %12s %8s" % ("kmem_cache", "NAME", "TOTAL", "OBJSIZE"))
     print("=" * separator_width)
@@ -3408,7 +3408,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     print("=" * separator_width)
     if show_graph:
         format_str = "%-" + str(pname_width) + "s %-24s %15s"
-        print(format_str % ("Process_Name", "Percent", "Usage"))
+        print(format_str % ("Process_Name", "Usage_Percent", "Usage"))
     else:
         format_str = "%-" + str(pname_width) + "s %15s"
         print(format_str % ("NAME", "Usage"))
