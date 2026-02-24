@@ -3740,11 +3740,11 @@ def meminfo():
                   action="store",
                   type="string",
                   help="Shows the meaning of pte flags")
-    op.add_option("-g", "--gfp_mask", dest="gfp_mask", default="",
+    op.add_option("-G", "--gfp_mask", dest="gfp_mask", default="",
                   action="store",
                   type="string",
                   help="Interpret gfp_mask value")
-    op.add_option("-G", "--graph", dest="graph", default=0,
+    op.add_option("-g", "--graph", dest="graph", default=0,
                   action="store_true",
                   help="Show bar chart for memory usage visualization")
     op.add_option("-i", "--meminfo", dest="meminfo", default=0,
