@@ -838,14 +838,50 @@ def get_size_str(size, coloring = False):
 
 def get_terminal_width():
     """
-    Get terminal width using crash utility's shell command execution.
+    Get terminal width - tries multiple methods for SSH/tunneled environments.
 
     Returns:
         int: Terminal width in columns, or 80 if unable to determine
     """
     try:
-        # Method 1: Use crash's shell execution to run tput cols
-        # The '!' prefix in crash executes shell commands
+        # Method 1: Try os.get_terminal_size on stdout (works in SSH)
+        # This directly queries the file descriptor, bypassing shell
+        try:
+            import sys
+            # Try stdout first (most likely to work in SSH)
+            size = os.get_terminal_size(sys.stdout.fileno())
+            if size.columns > 0:
+                return size.columns
+        except:
+            pass
+
+        # Method 2: Try os.get_terminal_size on stderr
+        try:
+            import sys
+            size = os.get_terminal_size(sys.stderr.fileno())
+            if size.columns > 0:
+                return size.columns
+        except:
+            pass
+
+        # Method 3: Try os.get_terminal_size on stdin
+        try:
+            import sys
+            size = os.get_terminal_size(sys.stdin.fileno())
+            if size.columns > 0:
+                return size.columns
+        except:
+            pass
+
+        # Method 4: Try shutil (uses os.get_terminal_size internally but with fallback)
+        try:
+            terminal_size = shutil.get_terminal_size(fallback=(80, 24))
+            if terminal_size.columns > 0:
+                return terminal_size.columns
+        except:
+            pass
+
+        # Method 5: Use crash's shell execution to run tput cols
         try:
             result = exec_crash_command("! tput cols 2>/dev/null")
             width = int(result.strip())
@@ -854,7 +890,7 @@ def get_terminal_width():
         except:
             pass
 
-        # Method 2: Use crash's shell execution to run stty size
+        # Method 6: Use crash's shell execution to run stty size
         try:
             result = exec_crash_command("! stty size 2>/dev/null")
             parts = result.strip().split()
@@ -865,15 +901,7 @@ def get_terminal_width():
         except:
             pass
 
-        # Method 3: Try shutil as fallback
-        try:
-            terminal_size = shutil.get_terminal_size(fallback=(80, 24))
-            if terminal_size.columns > 0:
-                return terminal_size.columns
-        except:
-            pass
-
-        # Method 4: Check COLUMNS environment variable
+        # Method 7: Check COLUMNS environment variable
         try:
             columns = os.environ.get('COLUMNS')
             if columns and int(columns) > 0:
