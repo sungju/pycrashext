@@ -867,12 +867,14 @@ def get_optimal_max_widths(show_graph=False):
     terminal_width = get_terminal_width()
 
     # Reserve space for other columns and padding
+    # This matches separator_width formula: pname_width + 24 + 15 + 6 (graph)
     if show_graph:
-        # With graph: Process_Name + Percent(24) + Usage(15) + padding(~10)
-        reserved_space = 24 + 15 + 10
+        # With graph: Process_Name + Percent(24) + Usage(15) + padding(6)
+        reserved_space = 24 + 15 + 6  # = 45
     else:
-        # Without graph: Process_Name + Usage(15) + padding(~10)
-        reserved_space = 15 + 10
+        # Without graph: Process_Name + Usage(15) + padding(3)
+        # Based on show_oom_memory_usage: pname_width + 15 + 3
+        reserved_space = 15 + 3  # = 18
 
     available_width = terminal_width - reserved_space
 
@@ -881,12 +883,14 @@ def get_optimal_max_widths(show_graph=False):
     process_max = max(20, min(100, available_width))
 
     # SLAB names: slightly smaller to account for additional columns
+    # This matches separator_width formula: kmem_cache(18) + slab_width + graph(24) + TOTAL(12) + OBJSIZE(8) + padding(8)
     if show_graph:
-        # SLAB table has: kmem_cache(18) + NAME + Percent(24) + TOTAL(12) + OBJSIZE(8) + padding
-        slab_reserved = 18 + 24 + 12 + 8 + 12
+        # SLAB table has: kmem_cache(18) + NAME + Percent(24) + TOTAL(12) + OBJSIZE(8) + padding(8)
+        slab_reserved = 18 + 24 + 12 + 8 + 8  # = 70
     else:
-        # SLAB table has: kmem_cache(18) + NAME + TOTAL(12) + OBJSIZE(8) + padding
-        slab_reserved = 18 + 12 + 8 + 10
+        # SLAB table uses fixed width in non-graph mode, but calculate for consistency
+        # Formula would be: kmem_cache(18) + NAME + TOTAL(12) + OBJSIZE(8) + padding(3)
+        slab_reserved = 18 + 12 + 8 + 3  # = 41
 
     slab_available = terminal_width - slab_reserved
     slab_max = max(20, min(80, slab_available))
@@ -1046,7 +1050,7 @@ def show_tasks_memusage(options):
         initial_terminal_width = get_terminal_width()
         max_widths = get_optimal_max_widths(show_graph=True)
         max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
-        pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+        pname_width = max(20, min(max_widths['process_name'], max_pname_len + 1))
         separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
     else:
         separator_width = 70
@@ -1075,7 +1079,7 @@ def show_tasks_memusage(options):
                 # Recalculate widths
                 initial_terminal_width = current_width
                 max_widths = get_optimal_max_widths(show_graph=True)
-                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 1))
                 separator_width = pname_width + 24 + 15 + 6
 
                 # Reprint header
@@ -1164,7 +1168,7 @@ def show_slabtop(options):
 
         max_slab_len = max(len(name) for name in slab_names) if slab_names else 15
         # Ensure NAME width fits: min 15 chars, max based on available space, prefer actual max length
-        slab_width = max(15, min(available_for_name - 2, max_slab_len + 2))
+        slab_width = max(15, min(available_for_name, max_slab_len + 1))
 
         # Calculate actual separator width to match terminal or be narrower
         separator_width = kmem_cache_width + slab_width + graph_width + total_width + objsize_width + padding
@@ -1198,7 +1202,7 @@ def show_slabtop(options):
                 initial_terminal_width = current_width
                 terminal_width = current_width
                 available_for_name = terminal_width - reserved
-                slab_width = max(15, min(available_for_name - 2, max_slab_len + 2))
+                slab_width = max(15, min(available_for_name, max_slab_len + 1))
                 separator_width = kmem_cache_width + slab_width + graph_width + total_width + objsize_width + padding
                 separator_width = min(separator_width, terminal_width)
 
@@ -3562,7 +3566,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
                 # Recalculate widths
                 initial_terminal_width = current_width
                 max_widths = get_optimal_max_widths(show_graph)
-                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+                pname_width = max(20, min(max_widths['process_name'], max_pname_len + 1))
                 separator_width = pname_width + 24 + 15 + 6
 
                 # Reprint header
