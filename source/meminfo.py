@@ -838,14 +838,34 @@ def get_size_str(size, coloring = False):
 
 def get_terminal_width():
     """
-    Get terminal width from shutil or environment.
+    Get terminal width using crash utility's shell command execution.
 
     Returns:
         int: Terminal width in columns, or 80 if unable to determine
     """
     try:
-        # Try multiple methods to get terminal size
-        # Method 1: Try stdout first (most reliable in crash utility)
+        # Method 1: Use crash's shell execution to run tput cols
+        # The '!' prefix in crash executes shell commands
+        try:
+            result = exec_crash_command("! tput cols 2>/dev/null")
+            width = int(result.strip())
+            if width > 0:
+                return width
+        except:
+            pass
+
+        # Method 2: Use crash's shell execution to run stty size
+        try:
+            result = exec_crash_command("! stty size 2>/dev/null")
+            parts = result.strip().split()
+            if len(parts) >= 2:
+                width = int(parts[1])
+                if width > 0:
+                    return width
+        except:
+            pass
+
+        # Method 3: Try shutil as fallback
         try:
             terminal_size = shutil.get_terminal_size(fallback=(80, 24))
             if terminal_size.columns > 0:
@@ -853,21 +873,8 @@ def get_terminal_width():
         except:
             pass
 
-        # Method 2: Try reading from /dev/tty directly
+        # Method 4: Check COLUMNS environment variable
         try:
-            import fcntl
-            import termios
-            import struct
-            with open('/dev/tty', 'r') as tty:
-                height, width = struct.unpack('hh', fcntl.ioctl(tty.fileno(), termios.TIOCGWINSZ, '1234'))
-                if width > 0:
-                    return width
-        except:
-            pass
-
-        # Method 3: Check COLUMNS environment variable
-        try:
-            import os
             columns = os.environ.get('COLUMNS')
             if columns and int(columns) > 0:
                 return int(columns)
