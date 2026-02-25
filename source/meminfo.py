@@ -838,15 +838,44 @@ def get_size_str(size, coloring = False):
 
 def get_terminal_width():
     """
-    Get terminal width from shutil.
+    Get terminal width from shutil or environment.
 
     Returns:
         int: Terminal width in columns, or 80 if unable to determine
     """
     try:
-        # Try to get terminal size from shutil (works in most cases)
-        terminal_size = shutil.get_terminal_size()
-        return terminal_size.columns
+        # Try multiple methods to get terminal size
+        # Method 1: Try stdout first (most reliable in crash utility)
+        try:
+            terminal_size = shutil.get_terminal_size(fallback=(80, 24))
+            if terminal_size.columns > 0:
+                return terminal_size.columns
+        except:
+            pass
+
+        # Method 2: Try reading from /dev/tty directly
+        try:
+            import fcntl
+            import termios
+            import struct
+            with open('/dev/tty', 'r') as tty:
+                height, width = struct.unpack('hh', fcntl.ioctl(tty.fileno(), termios.TIOCGWINSZ, '1234'))
+                if width > 0:
+                    return width
+        except:
+            pass
+
+        # Method 3: Check COLUMNS environment variable
+        try:
+            import os
+            columns = os.environ.get('COLUMNS')
+            if columns and int(columns) > 0:
+                return int(columns)
+        except:
+            pass
+
+        # Fallback to 80 columns if all methods fail
+        return 80
     except:
         # Fallback to 80 columns if unable to determine
         return 80
