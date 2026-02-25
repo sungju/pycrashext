@@ -965,6 +965,39 @@ def get_optimal_max_widths(show_graph=False):
     }
 
 
+def truncate_middle(text, max_width):
+    """
+    Truncate text with ellipsis in the middle to preserve the end.
+
+    This is useful for process names with full paths where the end
+    contains the actual executable name.
+
+    Args:
+        text: String to truncate
+        max_width: Maximum width including ellipsis
+
+    Returns:
+        Truncated string with '...' in the middle if needed
+
+    Examples:
+        truncate_middle("/usr/bin/very_long_process_name", 20)
+        -> "/usr/bin/...s_name"
+    """
+    if len(text) <= max_width:
+        return text
+
+    if max_width < 4:
+        return text[:max_width]
+
+    # Reserve 3 characters for '...'
+    available = max_width - 3
+    # Split available space: slightly favor the end to preserve executable name
+    left_chars = available // 2
+    right_chars = available - left_chars
+
+    return text[:left_chars] + "..." + text[-right_chars:]
+
+
 def get_memory_bar(percentage, width=20):
     """
     Generate ASCII bar chart for memory usage percentage
@@ -1157,8 +1190,7 @@ def show_tasks_memusage(options):
 
         if options.graph:
             # Truncate process name to fit column width
-            if len(pname) > pname_width:
-                pname = pname[:pname_width-3] + "..."
+            pname = truncate_middle(pname, pname_width)
             percentage = (rss_kb * 100.0 / total_rss) if total_rss > 0 else 0
             bar = get_memory_bar(percentage, width=20)
             format_str = "%-" + str(pname_width) + "s %s %15s"
@@ -1285,8 +1317,7 @@ def show_slabtop(options):
 
         slab_name = kmem_cache.name
         # Truncate SLAB name to fit column width
-        if len(slab_name) > slab_width:
-            slab_name = slab_name[:slab_width-3] + "..."
+        slab_name = truncate_middle(slab_name, slab_width)
 
         if options.graph:
             percentage = (sorted_slabtop[i][1] * 100.0 / total_slab) if total_slab > 0 else 0
@@ -3641,8 +3672,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
 
         pname = sorted_oom_dict[i][0]
         # Truncate process name to fit column width
-        if len(pname) > pname_width:
-            pname = pname[:pname_width-3] + "..."
+        pname = truncate_middle(pname, pname_width)
 
         mem_usage = sorted_oom_dict[i][1]
 
