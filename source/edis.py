@@ -53,6 +53,12 @@ def set_jump_op_list():
     elif (arch.startswith("arm")):
         jump_op_set = [ "b" ]
         exclude_set = [ "bl", "bic", "bics", "blx" ]
+    elif (arch.startswith("s390") or arch in ("s390x")):
+        jump_op_set = [ "j", "brc", "brct" ]
+        exclude_set = [ "brasl", "bras" ]
+    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+        jump_op_set = [ "j", "b" ]
+        exclude_set = [ "jal", "jalr" ]
     else:
         jump_op_set = [ "j" ]
 
@@ -203,13 +209,31 @@ register_dict = []
 
 
 def read_stack_data(addr, unit):
+    """
+    Safely read stack data from memory.
+
+    Args:
+        addr: Memory address to read from
+        unit: Size in bytes (1, 2, 4, or 8)
+
+    Returns:
+        int: Data value, or 0 if read fails
+    """
     data = 0
     try:
-        if (unit == 8):
+        if unit == 8:
             data = readULong(addr)
-        elif (unit == 4):
+        elif unit == 4:
             data = readUInt(addr)
-    except:
+        elif unit == 2:
+            data = readU16(addr)
+        elif unit == 1:
+            data = readU8(addr)
+        else:
+            # Invalid unit size, return 0
+            return 0
+    except Exception as e:
+        # Memory read failed - this is expected for invalid addresses
         pass
 
     return data
@@ -252,6 +276,197 @@ def interpret_one_line(one_line):
     return result_str
 
 
+def s390x_stack_reg_op(words, result_str):
+    """Enhanced s390x (IBM Z) stack register operations handler"""
+
+    # Ensure we have stack pointer initialized
+    if "%rsp" not in register_dict:
+        return result_str
+
+    # Handle stack pointer adjustment: aghi r15, -160 or lay r15, -160(r15)
+    if words[2] == "aghi" and len(words) >= 4 and words[3].startswith("r15,"):
+        # Extract offset: r15,-160 -> -160
+        offset_str = words[3].split(",")[-1]
+        offset = parse_offset(offset_str)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + offset
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    elif words[2] == "lay" and len(words) >= 4 and words[3].startswith("r15,"):
+        # lay r15, -160(r15) - load address
+        if "(r15)" in words[3]:
+            offset_str = words[3].split(",")[1].split("(")[0]
+            offset = parse_offset(offset_str)
+            reg_list = []
+            for stackaddr in register_dict["%rsp"]:
+                actual_addr = stackaddr + offset
+                reg_list.append(actual_addr)
+            register_dict["%rsp"] = reg_list
+
+    # Handle store operations: stg r14, 112(r15) or stmg r6,r14,48(r15)
+    elif words[2] in ("stg", "stmg", "st", "sty") and len(words) > 3:
+        if "(r15)" in words[3]:
+            # Extract offset from format: 112(r15)
+            parts = words[3].split(",")
+            for part in parts:
+                if "(r15)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+
+                    # Determine data size
+                    if words[2] in ("stg", "stmg"):
+                        data_size = 8  # 64-bit
+                    else:
+                        data_size = 4  # 32-bit
+
+                    stackaddr_list = register_dict["%rsp"]
+                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
+
+                    if words[2] == "stmg":
+                        result_str = result_str + " ..."  # Multiple registers
+                    break
+
+    # Handle load operations: lg r14, 112(r15) or lmg r6,r14,48(r15)
+    elif words[2] in ("lg", "lmg", "l", "ly") and len(words) > 3:
+        if "(r15)" in words[3]:
+            # Extract offset from format: 112(r15)
+            parts = words[3].split(",")
+            for part in parts:
+                if "(r15)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+
+                    # Determine data size
+                    if words[2] in ("lg", "lmg"):
+                        data_size = 8  # 64-bit
+                    else:
+                        data_size = 4  # 32-bit
+
+                    stackaddr_list = register_dict["%rsp"]
+                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
+
+                    if words[2] == "lmg":
+                        result_str = result_str + " ..."  # Multiple registers
+                    break
+
+    # Handle frame pointer operations with r11 or r13
+    elif len(words) > 3 and ("(r11)" in words[3] or "(r13)" in words[3]):
+        # Similar to r15, but using frame pointer
+        reg_name = "r11" if "(r11)" in words[3] else "r13"
+        parts = words[3].split(",")
+        for part in parts:
+            if "(" + reg_name + ")" in part:
+                offset_str = part.split("(")[0]
+                offset = parse_offset(offset_str)
+
+                # Use frame pointer if available
+                if "%rbp" in register_dict:
+                    result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
+                break
+
+    return result_str
+
+
+def riscv_stack_reg_op(words, result_str):
+    """Enhanced RISC-V stack register operations handler"""
+
+    # Ensure we have stack pointer initialized
+    if "%rsp" not in register_dict:
+        return result_str
+
+    # Handle stack pointer adjustment: addi sp, sp, -32
+    if words[2] == "addi" and len(words) >= 4 and words[3].startswith("sp,sp,"):
+        # Extract offset: sp,sp,-32 -> -32
+        offset_str = words[3].split(",")[-1]
+        offset = parse_offset(offset_str)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + offset
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle frame pointer setup: mv s0, sp or addi s0, sp, 0
+    elif (words[2] == "mv" and len(words) >= 4 and
+          (words[3] == "s0,sp" or words[3] == "fp,sp")):
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            reg_list.append(stackaddr)
+        register_dict["%rbp"] = reg_list
+
+    # Handle store operations: sd ra, 24(sp) or sw a0, 8(sp)
+    elif words[2] in ("sd", "sw", "sh", "sb") and len(words) > 3:
+        if "(sp)" in words[3]:
+            # Extract offset from format: 24(sp)
+            parts = words[3].split(",")
+            for part in parts:
+                if "(sp)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+
+                    # Determine data size
+                    if words[2] == "sd":
+                        data_size = 8  # 64-bit
+                    elif words[2] == "sw":
+                        data_size = 4  # 32-bit
+                    elif words[2] == "sh":
+                        data_size = 2  # 16-bit
+                    else:  # sb
+                        data_size = 1  # 8-bit
+
+                    stackaddr_list = register_dict["%rsp"]
+                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
+                    break
+
+    # Handle load operations: ld ra, 24(sp) or lw a0, 8(sp)
+    elif words[2] in ("ld", "lw", "lh", "lhu", "lb", "lbu") and len(words) > 3:
+        if "(sp)" in words[3]:
+            # Extract offset from format: 24(sp)
+            parts = words[3].split(",")
+            for part in parts:
+                if "(sp)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+
+                    # Determine data size
+                    if words[2] == "ld":
+                        data_size = 8  # 64-bit
+                    elif words[2] == "lw":
+                        data_size = 4  # 32-bit
+                    elif words[2] in ("lh", "lhu"):
+                        data_size = 2  # 16-bit
+                    else:  # lb, lbu
+                        data_size = 1  # 8-bit
+
+                    stackaddr_list = register_dict["%rsp"]
+                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
+                    break
+
+    # Handle operations with frame pointer: ld a0, 16(s0) or ld a0, 16(fp)
+    elif len(words) > 3:
+        stack_word = ""
+        use_fp = False
+        for word in words[3:]:
+            if "(s0)" in word or "(fp)" in word or "(x8)" in word:
+                stack_word = word
+                use_fp = True
+                break
+
+        if stack_word != "" and use_fp:
+            parts = stack_word.split(",")
+            for part in parts:
+                if "(s0)" in part or "(fp)" in part or "(x8)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+
+                    if "%rbp" in register_dict:
+                        result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
+                    break
+
+    return result_str
+
+
 def stack_reg_op(words, result_str):
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
@@ -260,65 +475,211 @@ def stack_reg_op(words, result_str):
         result_str = arm_stack_reg_op(words, result_str)
     elif (arch.startswith("ppc")):
         result_str = ppc_stack_reg_op(words, result_str)
+    elif (arch.startswith("s390") or arch in ("s390x")):
+        result_str = s390x_stack_reg_op(words, result_str)
+    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+        result_str = riscv_stack_reg_op(words, result_str)
 
     return result_str
 
 
 def ppc_stack_reg_op(words, result_str):
-    if "(r1)" in words[3]: # std     r17,-120(r1)
+    """Enhanced PPC/PPC64 stack register operations handler"""
+
+    # Ensure we have stack pointer initialized
+    if "%rsp" not in register_dict:
+        return result_str
+
+    # Handle stack pointer adjustment: addi r1, r1, offset
+    if words[2] == "addi" and len(words) >= 4 and words[3].startswith("r1,r1,"):
+        # Extract offset: r1,r1,-128 -> -128
+        offset_str = words[3].split(",")[-1]
+        offset = parse_offset(offset_str)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + offset
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle stack operations with (r1): std r17,-120(r1)
+    elif len(words) > 3 and "(r1)" in words[3]:
         op_words = words[3].split(",")
         for op in op_words:
             if "(r1)" in op:
+                # Extract offset from format: -120(r1)
                 if len(op) > 4:
-                    offset = int(op[:-4], 10)
+                    offset_str = op[:-4]
+                    offset = parse_offset(offset_str)
                 else:
                     offset = 0
-                internal_count = 0
+
+                # Determine data size based on instruction
+                data_size = stack_unit  # Default to 8 bytes (doubleword)
+                if words[2] in ("stw", "lwz", "lwzu", "stwu"):
+                    data_size = 4  # Word operations
+                elif words[2] in ("sth", "lhz", "lha"):
+                    data_size = 2  # Halfword operations
+                elif words[2] in ("stb", "lbz"):
+                    data_size = 1  # Byte operations
+
                 stackaddr_list = register_dict["%rsp"]
-                result_stack_addr_list = []
-                for stackaddr in stackaddr_list:
-                    actual_addr = stackaddr + offset
-                    data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
-                    if internal_count == 0:
-                        result_str = "%s    ; 0x%s" % (result_str, data)
-                    else:
-                        result_str = "%s, 0x%s" % (result_str, data)
-                    internal_count = internal_count + 1
+                result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
 
-                    # Handling the situation the stack address changes
-                    # begin
-                    if words[2] == "stdu" and op_words[0] == "r1":
+                # Handle instructions that update the stack pointer
+                # stdu: store doubleword with update (r1 = effective address)
+                # stwu: store word with update
+                if words[2] in ("stdu", "stwu") and op_words[0] == "r1":
+                    result_stack_addr_list = []
+                    for stackaddr in stackaddr_list:
+                        actual_addr = stackaddr + offset
                         result_stack_addr_list.append(actual_addr)
-                    else:
-                        result_stack_addr_list.append(stackaddr)
+                    register_dict["%rsp"] = result_stack_addr_list
 
-                register_dict["%rsp"] = result_stack_addr_list
-                #end
                 break
+
+    # Handle multiple register store/load: stmw, lmw
+    elif words[2] in ("stmw", "lmw") and len(words) > 3:
+        # stmw/lmw stores/loads multiple words starting from specified register
+        # Format: stmw r27,-20(r1)
+        if "(r1)" in words[3]:
+            op_words = words[3].split(",")
+            for op in op_words:
+                if "(r1)" in op:
+                    if len(op) > 4:
+                        offset_str = op[:-4]
+                        offset = parse_offset(offset_str)
+                    else:
+                        offset = 0
+
+                    stackaddr_list = register_dict["%rsp"]
+                    result_str = result_str + format_stack_data(stackaddr_list, offset, 4)
+                    result_str = result_str + " ..."  # Multiple registers
+                    break
 
     return result_str
 
 
+def parse_offset(offset_str):
+    """
+    Parse an offset string that can be in various formats.
+    Handles: decimal, hex (0x...), negative values, with/without # prefix
+
+    Args:
+        offset_str: String containing the offset (e.g., "16", "0x10", "-8", "#16")
+
+    Returns:
+        int: Parsed offset value
+    """
+    if not offset_str:
+        return 0
+
+    # Remove # prefix if present (ARM style)
+    if offset_str.startswith("#"):
+        offset_str = offset_str[1:]
+
+    # Remove $ prefix if present (x86 style)
+    if offset_str.startswith("$"):
+        offset_str = offset_str[1:]
+
+    try:
+        # Handle hex
+        if offset_str.startswith("0x") or offset_str.startswith("-0x"):
+            return int(offset_str, 16)
+        # Handle decimal (including negative)
+        else:
+            return int(offset_str, 10)
+    except ValueError:
+        # Return 0 for unparseable values
+        return 0
+
+
 def get_stack_offset(stack_word):
+    """Legacy wrapper for parse_offset() to maintain compatibility"""
     op_words = stack_word.split(",")
     if len(op_words) > 1:
-        if op_words[1].startswith("#"):
-            op = op_words[1][1:]
-        else:
-            op = op_words[1]
-        if op.startswith("0x"):
-            offset = int(op, 16)
-        else:
-            offset = int(op)
+        return parse_offset(op_words[1])
     else:
-        offset = 0
+        return 0
 
-    return offset
+
+def format_stack_data(stackaddr_list, offset, unit, prefix="    ; "):
+    """
+    Format stack data for display.
+
+    Args:
+        stackaddr_list: List of stack addresses to read from
+        offset: Offset from stack address
+        unit: Size of data to read (1, 2, 4, or 8 bytes)
+        prefix: Prefix string for the comment
+
+    Returns:
+        str: Formatted string with stack values, empty string if no data
+    """
+    if not stackaddr_list:
+        return ""
+
+    result = ""
+    for idx, stackaddr in enumerate(stackaddr_list):
+        try:
+            actual_addr = stackaddr + offset
+            data = read_stack_data(actual_addr, unit)
+            # Format with correct width based on unit size
+            data_str = ("%x" % data).zfill(unit * 2)
+            if idx == 0:
+                result = "%s0x%s" % (prefix, data_str)
+            else:
+                result = "%s, 0x%s" % (result, data_str)
+        except Exception as e:
+            # Skip this entry if there's an error
+            continue
+
+    return result
+
+
+def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; "):
+    """
+    Format pair of stack data values for display (used by ARM stp/ldp).
+
+    Args:
+        stackaddr_list: List of stack addresses to read from
+        offset: Offset from stack address
+        unit: Size of data to read (4 or 8 bytes)
+        prefix: Prefix string for the comment
+
+    Returns:
+        str: Formatted string with pairs of stack values, empty string if no data
+    """
+    if not stackaddr_list:
+        return ""
+
+    result = ""
+    for idx, stackaddr in enumerate(stackaddr_list):
+        try:
+            actual_addr = stackaddr + offset
+            data1 = read_stack_data(actual_addr, unit)
+            data2 = read_stack_data(actual_addr + unit, unit)
+            data1_str = ("%x" % data1).zfill(unit * 2)
+            data2_str = ("%x" % data2).zfill(unit * 2)
+            if idx == 0:
+                result = "%s0x%s 0x%s" % (prefix, data1_str, data2_str)
+            else:
+                result = "%s, 0x%s 0x%s" % (result, data1_str, data2_str)
+        except Exception as e:
+            # Skip this entry if there's an error
+            continue
+
+    return result
 
 
 
 def arm_stack_reg_op(words, result_str):
-    # 0xffff8000103fba34 <do_epoll_pwait+16>:	mov	x29, sp
+    """Enhanced ARM/AArch64 stack register operations handler"""
+
+    # Ensure we have stack pointer initialized
+    if "%rsp" not in register_dict:
+        return result_str
+
+    # Handle frame pointer setup: mov x29, sp
     if words[2] == "mov" and words[len(words)-1] == "sp":
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
@@ -326,6 +687,29 @@ def arm_stack_reg_op(words, result_str):
             reg_list.append(actual_addr)
         register_dict["%rbp"] = reg_list
 
+    # Handle stack allocation: sub sp, sp, #0x40
+    elif words[2] == "sub" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp,"):
+        # Extract offset from last part: sp,#0x40 -> 0x40
+        offset_part = words[4].split(",")[-1]
+        value_to_sub = parse_offset(offset_part)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - value_to_sub
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle stack cleanup: add sp, sp, #0x40
+    elif words[2] == "add" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp,"):
+        # Extract offset from last part: sp,#0x40 -> 0x40
+        offset_part = words[4].split(",")[-1]
+        value_to_add = parse_offset(offset_part)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + value_to_add
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle store pair: stp x29, x30, [sp,#-64]!
     elif words[2] == "stp" and words[len(words)-2].find("[sp,") >= 0:
         stack_word = words[len(words)-1]
         if stack_word.endswith("]!"):
@@ -345,7 +729,7 @@ def arm_stack_reg_op(words, result_str):
             update_sp=False
 
         stack_word = stack_word[1:stack_word.find("]")]
-        offset = get_stack_offset("," + stack_word)
+        offset = parse_offset(stack_word)
 
         if update_sp == True:
             stackaddr_list = register_dict["%rsp"]
@@ -356,58 +740,31 @@ def arm_stack_reg_op(words, result_str):
             register_dict["%rsp"] = new_stackaddr_list
             offset = 0
 
-
-        internal_count = 0
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + offset
-            data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
-            data2 = ("%x" % read_stack_data(actual_addr + 8, stack_unit)).zfill(stack_unit *2)
-
-            if internal_count == 0:
-                result_str = "%s    ; 0x%s 0x%s" % (result_str, data, data2)
-            else:
-                result_str = "%s, 0x%s 0x%s" % (result_str, data, data2)
-            internal_count = internal_count + 1
+        # Use helper function for formatting
+        result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+    # Handle load pair: ldp x29, x30, [sp],#16
     elif words[2] == "ldp":
         if words[len(words)-2].find("[sp") >= 0:
-            # Stack Pop
-            # Example:
-            # 0xffff80001002afc4 <do_el0_svc+48>:	ldp	x29, x30, [sp],#16
-            # sp = sp - 64
-            # [sp] = x29
-            # [sp + 8] = x30
+            # Stack Pop with post-increment
+            # Example: ldp	x29, x30, [sp],#16
             stack_word = words[len(words)-2]
             stack_op = words[len(words) - 1][1:]
             if stack_op.endswith("]"):
                 stack_op = stack_op[:-1]
-
-            if stack_op.startswith("0x"):
-                sp_offset = int(stack_op, 16)
-            else:
-                sp_offset = int(stack_op)
-            update_sp=True
+            sp_offset = parse_offset(stack_op)
+            update_sp = True
         else:
             # Normal stack access
-            # Example:
-            # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
-            # [sp + 16] = x19
-            # [sp + 16 + 8] = x20
+            # Example: ldp	x19, x20, [sp,#16]
             stack_word = words[len(words)-1]
-            update_sp=False
+            update_sp = False
+            sp_offset = 0
 
         stack_word = stack_word[1:stack_word.find("]")]
-        offset = get_stack_offset(stack_word)
-        internal_count = 0
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + offset
-            data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
-            data2 = ("%x" % read_stack_data(actual_addr + 8, stack_unit)).zfill(stack_unit *2)
+        offset = parse_offset(stack_word)
 
-            if internal_count == 0:
-                result_str = "%s    ; 0x%s 0x%s" % (result_str, data, data2)
-            else:
-                result_str = "%s, 0x%s 0x%s" % (result_str, data, data2)
-            internal_count = internal_count + 1
+        # Use helper function for formatting
+        result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
 
         if update_sp == True:
             stackaddr_list = register_dict["%rsp"]
@@ -416,35 +773,113 @@ def arm_stack_reg_op(words, result_str):
                 stackaddr = stackaddr + sp_offset
                 new_stackaddr_list.append(stackaddr)
             register_dict["%rsp"] = new_stackaddr_list
-            sp_offset = 0
-    else:
+
+    # Handle single register store: str x19, [sp,#16] or str x19, [sp], #16
+    elif words[2] in ("str", "stur", "strb", "strh", "strw"):
         stack_word = ""
-        for word in words:
+        for word in words[3:]:
             if word.startswith("[sp"):
                 stack_word = word
                 break
 
         if stack_word != "":
+            # Check for post-increment: str x19, [sp], #16
+            post_inc = False
+            if stack_word.endswith("]") and len(words) > 4 and words[-1].startswith("#"):
+                post_inc = True
+                post_offset = parse_offset(words[-1])
+
             stack_word = stack_word[1:stack_word.find("]")]
-            offset = get_stack_offset(stack_word)
+            offset = parse_offset(stack_word)
 
-            internal_count = 0
-            for stackaddr in register_dict["%rsp"]:
-                actual_addr = stackaddr + offset
-                data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit *2)
+            # Determine data size based on instruction
+            if words[2] == "strb":
+                data_size = 1
+            elif words[2] == "strh":
+                data_size = 2
+            elif words[2] == "strw":
+                data_size = 4
+            else:
+                data_size = stack_unit
 
-                if internal_count == 0:
-                    result_str = "%s    ; 0x%s" % (result_str, data)
-                else:
-                    result_str = "%s, 0x%s" % (result_str, data)
-                internal_count = internal_count + 1
+            result_str = result_str + format_stack_data(register_dict["%rsp"], offset, data_size)
 
+            if post_inc:
+                reg_list = []
+                for stackaddr in register_dict["%rsp"]:
+                    reg_list.append(stackaddr + post_offset)
+                register_dict["%rsp"] = reg_list
 
+    # Handle single register load: ldr x19, [sp,#16] or ldr x19, [sp], #16
+    elif words[2] in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
+        stack_word = ""
+        for word in words[3:]:
+            if word.startswith("[sp"):
+                stack_word = word
+                break
+
+        if stack_word != "":
+            # Check for post-increment: ldr x19, [sp], #16
+            post_inc = False
+            if stack_word.endswith("]") and len(words) > 4 and words[-1].startswith("#"):
+                post_inc = True
+                post_offset = parse_offset(words[-1])
+
+            stack_word = stack_word[1:stack_word.find("]")]
+            offset = parse_offset(stack_word)
+
+            # Determine data size based on instruction
+            if words[2] in ("ldrb", "ldrsb"):
+                data_size = 1
+            elif words[2] in ("ldrh", "ldrsh"):
+                data_size = 2
+            elif words[2] in ("ldrw", "ldrsw"):
+                data_size = 4
+            else:
+                data_size = stack_unit
+
+            result_str = result_str + format_stack_data(register_dict["%rsp"], offset, data_size)
+
+            if post_inc:
+                reg_list = []
+                for stackaddr in register_dict["%rsp"]:
+                    reg_list.append(stackaddr + post_offset)
+                register_dict["%rsp"] = reg_list
+    # Handle operations with frame pointer (x29): ldr x0, [x29,#16]
+    elif len(words) > 3:
+        # Check for [x29] or [fp] addressing
+        stack_word = ""
+        use_fp = False
+        for word in words[3:]:
+            if word.startswith("[x29") or word.startswith("[fp"):
+                stack_word = word
+                use_fp = True
+                break
+            elif word.startswith("[sp"):
+                stack_word = word
+                break
+
+        if stack_word != "":
+            stack_word = stack_word[1:stack_word.find("]")]
+            offset = parse_offset(stack_word)
+
+            # Use frame pointer or stack pointer
+            if use_fp and "%rbp" in register_dict:
+                result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
+            elif "%rsp" in register_dict:
+                result_str = result_str + format_stack_data(register_dict["%rsp"], offset, stack_unit)
 
     return result_str
 
 
 def x86_stack_reg_op(words, result_str):
+    """Enhanced x86/x86_64 stack register operations handler"""
+
+    # Ensure we have stack pointer initialized
+    if "%rsp" not in register_dict:
+        return result_str
+
+    # Handle frame pointer setup: mov %rsp,%rbp
     if words[2] == "mov" and words[3] == "%rsp,%rbp":
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
@@ -452,68 +887,137 @@ def x86_stack_reg_op(words, result_str):
             reg_list.append(actual_addr)
         register_dict["%rbp"] = reg_list
 
+    # Handle stack allocation: sub $0x40,%rsp
     elif words[2] == "sub" and words[3].endswith(",%rsp"):
-        # sub    $0x40,%rsp
         op_words = words[3].split(",")
         if "%" in op_words[0]: # Cannot use other register values
             return result_str + "  ;CAUTION: skipped register sub"
-        value_to_sub = int(op_words[0][1:], 16)
+        value_to_sub = parse_offset(op_words[0])
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
             actual_addr = stackaddr - value_to_sub - (cur_count * stack_unit)
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
 
-    elif "(%rbp)" in words[3]: # mov    %rax,-0x30(%rbp)
+    # Handle stack cleanup: add $0x40,%rsp
+    elif words[2] == "add" and words[3].endswith(",%rsp"):
+        op_words = words[3].split(",")
+        if "%" in op_words[0]: # Cannot use other register values
+            return result_str + "  ;CAUTION: skipped register add"
+        value_to_add = parse_offset(op_words[0])
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + value_to_add
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle pop instruction: pop %rbx
+    elif words[2] == "pop" or words[2] == "popq":
+        # Display current stack value
+        result_str = result_str + format_stack_data(register_dict["%rsp"], 0, stack_unit)
+        # Update stack pointer (pop removes 8 bytes on x86_64, 4 on x86)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + stack_unit
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle enter instruction: enter $0x10,$0x00
+    elif words[2] == "enter":
+        # enter creates a stack frame
+        # First pushes %rbp, then mov %rsp,%rbp, then sub from %rsp
+        op_words = words[3].split(",")
+        frame_size = parse_offset(op_words[0]) if op_words else 0
+        # Simulate push %rbp
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - stack_unit
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+        register_dict["%rbp"] = reg_list[:]
+        # Subtract frame size
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr - frame_size
+            reg_list.append(actual_addr)
+        register_dict["%rsp"] = reg_list
+
+    # Handle leave instruction: leave
+    elif words[2] == "leave":
+        # leave restores the stack frame
+        # mov %rbp,%rsp; pop %rbp
+        if "%rbp" in register_dict:
+            register_dict["%rsp"] = register_dict["%rbp"][:]
+            reg_list = []
+            for stackaddr in register_dict["%rsp"]:
+                actual_addr = stackaddr + stack_unit
+                reg_list.append(actual_addr)
+            register_dict["%rsp"] = reg_list
+
+    # Handle operations with frame pointer: mov %rax,-0x30(%rbp)
+    elif len(words) > 3 and "(%rbp)" in words[3]:
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rbp)" in op and "%rbp" in register_dict:
                 if op.startswith("*"):
                     op = op[1:]
+                # Extract offset, handling negative values
                 if len(op) > 6:
-                    offset = int(op[:-6], 16)
+                    offset_str = op[:-6]
+                    offset = parse_offset(offset_str)
                 else:
                     offset = 0
-                internal_count = 0
-                for stackaddr in register_dict["%rbp"]:
-                    actual_addr = stackaddr + offset + stack_unit
-                    if words[2] != "lea": # lea    -0x30(%rbp),%rdi
-                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
-                    else:
-                        data = ("%x" % actual_addr)
 
-                    if internal_count == 0:
-                        result_str = "%s    ; 0x%s" % (result_str, data)
-                    else:
-                        result_str = "%s, 0x%s" % (result_str, data)
-                    internal_count = internal_count + 1
-
+                # Use the new helper function for formatting
+                if words[2] != "lea": # lea doesn't dereference
+                    result_str = result_str + format_stack_data(
+                        register_dict["%rbp"], offset + stack_unit, stack_unit)
+                else:
+                    # For lea, show the address itself
+                    for idx, stackaddr in enumerate(register_dict["%rbp"]):
+                        actual_addr = stackaddr + offset + stack_unit
+                        if idx == 0:
+                            result_str = "%s    ; 0x%x" % (result_str, actual_addr)
+                        else:
+                            result_str = "%s, 0x%x" % (result_str, actual_addr)
                 break
 
-    elif "(%rsp)" in words[3]: # mov    %rdx,0x18(%rsp)
+    # Handle operations with stack pointer: mov %rdx,0x18(%rsp)
+    elif len(words) > 3 and "(%rsp)" in words[3]:
         op_words = words[3].split(",")
         for op in op_words:
             if "(%rsp)" in op:
                 if op.startswith("*"):
                     op = op[1:]
-                if len(op) > 6: # check the case with no offset
-                    offset = int(op[:-6], 16)
-                else: # (%rsp)
-                    offset = 0
-                internal_count = 0
-                for stackaddr in register_dict["%rsp"]:
-                    actual_addr = stackaddr + offset
-                    if words[2] != "lea": # lea    -0x30(%rsp),%rdi
-                        data = ("%x" % read_stack_data(actual_addr, stack_unit)).zfill(stack_unit * 2)
-                    else:
-                        data = ("%x" % actual_addr)
 
-                    if internal_count == 0:
-                        result_str = "%s    ; 0x%s" % (result_str, data)
+                # Handle indexed addressing: 0x10(%rsp,%rbx,8)
+                if "," in op:
+                    # Complex addressing mode - just show base for now
+                    base_part = op.split(",")[0]
+                    if len(base_part) > 6:
+                        offset = parse_offset(base_part[:-6])
                     else:
-                        result_str = "%s, 0x%s" % (result_str, data)
-                    internal_count = internal_count + 1
+                        offset = 0
+                    result_str = result_str + "  ;CAUTION: indexed addressing"
+                else:
+                    # Simple offset: 0x18(%rsp) or (%rsp)
+                    if len(op) > 6:
+                        offset = parse_offset(op[:-6])
+                    else:
+                        offset = 0
 
+                # Use the new helper function for formatting
+                if words[2] != "lea": # lea doesn't dereference
+                    result_str = result_str + format_stack_data(
+                        register_dict["%rsp"], offset, stack_unit)
+                else:
+                    # For lea, show the address itself
+                    for idx, stackaddr in enumerate(register_dict["%rsp"]):
+                        actual_addr = stackaddr + offset
+                        if idx == 0:
+                            result_str = "%s    ; 0x%x" % (result_str, actual_addr)
+                        else:
+                            result_str = "%s, 0x%x" % (result_str, actual_addr)
                 break
 
     return result_str
@@ -613,6 +1117,55 @@ def set_stack_data(disasm_str, disaddr_str):
             if words[2] == funcname and words[4] == disaddr_str:
                 stackfound = 1
 
+    elif (arch.startswith("s390") or arch in ("s390x")):
+        stack_op_dict = {}
+        stack_unit = 8
+        stack_offset = 0
+
+        stackfound = 0
+        for one_line in bt_str.splitlines():
+            words = one_line.split()
+            if len(words) > 0:
+                if words[0] == "[exception":
+                    if words[2].startswith(funcname + "+"):
+                        stackfound = 1
+                    continue
+
+            if (len(words) < 5):
+                continue
+            if words[0].startswith("#") and stackfound == 1:
+                stackaddr_list.append(int(words[1][1:-1], 16))
+                stackfound = 0
+
+            if words[2] == funcname and words[4] == disaddr_str:
+                stackfound = 1
+
+    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+        stack_op_dict = {}
+        if arch in ("riscv64"):
+            stack_unit = 8
+        else:
+            stack_unit = 4
+        stack_offset = 0
+
+        stackfound = 0
+        for one_line in bt_str.splitlines():
+            words = one_line.split()
+            if len(words) > 0:
+                if words[0] == "[exception":
+                    if words[2].startswith(funcname + "+"):
+                        stackfound = 1
+                    continue
+
+            if (len(words) < 5):
+                continue
+            if words[0].startswith("#") and stackfound == 1:
+                stackaddr_list.append(int(words[1][1:-1], 16))
+                stackfound = 0
+
+            if words[2] == funcname and words[4] == disaddr_str:
+                stackfound = 1
+
 
 def set_asm_colors():
     global asm_color_dict
@@ -658,6 +1211,49 @@ def set_asm_colors():
             "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r10" : crashcolor.UNDERLINE | crashcolor.CYAN,
+        }
+    elif (arch.startswith("s390") or arch in ("s390x")):
+        asm_color_dict = {
+            "brasl" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "bras" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "jg" : crashcolor.BLUE | crashcolor.BOLD,
+            "j" : crashcolor.BLUE | crashcolor.BOLD,
+            "brc" : crashcolor.BLUE | crashcolor.BOLD,
+            "stg" : crashcolor.RED | crashcolor.UNDERLINE,
+            "stmg" : crashcolor.RED | crashcolor.UNDERLINE,
+            "lg" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "lmg" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "br" : crashcolor.MAGENTA | crashcolor.BOLD,
+        }
+        arg_color_dict = {
+            "r2" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r3" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r4" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r5" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "r6" : crashcolor.UNDERLINE | crashcolor.CYAN,
+        }
+    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+        asm_color_dict = {
+            "jal" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "jalr" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            "j" : crashcolor.BLUE | crashcolor.BOLD,
+            "beq" : crashcolor.BLUE | crashcolor.BOLD,
+            "bne" : crashcolor.BLUE | crashcolor.BOLD,
+            "sd" : crashcolor.RED | crashcolor.UNDERLINE,
+            "sw" : crashcolor.RED | crashcolor.UNDERLINE,
+            "ld" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "lw" : crashcolor.YELLOW | crashcolor.UNDERLINE,
+            "ret" : crashcolor.MAGENTA | crashcolor.BOLD,
+        }
+        arg_color_dict = {
+            "a0" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a1" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a2" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a3" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a4" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a5" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a6" : crashcolor.UNDERLINE | crashcolor.CYAN,
+            "a7" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
 
     return
@@ -981,6 +1577,10 @@ def set_call_op_list():
         call_op_set = [ "bl", "ctrl" ]
     elif (arch.startswith("arm") or (arch in ("aarch64"))):
         call_op_set = [ "bl", "bic", "bics", "blx" ]
+    elif (arch.startswith("s390") or arch in ("s390x")):
+        call_op_set = [ "brasl", "bras" ]
+    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+        call_op_set = [ "jal", "jalr" ]
     else:
         call_op_set = ["callq" ]
 
