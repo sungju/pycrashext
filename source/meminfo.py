@@ -1609,20 +1609,49 @@ def check_slab_corruption(options):
     """
     Check SLAB/SLUB corruption by examining kmem_cache_cpu freelists.
 
-    Usage: meminfo --corrupt <kmem_cache_addr>[:<cpu_num>]
+    Usage: meminfo --corrupt <kmem_cache_addr|slab_name>[:<cpu_num>]
+
+    Examples:
+        meminfo --corrupt ffff93e400008e00
+        meminfo --corrupt kmalloc-128
+        meminfo --corrupt kmalloc-128:22
 
     If cpu_num is not specified, all CPUs are checked.
     """
     import re
 
-    # Parse input: address or address:cpu
+    # Parse input: address/name and optional cpu number
     parts = options.corrupt.split(':')
+    slab_input = parts[0]
+
+    # Determine if input is a hex address or slab name
+    kmem_cache_addr = None
     try:
-        kmem_cache_addr = int(parts[0], 16)
+        # Try to parse as hex address
+        kmem_cache_addr = int(slab_input, 16)
     except ValueError:
-        print("Error: Invalid kmem_cache address: %s" % parts[0])
-        print("Usage: meminfo --corrupt <kmem_cache_addr>[:<cpu_num>]")
-        return
+        # Not a hex address, treat as slab name
+        # Use kmem -s to look up the slab by name
+        lines = exec_crash_command("kmem -s %s" % slab_input)
+        if len(lines) == 0:
+            print("Error: Slab '%s' not found" % slab_input)
+            print("Usage: meminfo --corrupt <kmem_cache_addr|slab_name>[:<cpu_num>]")
+            return
+
+        # Parse the kmem -s output to get the address
+        # Format: CACHE            NAME                 OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE
+        #         ffff93e400008e00 kmalloc-128              128      12345     20000    500    4k
+        lines_split = lines.splitlines()
+        if len(lines_split) < 2:
+            print("Error: Could not parse kmem output for slab '%s'" % slab_input)
+            return
+
+        words = lines_split[1].split()
+        try:
+            kmem_cache_addr = int(words[0], 16)
+        except (ValueError, IndexError):
+            print("Error: Could not extract kmem_cache address for slab '%s'" % slab_input)
+            return
 
     target_cpu = None
     if len(parts) > 1:
@@ -4189,7 +4218,7 @@ def meminfo():
                   help="Show details of a slab")
     op.add_option("--corrupt", dest="corrupt", default="",
                   action="store", type="string",
-                  help="Check SLAB corruption. Format: <kmem_cache_addr>[:<cpu_num>]")
+                  help="Check SLAB corruption. Format: <kmem_cache_addr|slab_name>[:<cpu_num>]")
     op.add_option("-t", "--type", dest="percpu_type", default="",
                   action="store", type="string",
                   help="Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int")
