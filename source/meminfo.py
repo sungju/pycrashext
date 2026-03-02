@@ -1639,17 +1639,27 @@ def check_slab_corruption(options):
             return
 
         # Parse the kmem -s output to get the address
-        # Format: CACHE            NAME                 OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE
-        #         ffff93e400008e00 kmalloc-128              128      12345     20000    500    4k
+        # The output may contain error lines like:
+        #   CACHE             OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE  NAME
+        #   kmem: kmalloc-128: slab: ffffe5e81b157f00 invalid freepointer: e83de3b4c24007fc
+        #   ffff93e400008e00      128      22403     50176    784     8k  kmalloc-128
+        # We need to find the line that starts with a hex address (the actual data line)
         lines_split = lines.splitlines()
-        if len(lines_split) < 2:
-            print("Error: Could not parse kmem output for slab '%s'" % slab_input)
-            return
+        kmem_cache_addr = None
+        for line in lines_split:
+            line = line.strip()
+            if not line or line.startswith("CACHE") or line.startswith("kmem:"):
+                continue
+            # Try to parse the first word as a hex address
+            words = line.split()
+            if len(words) > 0:
+                try:
+                    kmem_cache_addr = int(words[0], 16)
+                    break  # Found the data line
+                except ValueError:
+                    continue  # Not a hex address, skip this line
 
-        words = lines_split[1].split()
-        try:
-            kmem_cache_addr = int(words[0], 16)
-        except (ValueError, IndexError):
+        if kmem_cache_addr is None:
             print("Error: Could not extract kmem_cache address for slab '%s'" % slab_input)
             return
 
