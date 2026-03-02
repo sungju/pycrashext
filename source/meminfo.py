@@ -1605,6 +1605,135 @@ def show_slab_alloc_result(options, kmem_cache):
             break
 
 
+def check_slab_corruption(options):
+    """
+    Check SLAB/SLUB corruption by examining kmem_cache_cpu freelists.
+
+    Usage: meminfo --corrupt <kmem_cache_addr>[:<cpu_num>]
+
+    If cpu_num is not specified, all CPUs are checked.
+    """
+    import re
+
+    # Parse input: address or address:cpu
+    parts = options.corrupt.split(':')
+    try:
+        kmem_cache_addr = int(parts[0], 16)
+    except ValueError:
+        print("Error: Invalid kmem_cache address: %s" % parts[0])
+        print("Usage: meminfo --corrupt <kmem_cache_addr>[:<cpu_num>]")
+        return
+
+    target_cpu = None
+    if len(parts) > 1:
+        try:
+            target_cpu = int(parts[1])
+        except ValueError:
+            print("Error: Invalid CPU number: %s" % parts[1])
+            return
+
+    # Read kmem_cache structure
+    try:
+        kmem_cache = readSU("struct kmem_cache", kmem_cache_addr)
+    except Exception as e:
+        print("Error reading kmem_cache at 0x%x: %s" % (kmem_cache_addr, str(e)))
+        return
+
+    # Get cache name and cpu_slab offset
+    try:
+        cache_name = kmem_cache.name
+        cpu_slab_offset = kmem_cache.cpu_slab
+    except Exception as e:
+        print("Error reading kmem_cache fields: %s" % str(e))
+        return
+
+    print("\nChecking SLAB corruption for cache: %s (0x%x)" % (cache_name, kmem_cache_addr))
+    print("CPU slab offset: 0x%x" % cpu_slab_offset)
+    print("=" * 80)
+
+    # Get number of CPUs
+    num_cpus = sys_info.CPUS
+
+    # Function to check if address is canonical (valid kernel address)
+    def is_canonical_kernel_addr(addr):
+        """Check if address is a valid canonical kernel address on x86_64"""
+        if addr == 0:
+            return True  # NULL is valid
+        # On x86_64, kernel addresses should have bits 63-48 either all 0 or all 1
+        # Kernel space typically has all 1s (0xffff...)
+        high_bits = (addr >> 48) & 0xffff
+        return high_bits == 0xffff or high_bits == 0x0
+
+    # Check specified CPU or all CPUs
+    cpus_to_check = [target_cpu] if target_cpu is not None else range(num_cpus)
+    corruption_found = False
+
+    for cpu_num in cpus_to_check:
+        try:
+            # Convert percpu offset to virtual address for this CPU
+            percpu_offset = cpu_slab_offset
+            cpu_slab_vaddr = percpu.percpu_ptr(percpu_offset, cpu_num)
+
+            # Read kmem_cache_cpu structure
+            try:
+                kmem_cache_cpu = readSU("struct kmem_cache_cpu", cpu_slab_vaddr)
+            except Exception as e:
+                print("CPU %d: Error reading kmem_cache_cpu at 0x%x: %s" %
+                      (cpu_num, cpu_slab_vaddr, str(e)))
+                continue
+
+            # Check freelist pointer
+            freelist = kmem_cache_cpu.freelist
+            tid = kmem_cache_cpu.tid
+            page = kmem_cache_cpu.page
+
+            # Validate freelist
+            if not is_canonical_kernel_addr(freelist):
+                corruption_found = True
+                crashcolor.set_color(crashcolor.RED)
+                print("\n[CORRUPTION DETECTED] CPU %d:" % cpu_num)
+                crashcolor.set_color(crashcolor.RESET)
+                print("  kmem_cache_cpu address: 0x%x" % cpu_slab_vaddr)
+                print("  freelist: 0x%x (INVALID - non-canonical address)" % freelist)
+                print("  tid: 0x%x" % tid)
+                print("  page: 0x%x" % page)
+
+                # Try to read freelist to confirm it's inaccessible
+                try:
+                    test_read = readULong(freelist)
+                    print("  Warning: Corrupted freelist is readable (0x%x)" % test_read)
+                except:
+                    print("  Confirmed: Corrupted freelist is NOT accessible")
+            else:
+                # Only print if checking specific CPU or in verbose mode
+                if target_cpu is not None or debug_mode:
+                    crashcolor.set_color(crashcolor.GREEN)
+                    print("CPU %d: OK" % cpu_num)
+                    crashcolor.set_color(crashcolor.RESET)
+                    if debug_mode:
+                        print("  kmem_cache_cpu address: 0x%x" % cpu_slab_vaddr)
+                        print("  freelist: 0x%x" % freelist)
+                        print("  tid: 0x%x" % tid)
+                        print("  page: 0x%x" % page)
+
+        except Exception as e:
+            print("CPU %d: Error during check: %s" % (cpu_num, str(e)))
+            if debug_mode:
+                import traceback
+                traceback.print_exc()
+
+    print("=" * 80)
+    if corruption_found:
+        crashcolor.set_color(crashcolor.RED)
+        print("\n[RESULT] SLAB CORRUPTION DETECTED")
+        crashcolor.set_color(crashcolor.RESET)
+    else:
+        crashcolor.set_color(crashcolor.GREEN)
+        print("\n[RESULT] No corruption detected")
+        crashcolor.set_color(crashcolor.RESET)
+    print()
+
+
 def show_slabdetail(options):
     N_ONLINE=1
     node_states = readSymbol("node_states")
@@ -4058,6 +4187,9 @@ def meminfo():
     op.add_option("-S", "--slabdetail", dest="slabdetail", default="",
                   action="store", type="string",
                   help="Show details of a slab")
+    op.add_option("--corrupt", dest="corrupt", default="",
+                  action="store", type="string",
+                  help="Check SLAB corruption. Format: <kmem_cache_addr>[:<cpu_num>]")
     op.add_option("-t", "--type", dest="percpu_type", default="",
                   action="store", type="string",
                   help="Specify percpu type : u8, u16, u32, u64, s8, s16, s32, s64, int")
@@ -4096,6 +4228,10 @@ def meminfo():
 
     if (o.slabdetail != ""):
         show_slabdetail(o)
+        sys.exit(0)
+
+    if (o.corrupt != ""):
+        check_slab_corruption(o)
         sys.exit(0)
 
     if (o.meminfo):
