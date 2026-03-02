@@ -1731,18 +1731,24 @@ def check_slab_corruption(options):
                 corruption_found = True
                 crashcolor.set_color(crashcolor.RED)
                 print("\n[CORRUPTION DETECTED] CPU %d:" % cpu_num)
-                crashcolor.set_color(crashcolor.RESET)
-                print("  kmem_cache_cpu address: 0x%x" % cpu_slab_vaddr)
-                print("  freelist: 0x%x (INVALID - non-canonical address)" % freelist)
-                print("  tid: 0x%x" % tid)
-                print("  page: 0x%x" % page)
+                crashcolor.set_color(crashcolor.CYAN)
+                print("crash> kmem_cache_cpu 0x%x" % cpu_slab_vaddr)
+                print("struct kmem_cache_cpu {")
+                print("  freelist = 0x%x, (INVALID - non-canonical address)" % freelist)
+                print("  tid = 0x%x," % tid)
+                print("  page = 0x%x," % page)
+                print("  ...")
+                print("}")
+                crashcolor.set_color(crashcolor.UNDERLINE | crashcolor.YELLOW)
+
 
                 # Try to read freelist to confirm it's inaccessible
                 try:
                     test_read = readULong(freelist)
-                    print("  Warning: Corrupted freelist is readable (0x%x)" % test_read)
+                    print("Warning: Corrupted freelist is readable (0x%x)" % test_read)
                 except:
-                    print("  Confirmed: Corrupted freelist is NOT accessible")
+                    print("Confirmed: Corrupted freelist is NOT accessible")
+                crashcolor.set_color(crashcolor.RESET)
             else:
                 # Only print if checking specific CPU or in verbose mode
                 if target_cpu is not None or debug_mode:
