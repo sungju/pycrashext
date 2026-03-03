@@ -706,6 +706,17 @@ def parse_aarch64_mem_operand(operand_text):
     return None, 0, False, False
 
 
+def is_aarch64_immediate(token):
+    tok = token.strip().rstrip(",")
+    if tok == "":
+        return False
+    if tok.startswith("#"):
+        return True
+    if tok.startswith("0x") or tok.startswith("-0x"):
+        return True
+    return tok.lstrip("-").isdigit()
+
+
 def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
     """
     Estimate ENTRY SP (before prologue stack allocation) from bt frame address
@@ -783,73 +794,74 @@ def arm_stack_reg_op(words, result_str):
     if "%rsp" not in register_dict:
         return result_str
 
+    opcode = words[2]
+    operands = "".join(words[3:]) if len(words) > 3 else ""
+
     # Handle frame pointer setup: mov x29, sp / add x29, sp, #imm
-    if words[2] == "mov" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
+    if opcode == "mov" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
             # On AArch64, x29 mirrors current SP at this point.
             reg_list.append(stackaddr)
         register_dict["%rbp"] = reg_list
-    elif words[2] == "add" and len(words) >= 6 and words[3].startswith("x29") and words[4].startswith("sp"):
+    elif opcode == "add" and len(words) >= 6 and words[3].startswith("x29") and words[4].startswith("sp"):
         fp_offset = parse_offset(words[5].rstrip(","))
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
             reg_list.append(stackaddr + fp_offset)
         register_dict["%rbp"] = reg_list
 
-    # Handle frame pointer setup with offset: add x29, sp, #0x40
-    elif words[2] == "add" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
-        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
-        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
-            # Format: add x29, sp,#0x40
-            offset_part = words[4].split(",")[-1]
-        elif len(words) > 5:
-            # Format: add x29, sp, #0x40 (offset is in words[5])
-            offset_part = words[5]
+    # Handle mov sp, x29 / mov sp, xN
+    elif opcode == "mov" and len(words) >= 5 and words[3].startswith("sp"):
+        src_reg = words[4].rstrip(",")
+        if src_reg.startswith("x29") or src_reg.startswith("fp"):
+            if "%rbp" in register_dict:
+                register_dict["%rsp"] = register_dict["%rbp"][:]
+            else:
+                result_str = result_str + "  ;CAUTION: missing frame pointer value"
+        elif src_reg.startswith("sp"):
+            pass
         else:
-            offset_part = "0"
-        fp_offset = parse_offset(offset_part)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + fp_offset
-            reg_list.append(actual_addr)
-        register_dict["%rbp"] = reg_list
+            result_str = result_str + "  ;CAUTION: skipped register sp move"
 
-    # Handle stack allocation: sub sp, sp, #0x40
-    elif words[2] == "sub" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
-        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
-        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
-            # Format: sub sp, sp,#0x40
-            offset_part = words[4].split(",")[-1]
-        elif len(words) > 5:
-            # Format: sub sp, sp, #0x40 (offset is in words[5])
-            offset_part = words[5]
-        else:
-            offset_part = "0"
-        value_to_sub = parse_offset(offset_part)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr - value_to_sub
-            reg_list.append(actual_addr)
-        register_dict["%rsp"] = reg_list
+    # Handle stack pointer manipulation:
+    #   sub/add sp, sp, #imm
+    #   sub/add sp, sp, xN
+    #   add/sub sp, x29, #imm
+    elif opcode in ("sub", "add") and len(words) >= 5 and words[3] == "sp,":
+        src_token = words[4].rstrip(",")
+        rhs_token = words[5].rstrip(",") if len(words) > 5 else ""
+        if "," in words[4]:
+            # Handles compact style: sp,sp,#0x40
+            parts = words[4].split(",")
+            src_token = parts[0]
+            if len(parts) > 1 and parts[1] != "":
+                rhs_token = parts[1]
 
-    # Handle stack cleanup: add sp, sp, #0x40
-    elif words[2] == "add" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
-        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
-        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
-            # Format: add sp, sp,#0x40
-            offset_part = words[4].split(",")[-1]
-        elif len(words) > 5:
-            # Format: add sp, sp, #0x40 (offset is in words[5])
-            offset_part = words[5]
+        sign = -1 if opcode == "sub" else 1
+
+        if src_token == "sp":
+            if is_aarch64_immediate(rhs_token):
+                delta = sign * parse_offset(rhs_token)
+                reg_list = []
+                for stackaddr in register_dict["%rsp"]:
+                    reg_list.append(stackaddr + delta)
+                register_dict["%rsp"] = reg_list
+            else:
+                result_str = result_str + "  ;CAUTION: skipped register sp adjust"
+        elif src_token in ("x29", "fp"):
+            if "%rbp" not in register_dict:
+                result_str = result_str + "  ;CAUTION: missing frame pointer value"
+            elif is_aarch64_immediate(rhs_token):
+                delta = sign * parse_offset(rhs_token)
+                reg_list = []
+                for fpaddr in register_dict["%rbp"]:
+                    reg_list.append(fpaddr + delta)
+                register_dict["%rsp"] = reg_list
+            else:
+                result_str = result_str + "  ;CAUTION: skipped register sp base adjust"
         else:
-            offset_part = "0"
-        value_to_add = parse_offset(offset_part)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + value_to_add
-            reg_list.append(actual_addr)
-        register_dict["%rsp"] = reg_list
+            result_str = result_str + "  ;CAUTION: unsupported sp base register"
 
     # Handle store pair: stp x29, x30, [sp,#-64]!
     elif words[2] == "stp" and len(words) >= 5:
@@ -978,76 +990,75 @@ def arm_stack_reg_op(words, result_str):
                 register_dict["%rsp"] = new_stackaddr_list
 
     # Handle single register store: str x19, [sp,#16] or str x19, [sp], #16
-    elif words[2] in ("str", "stur", "strb", "strh", "strw"):
-        stack_word = ""
-        for word in words[3:]:
-            if word.startswith("[sp"):
-                stack_word = word
-                break
+    elif opcode in ("str", "stur", "strb", "strh", "strw"):
+        mem_pos = operands.find("[sp")
+        if mem_pos >= 0:
+            mem_op = operands[mem_pos:]
+            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-        if stack_word != "":
-            # Check for post-increment: str x19, [sp], #16
-            post_inc = False
-            if stack_word.endswith("]") and len(words) > 4 and words[-1].startswith("#"):
-                post_inc = True
-                post_offset = parse_offset(words[-1])
+            if base_reg == "sp":
+                # Determine data size based on instruction
+                if opcode == "strb":
+                    data_size = 1
+                elif opcode == "strh":
+                    data_size = 2
+                elif opcode == "strw":
+                    data_size = 4
+                else:
+                    data_size = stack_unit
 
-            stack_word = stack_word[1:stack_word.find("]")]
-            offset = parse_offset(stack_word)
+                if writeback_pre:
+                    reg_list = []
+                    for stackaddr in register_dict["%rsp"]:
+                        reg_list.append(stackaddr + offset)
+                    register_dict["%rsp"] = reg_list
+                    access_offset = 0
+                else:
+                    access_offset = offset
 
-            # Determine data size based on instruction
-            if words[2] == "strb":
-                data_size = 1
-            elif words[2] == "strh":
-                data_size = 2
-            elif words[2] == "strw":
-                data_size = 4
-            else:
-                data_size = stack_unit
+                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size)
 
-            result_str = result_str + format_stack_data(register_dict["%rsp"], offset, data_size)
+                if post_index:
+                    reg_list = []
+                    for stackaddr in register_dict["%rsp"]:
+                        reg_list.append(stackaddr + offset)
+                    register_dict["%rsp"] = reg_list
 
-            if post_inc:
-                reg_list = []
-                for stackaddr in register_dict["%rsp"]:
-                    reg_list.append(stackaddr + post_offset)
-                register_dict["%rsp"] = reg_list
+    # Handle single register load: ldr x19, [sp,#16] / [sp],#16 / [sp,#-16]!
+    elif opcode in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
+        mem_pos = operands.find("[sp")
+        if mem_pos >= 0:
+            mem_op = operands[mem_pos:]
+            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-    # Handle single register load: ldr x19, [sp,#16] or ldr x19, [sp], #16
-    elif words[2] in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
-        stack_word = ""
-        for word in words[3:]:
-            if word.startswith("[sp"):
-                stack_word = word
-                break
+            if base_reg == "sp":
+                # Determine data size based on instruction
+                if opcode in ("ldrb", "ldrsb"):
+                    data_size = 1
+                elif opcode in ("ldrh", "ldrsh"):
+                    data_size = 2
+                elif opcode in ("ldrw", "ldrsw"):
+                    data_size = 4
+                else:
+                    data_size = stack_unit
 
-        if stack_word != "":
-            # Check for post-increment: ldr x19, [sp], #16
-            post_inc = False
-            if stack_word.endswith("]") and len(words) > 4 and words[-1].startswith("#"):
-                post_inc = True
-                post_offset = parse_offset(words[-1])
+                if writeback_pre:
+                    reg_list = []
+                    for stackaddr in register_dict["%rsp"]:
+                        reg_list.append(stackaddr + offset)
+                    register_dict["%rsp"] = reg_list
+                    access_offset = 0
+                else:
+                    access_offset = offset
 
-            stack_word = stack_word[1:stack_word.find("]")]
-            offset = parse_offset(stack_word)
+                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size)
 
-            # Determine data size based on instruction
-            if words[2] in ("ldrb", "ldrsb"):
-                data_size = 1
-            elif words[2] in ("ldrh", "ldrsh"):
-                data_size = 2
-            elif words[2] in ("ldrw", "ldrsw"):
-                data_size = 4
-            else:
-                data_size = stack_unit
+                if post_index:
+                    reg_list = []
+                    for stackaddr in register_dict["%rsp"]:
+                        reg_list.append(stackaddr + offset)
+                    register_dict["%rsp"] = reg_list
 
-            result_str = result_str + format_stack_data(register_dict["%rsp"], offset, data_size)
-
-            if post_inc:
-                reg_list = []
-                for stackaddr in register_dict["%rsp"]:
-                    reg_list.append(stackaddr + post_offset)
-                register_dict["%rsp"] = reg_list
     # Handle operations with frame pointer (x29): ldr x0, [x29,#16]
     elif len(words) > 3:
         # Check for [x29] or [fp] addressing
