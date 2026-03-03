@@ -206,6 +206,22 @@ cur_count = 0
 stack_unit = 0
 stack_offset = 0
 register_dict = []
+stack_debug_enabled = False
+stack_debug_lines = []
+
+
+def reset_stack_debug():
+    global stack_debug_lines
+    stack_debug_lines = []
+
+
+def add_stack_debug(msg):
+    if stack_debug_enabled:
+        stack_debug_lines.append(msg)
+
+
+def get_stack_debug():
+    return stack_debug_lines[:]
 
 
 def read_stack_data(addr, unit):
@@ -247,6 +263,8 @@ def interpret_one_line(one_line):
     global stack_offset
     global register_dict
 
+    reset_stack_debug()
+
     if len(register_dict) == 0:
         register_dict= { "%rsp" : stackaddr_list, }
 
@@ -254,6 +272,8 @@ def interpret_one_line(one_line):
     words = one_line.split()
     if len(words) < 3 or one_line.startswith("/") or one_line.startswith(" "):
         return result_str
+
+    add_stack_debug("insn=%s" % one_line.strip())
 
     for op in stack_op_dict:
         if words[2].startswith(op):
@@ -624,6 +644,8 @@ def format_stack_data(stackaddr_list, offset, unit, prefix="    ; ", reg=None):
         try:
             actual_addr = stackaddr + offset
             data = read_stack_data(actual_addr, unit)
+            add_stack_debug("read %s base=0x%x offset=%d addr=0x%x size=%d value=0x%x" %
+                            (reg if reg else "stack", stackaddr, offset, actual_addr, unit, data))
             # Format with correct width based on unit size
             data_str = ("%x" % data).zfill(unit * 2)
 
@@ -669,6 +691,9 @@ def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; ", reg1=N
             actual_addr = stackaddr + offset
             data1 = read_stack_data(actual_addr, unit)
             data2 = read_stack_data(actual_addr + unit, unit)
+            add_stack_debug("read pair %s/%s base=0x%x offset=%d addrs=(0x%x,0x%x) size=%d values=(0x%x,0x%x)" %
+                            (reg1 if reg1 else "stack", reg2 if reg2 else "stack",
+                             stackaddr, offset, actual_addr, actual_addr + unit, unit, data1, data2))
             data1_str = ("%x" % data1).zfill(unit * 2)
             data2_str = ("%x" % data2).zfill(unit * 2)
 
@@ -839,12 +864,16 @@ def arm_stack_reg_op(words, result_str):
             # On AArch64, x29 mirrors current SP at this point.
             reg_list.append(stackaddr)
         register_dict["%rbp"] = reg_list
+        add_stack_debug("fp update: x29 <- sp, fp=%s" %
+                        (",".join(["0x%x" % a for a in register_dict["%rbp"]])))
     elif opcode == "add" and len(words) >= 6 and words[3].startswith("x29") and words[4].startswith("sp"):
         fp_offset = parse_offset(words[5].rstrip(","))
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
             reg_list.append(stackaddr + fp_offset)
         register_dict["%rbp"] = reg_list
+        add_stack_debug("fp update: x29 <- sp + %d, fp=%s" %
+                        (fp_offset, ",".join(["0x%x" % a for a in register_dict["%rbp"]])))
 
     # Handle mov sp, x29 / mov sp, xN
     elif opcode == "mov" and len(words) >= 5 and words[3].startswith("sp"):
@@ -852,6 +881,8 @@ def arm_stack_reg_op(words, result_str):
         if src_reg.startswith("x29") or src_reg.startswith("fp"):
             if "%rbp" in register_dict:
                 register_dict["%rsp"] = register_dict["%rbp"][:]
+                add_stack_debug("sp update: sp <- fp, sp=%s" %
+                                (",".join(["0x%x" % a for a in register_dict["%rsp"]])))
             else:
                 result_str = result_str + "  ;CAUTION: missing frame pointer value"
         elif src_reg.startswith("sp"):
@@ -882,6 +913,9 @@ def arm_stack_reg_op(words, result_str):
                 for stackaddr in register_dict["%rsp"]:
                     reg_list.append(stackaddr + delta)
                 register_dict["%rsp"] = reg_list
+                add_stack_debug("sp update: sp <- sp %s %s => %s" %
+                                ("+" if delta >= 0 else "-", abs(delta),
+                                 ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
             else:
                 result_str = result_str + "  ;CAUTION: skipped register sp adjust"
         elif src_token in ("x29", "fp"):
@@ -893,6 +927,9 @@ def arm_stack_reg_op(words, result_str):
                 for fpaddr in register_dict["%rbp"]:
                     reg_list.append(fpaddr + delta)
                 register_dict["%rsp"] = reg_list
+                add_stack_debug("sp update: sp <- fp %s %s => %s" %
+                                ("+" if delta >= 0 else "-", abs(delta),
+                                 ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
             else:
                 result_str = result_str + "  ;CAUTION: skipped register sp base adjust"
         else:
@@ -1059,6 +1096,8 @@ def arm_stack_reg_op(words, result_str):
                         reg_list.append(stackaddr + offset)
                     register_dict["%rsp"] = reg_list
                     access_offset = 0
+                    add_stack_debug("sp writeback(pre): sp <- sp %+d => %s" %
+                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
                 else:
                     access_offset = offset
 
@@ -1069,6 +1108,8 @@ def arm_stack_reg_op(words, result_str):
                     for stackaddr in register_dict["%rsp"]:
                         reg_list.append(stackaddr + offset)
                     register_dict["%rsp"] = reg_list
+                    add_stack_debug("sp writeback(post): sp <- sp %+d => %s" %
+                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle single register load: ldr x19, [sp,#16] / [sp],#16 / [sp,#-16]!
     elif opcode in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
@@ -1097,6 +1138,8 @@ def arm_stack_reg_op(words, result_str):
                         reg_list.append(stackaddr + offset)
                     register_dict["%rsp"] = reg_list
                     access_offset = 0
+                    add_stack_debug("sp writeback(pre): sp <- sp %+d => %s" %
+                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
                 else:
                     access_offset = offset
 
@@ -1107,6 +1150,8 @@ def arm_stack_reg_op(words, result_str):
                     for stackaddr in register_dict["%rsp"]:
                         reg_list.append(stackaddr + offset)
                     register_dict["%rsp"] = reg_list
+                    add_stack_debug("sp writeback(post): sp <- sp %+d => %s" %
+                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle operations with frame pointer (x29): ldr x0, [x29,#16]
     elif len(words) > 3:
@@ -1359,6 +1404,7 @@ def set_stack_data(disasm_str, disaddr_str):
             if words[0].startswith("#") and stackfound == 1:
                 # Exception frame hand-off: the following frame holds the stack pointer.
                 stackaddr_list.append(int(words[1][1:-1], 16))
+                add_stack_debug("set_stack_data: exception hand-off sp=0x%x" % stackaddr_list[-1])
                 stackfound = 0
                 continue
 
@@ -1367,6 +1413,8 @@ def set_stack_data(disasm_str, disaddr_str):
                 frame_addr = int(words[1][1:-1], 16)
                 runtime_sp = estimate_aarch64_runtime_sp(frame_addr, disasm_str)
                 stackaddr_list.append(runtime_sp)
+                add_stack_debug("set_stack_data: frame=0x%x estimated_entry_sp=0x%x" %
+                                (frame_addr, runtime_sp))
 
     elif (arch.startswith("ppc")):
         stack_op_dict = {}
@@ -1553,6 +1601,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
     global funcname
     global stackaddr_list
     global stack_op_dict
+    global stack_debug_enabled
 
     path_list = cmd_path_list.split(':')
     disasm_path = ""
@@ -1639,6 +1688,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
     if (o.graph):
         result_str = draw_branches(result_str, o.jump_op_list)
 
+    stack_debug_enabled = o.debug
     set_stack_data(disasm_str, ins_addr) # To retreive stack data
     if o.stackaddr != "":
         stackaddr_list = [int(o.stackaddr, 16)]
@@ -1695,10 +1745,13 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
         if is_disasm_line == True:
             line = interpret_one_line(line) # Retreive stack data if possible
+            debug_lines = get_stack_debug()
             if o.symbol:
                 words = line.split()
                 if words[-2] == '#':
                     line = line + " " + find_symbol(words[-1])
+        else:
+            debug_lines = []
 
         words = line.split()
         if len(words) > 2:
@@ -1775,6 +1828,12 @@ def disasm(ins_addr, o, args, cmd_path_list):
             crashcolor.set_color(crashcolor.RESET)
         else:
             print(line)
+
+        if o.debug and is_disasm_line and len(debug_lines) > 0:
+            crashcolor.set_color(crashcolor.LIGHTCYAN)
+            for dbg in debug_lines:
+                print("    [D] %s" % dbg)
+            crashcolor.set_color(crashcolor.RESET)
 
 
     crashcolor.set_color(crashcolor.RESET)
@@ -1953,6 +2012,12 @@ def edis():
                   default="",
                   dest="jump_op_list",
                   help="Shows graph for the specified jump operations only")
+
+    op.add_option("-D", "--debug",
+                  action="store_true",
+                  dest="debug",
+                  default=False,
+                  help="Show stack calculation debug lines after each disassembly line")
 
 
     try:
