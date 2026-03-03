@@ -683,8 +683,8 @@ def arm_stack_reg_op(words, result_str):
     if words[2] == "mov" and words[len(words)-1] == "sp":
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr - stack_offset - (cur_count * stack_unit)
-            reg_list.append(actual_addr)
+            # On AArch64, x29 mirrors current SP at this point.
+            reg_list.append(stackaddr)
         register_dict["%rbp"] = reg_list
 
     # Handle frame pointer setup with offset: add x29, sp, #0x40
@@ -742,69 +742,130 @@ def arm_stack_reg_op(words, result_str):
         register_dict["%rsp"] = reg_list
 
     # Handle store pair: stp x29, x30, [sp,#-64]!
-    elif words[2] == "stp" and words[len(words)-2].find("[sp,") >= 0:
-        stack_word = words[len(words)-1]
-        if stack_word.endswith("]!"):
-            # Stack Push
-            # Example:
-            # 0xffff800010386560 <vfs_read+16>:	stp	x29, x30, [sp,#-64]!
-            # sp = sp - 64
-            # [sp] = x29
-            # [sp + 8] = x30
-            update_sp=True
+    elif words[2] == "stp" and len(words) >= 5:
+        # Check if [sp is in the instruction (could be words[len-2] or words[len-1])
+        found_sp = False
+        stack_word = ""
+
+        # Format 1: stp x29, x30, [sp, #64] -> second-to-last word is [sp,
+        if len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
+            stack_word = words[len(words)-1]
+            found_sp = True
+        # Format 2: stp x29, x30, [sp,#64] -> last word is [sp,#64]
+        elif words[len(words)-1].find("[sp") >= 0:
+            stack_word = words[len(words)-1]
+            found_sp = True
+
+        if not found_sp:
+            # Not an sp-relative stp, skip
+            pass
         else:
-            # Normal stack access
-            # Example:
-            # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
-            # [sp + 16] = x19
-            # [sp + 16 + 8] = x20
-            update_sp=False
+            # Determine if it's pre-decrement or normal
+            if stack_word.endswith("]!"):
+                # Stack Push
+                # Example:
+                # 0xffff800010386560 <vfs_read+16>:	stp	x29, x30, [sp,#-64]!
+                # sp = sp - 64
+                # [sp] = x29
+                # [sp + 8] = x30
+                update_sp=True
+            else:
+                # Normal stack access
+                # Example:
+                # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
+                # [sp + 16] = x19
+                # [sp + 16 + 8] = x20
+                update_sp=False
 
-        stack_word = stack_word[1:stack_word.find("]")]
-        offset = parse_offset(stack_word)
+            # Extract offset from stack_word
+            # Could be "#64]" or "[sp,#64]" or "[sp, #64]"
+            if stack_word.startswith("[sp"):
+                # Format: [sp,#64] or [sp, #64] -> find the offset part
+                offset_start = stack_word.find("#")
+                if offset_start > 0:
+                    # Extract from # to ]
+                    offset_end = stack_word.find("]")
+                    offset_str = stack_word[offset_start:offset_end]
+                else:
+                    # No # found, extract from comma
+                    offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
+            else:
+                # Format: #64] -> already just the offset
+                offset_str = stack_word[1:stack_word.find("]")]
 
-        if update_sp == True:
-            stackaddr_list = register_dict["%rsp"]
-            new_stackaddr_list = []
-            for stackaddr in stackaddr_list:
-                stackaddr = stackaddr + offset
-                new_stackaddr_list.append(stackaddr)
-            register_dict["%rsp"] = new_stackaddr_list
-            offset = 0
+            offset = parse_offset(offset_str)
 
-        # Use helper function for formatting
-        result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+            if update_sp == True:
+                stackaddr_list = register_dict["%rsp"]
+                new_stackaddr_list = []
+                for stackaddr in stackaddr_list:
+                    stackaddr = stackaddr + offset
+                    new_stackaddr_list.append(stackaddr)
+                register_dict["%rsp"] = new_stackaddr_list
+                offset = 0
+
+            # Use helper function for formatting
+            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
     # Handle load pair: ldp x29, x30, [sp],#16
-    elif words[2] == "ldp":
-        if words[len(words)-2].find("[sp") >= 0:
-            # Stack Pop with post-increment
-            # Example: ldp	x29, x30, [sp],#16
+    elif words[2] == "ldp" and len(words) >= 5:
+        # Check for [sp in the instruction
+        found_sp = False
+        stack_word = ""
+        update_sp = False
+        sp_offset = 0
+
+        # Format 1: ldp x29, x30, [sp],#16 -> post-increment
+        if len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
             stack_word = words[len(words)-2]
-            stack_op = words[len(words) - 1][1:]
+            stack_op = words[len(words) - 1]
+            if stack_op.startswith("#"):
+                stack_op = stack_op[1:]
             if stack_op.endswith("]"):
                 stack_op = stack_op[:-1]
             sp_offset = parse_offset(stack_op)
             update_sp = True
-        else:
-            # Normal stack access
-            # Example: ldp	x19, x20, [sp,#16]
+            found_sp = True
+        # Format 2: ldp x19, x20, [sp, #16] or [sp,#16] -> normal access
+        elif words[len(words)-1].find("[sp") >= 0:
             stack_word = words[len(words)-1]
             update_sp = False
             sp_offset = 0
+            found_sp = True
+        elif len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
+            stack_word = words[len(words)-1]
+            update_sp = False
+            sp_offset = 0
+            found_sp = True
 
-        stack_word = stack_word[1:stack_word.find("]")]
-        offset = parse_offset(stack_word)
+        if found_sp:
+            # Extract offset from stack_word
+            if stack_word.startswith("[sp"):
+                # Format: [sp,#16] -> extract offset
+                offset_start = stack_word.find("#")
+                if offset_start > 0:
+                    offset_end = stack_word.find("]")
+                    offset_str = stack_word[offset_start:offset_end]
+                else:
+                    offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
+            else:
+                # Format: #16] or just numbers
+                if stack_word.find("]") > 0:
+                    offset_str = stack_word[1:stack_word.find("]")]
+                else:
+                    offset_str = stack_word
 
-        # Use helper function for formatting
-        result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+            offset = parse_offset(offset_str)
 
-        if update_sp == True:
-            stackaddr_list = register_dict["%rsp"]
-            new_stackaddr_list = []
-            for stackaddr in stackaddr_list:
-                stackaddr = stackaddr + sp_offset
-                new_stackaddr_list.append(stackaddr)
-            register_dict["%rsp"] = new_stackaddr_list
+            # Use helper function for formatting
+            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+
+            if update_sp == True:
+                stackaddr_list = register_dict["%rsp"]
+                new_stackaddr_list = []
+                for stackaddr in stackaddr_list:
+                    stackaddr = stackaddr + sp_offset
+                    new_stackaddr_list.append(stackaddr)
+                register_dict["%rsp"] = new_stackaddr_list
 
     # Handle single register store: str x19, [sp,#16] or str x19, [sp], #16
     elif words[2] in ("str", "stur", "strb", "strh", "strw"):
@@ -1126,51 +1187,14 @@ def set_stack_data(disasm_str, disaddr_str):
             if (len(words) < 5):
                 continue
             if words[0].startswith("#") and stackfound == 1:
+                # Exception frame hand-off: the following frame holds the stack pointer.
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
+                continue
 
-            if words[2] == funcname and words[4] == disaddr_str:
-                stackfound = 1
-
-        # For ARM64, adjust stack address based on function prologue
-        # The backtrace shows where x29 is saved, but we need the initial SP
-        # Scan disasm to find: sub sp, sp, #N and stp x29, x30, [sp, #offset]
-        if len(stackaddr_list) > 0:
-            frame_addr = stackaddr_list[0]
-            sub_sp_amount = 0
-            stp_offset = 0
-
-            for one_line in disasm_str.splitlines():
-                words = one_line.split()
-                if len(words) < 3:
-                    continue
-
-                # Look for: sub sp, sp, #N
-                if words[2] == "sub" and len(words) >= 5:
-                    if words[3] == "sp," and words[4].startswith("sp"):
-                        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
-                            offset_part = words[4].split(",")[-1]
-                        elif len(words) > 5:
-                            offset_part = words[5]
-                        else:
-                            continue
-                        sub_sp_amount = parse_offset(offset_part)
-
-                # Look for: stp x29, x30, [sp, #offset] or stp x29, x30, [sp,#offset]
-                elif words[2] == "stp" and len(words) >= 6:
-                    if (words[3].startswith("x29") and words[4].startswith("x30") and
-                        words[len(words)-2].find("[sp") >= 0):
-                        stack_word = words[len(words)-1]
-                        if not stack_word.endswith("]!"):  # Not a pre-decrement
-                            stack_word = stack_word[1:stack_word.find("]")]
-                            stp_offset = parse_offset(stack_word)
-                            break  # Found both, can calculate now
-
-            # Calculate initial SP: frame_addr = (initial_SP - sub_sp_amount) + stp_offset
-            # Therefore: initial_SP = frame_addr - stp_offset + sub_sp_amount
-            if sub_sp_amount > 0 and stp_offset >= 0:
-                initial_sp = frame_addr - stp_offset + sub_sp_amount
-                stackaddr_list[0] = initial_sp
+            if words[0].startswith("#") and words[2] == funcname and words[4] == disaddr_str:
+                # For normal AArch64 frames, use the SP shown for this exact frame.
+                stackaddr_list.append(int(words[1][1:-1], 16))
 
     elif (arch.startswith("ppc")):
         stack_op_dict = {}
