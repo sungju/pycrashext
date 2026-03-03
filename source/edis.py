@@ -671,6 +671,82 @@ def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; "):
     return result
 
 
+def parse_aarch64_mem_operand(operand_text):
+    """
+    Parse AArch64 memory operand forms used in prologue/epilogue.
+    Examples:
+      [sp, #96]
+      [sp,#-64]!
+      [sp],#16
+    Returns:
+      (base_reg, offset, writeback, post_index)
+    """
+    if operand_text is None:
+        return None, 0, False, False
+
+    text = operand_text.replace(" ", "")
+    writeback = text.endswith("]!")
+    post_index = "]," in text and not writeback
+
+    if text.startswith("[") and "]" in text:
+        inner = text[1:text.find("]")]
+        parts = inner.split(",")
+        base_reg = parts[0] if len(parts) > 0 else ""
+        offset = 0
+        if len(parts) > 1 and parts[1] != "":
+            offset = parse_offset(parts[1])
+
+        if post_index:
+            # Form: [sp],#16 (post-index immediate after ']')
+            post = text[text.find("],") + 2:]
+            offset = parse_offset(post)
+
+        return base_reg, offset, writeback, post_index
+
+    return None, 0, False, False
+
+
+def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
+    """
+    Estimate runtime SP from bt frame address for AArch64.
+    bt frame address usually matches x29 (frame pointer) rather than SP.
+    """
+    fp_from_sp_off = None
+    seen_insn = 0
+
+    for one_line in disasm_str.splitlines():
+        words = one_line.split()
+        if len(words) < 3 or not words[0].startswith("0x"):
+            continue
+
+        seen_insn += 1
+        if seen_insn > 80:
+            break
+
+        op = words[2]
+
+        # add x29, sp, #0x60
+        if op == "add" and len(words) >= 6 and words[3].startswith("x29"):
+            if words[4].startswith("sp"):
+                fp_from_sp_off = parse_offset(words[5].rstrip(","))
+                break
+
+        # mov x29, sp
+        if op == "mov" and len(words) >= 5 and words[3].startswith("x29"):
+            if words[4].startswith("sp"):
+                fp_from_sp_off = 0
+                break
+
+        # Stop after first call out of prologue region
+        if op in ("bl", "blr"):
+            break
+
+    if fp_from_sp_off is not None:
+        return frame_addr - fp_from_sp_off
+
+    return frame_addr
+
+
 
 def arm_stack_reg_op(words, result_str):
     """Enhanced ARM/AArch64 stack register operations handler"""
@@ -679,12 +755,18 @@ def arm_stack_reg_op(words, result_str):
     if "%rsp" not in register_dict:
         return result_str
 
-    # Handle frame pointer setup: mov x29, sp
-    if words[2] == "mov" and words[len(words)-1] == "sp":
+    # Handle frame pointer setup: mov x29, sp / add x29, sp, #imm
+    if words[2] == "mov" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
             # On AArch64, x29 mirrors current SP at this point.
             reg_list.append(stackaddr)
+        register_dict["%rbp"] = reg_list
+    elif words[2] == "add" and len(words) >= 6 and words[3].startswith("x29") and words[4].startswith("sp"):
+        fp_offset = parse_offset(words[5].rstrip(","))
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            reg_list.append(stackaddr + fp_offset)
         register_dict["%rbp"] = reg_list
 
     # Handle frame pointer setup with offset: add x29, sp, #0x40
@@ -1193,8 +1275,10 @@ def set_stack_data(disasm_str, disaddr_str):
                 continue
 
             if words[0].startswith("#") and words[2] == funcname and words[4] == disaddr_str:
-                # For normal AArch64 frames, use the SP shown for this exact frame.
-                stackaddr_list.append(int(words[1][1:-1], 16))
+                # For AArch64, bt frame address is often x29. Convert to runtime SP.
+                frame_addr = int(words[1][1:-1], 16)
+                runtime_sp = estimate_aarch64_runtime_sp(frame_addr, disasm_str)
+                stackaddr_list.append(runtime_sp)
 
     elif (arch.startswith("ppc")):
         stack_op_dict = {}
