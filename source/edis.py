@@ -368,6 +368,7 @@ def interpret_one_line(one_line):
     if len(words) < 3 or one_line.startswith("/") or one_line.startswith(" "):
         return result_str
 
+    arch = sys_info.machine
     explain = get_operand_explanation(one_line)
     if explain != "":
         add_stack_debug("hint=%s" % explain)
@@ -385,6 +386,12 @@ def interpret_one_line(one_line):
                 internal_count = internal_count + 1
 
             cur_count = cur_count + 1
+            if stack_debug_enabled and "%rsp" in register_dict and arch in ("x86_64", "i386", "i686", "athlon"):
+                vsp = []
+                for a in register_dict["%rsp"]:
+                    vsp.append(a - stack_offset - (cur_count * stack_unit))
+                add_stack_debug("sp update: push -> virtual rsp=%s" %
+                                (",".join(["0x%x" % a for a in vsp])))
             break
 
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
@@ -410,6 +417,8 @@ def s390x_stack_reg_op(words, result_str):
             actual_addr = stackaddr + offset
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: r15 += %d => %s" %
+                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     elif words[2] == "lay" and len(words) >= 4 and words[3].startswith("r15,"):
         # lay r15, -160(r15) - load address
@@ -421,6 +430,8 @@ def s390x_stack_reg_op(words, result_str):
                 actual_addr = stackaddr + offset
                 reg_list.append(actual_addr)
             register_dict["%rsp"] = reg_list
+            add_stack_debug("sp update: lay r15,%d(r15) => %s" %
+                            (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle store operations: stg r14, 112(r15) or stmg r6,r14,48(r15)
     elif words[2] in ("stg", "stmg", "st", "sty") and len(words) > 3:
@@ -503,6 +514,8 @@ def riscv_stack_reg_op(words, result_str):
             actual_addr = stackaddr + offset
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: sp += %d => %s" %
+                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle frame pointer setup: mv s0, sp or addi s0, sp, 0
     elif (words[2] == "mv" and len(words) >= 4 and
@@ -617,6 +630,8 @@ def ppc_stack_reg_op(words, result_str):
             actual_addr = stackaddr + offset
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: r1 += %d => %s" %
+                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle stack operations with (r1): std r17,-120(r1)
     elif len(words) > 3 and "(r1)" in words[3]:
@@ -651,6 +666,8 @@ def ppc_stack_reg_op(words, result_str):
                         actual_addr = stackaddr + offset
                         result_stack_addr_list.append(actual_addr)
                     register_dict["%rsp"] = result_stack_addr_list
+                    add_stack_debug("sp update: %s updates r1 by %d => %s" %
+                                    (words[2], offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
                 break
 
@@ -1303,6 +1320,8 @@ def x86_stack_reg_op(words, result_str):
             actual_addr = stackaddr - value_to_sub - (cur_count * stack_unit)
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: rsp -= %d => %s" %
+                        (value_to_sub, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle stack cleanup: add $0x40,%rsp
     elif words[2] == "add" and words[3].endswith(",%rsp"):
@@ -1315,6 +1334,8 @@ def x86_stack_reg_op(words, result_str):
             actual_addr = stackaddr + value_to_add
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: rsp += %d => %s" %
+                        (value_to_add, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle pop instruction: pop %rbx
     elif words[2] == "pop" or words[2] == "popq":
@@ -1326,6 +1347,8 @@ def x86_stack_reg_op(words, result_str):
             actual_addr = stackaddr + stack_unit
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: pop -> rsp += %d => %s" %
+                        (stack_unit, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle enter instruction: enter $0x10,$0x00
     elif words[2] == "enter":
@@ -1346,6 +1369,10 @@ def x86_stack_reg_op(words, result_str):
             actual_addr = stackaddr - frame_size
             reg_list.append(actual_addr)
         register_dict["%rsp"] = reg_list
+        add_stack_debug("sp update: enter frame_size=%d => rsp=%s rbp=%s" %
+                        (frame_size,
+                         ",".join(["0x%x" % a for a in register_dict["%rsp"]]),
+                         ",".join(["0x%x" % a for a in register_dict["%rbp"]])))
 
     # Handle leave instruction: leave
     elif words[2] == "leave":
@@ -1358,6 +1385,8 @@ def x86_stack_reg_op(words, result_str):
                 actual_addr = stackaddr + stack_unit
                 reg_list.append(actual_addr)
             register_dict["%rsp"] = reg_list
+            add_stack_debug("sp update: leave -> rsp from rbp then +%d => %s" %
+                            (stack_unit, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
 
     # Handle operations with frame pointer: mov %rax,-0x30(%rbp)
     elif len(words) > 3 and "(%rbp)" in words[3]:
