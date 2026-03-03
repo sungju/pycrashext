@@ -224,6 +224,101 @@ def get_stack_debug():
     return stack_debug_lines[:]
 
 
+def get_operand_explanation(one_line):
+    words = one_line.split(None, 3)
+    if len(words) < 3:
+        return ""
+
+    opcode = words[2].strip()
+    operands = words[3].strip() if len(words) > 3 else ""
+    arch = sys_info.machine
+
+    ops = [o.strip() for o in operands.split(",")] if operands else []
+
+    if arch in ("x86_64", "i386", "i686", "athlon"):
+        if opcode.startswith("mov") and len(ops) == 2:
+            return "move value from %s to %s" % (ops[0], ops[1])
+        if opcode == "lea" and len(ops) == 2:
+            return "compute address %s into %s (no memory read)" % (ops[0], ops[1])
+        if opcode in ("push", "pushq") and len(ops) == 1:
+            return "push %s onto stack (rsp decreases)" % ops[0]
+        if opcode in ("pop", "popq") and len(ops) == 1:
+            return "pop top of stack into %s (rsp increases)" % ops[0]
+        if opcode in ("sub", "add") and operands.find("%rsp") >= 0:
+            return "adjust stack pointer with %s" % operands
+        if opcode.startswith("call"):
+            return "function call (return address pushed on stack)"
+        if opcode.startswith("ret"):
+            return "return from function"
+        if "(%rsp)" in operands or "(%rbp)" in operands:
+            return "stack/frame memory access via %s" % ("rsp/rbp")
+        return "execute %s %s" % (opcode, operands)
+
+    if arch.startswith("arm") or arch in ("aarch64"):
+        if opcode == "stp" and operands:
+            return "store register pair to memory%s" % (" with writeback" if operands.find("]!") >= 0 else "")
+        if opcode == "ldp" and operands:
+            return "load register pair from memory%s" % (" with writeback" if operands.find("],") >= 0 else "")
+        if opcode.startswith("str"):
+            return "store register to memory%s" % (" with writeback" if operands.find("]!") >= 0 or operands.find("],") >= 0 else "")
+        if opcode.startswith("ldr"):
+            return "load register from memory%s" % (" with writeback" if operands.find("]!") >= 0 or operands.find("],") >= 0 else "")
+        if opcode == "mov" and len(ops) == 2:
+            return "copy %s to %s" % (ops[1], ops[0])
+        if opcode in ("add", "sub") and operands.find("sp") >= 0:
+            return "update stack pointer/frame with %s" % operands
+        if opcode in ("bl", "blr"):
+            return "branch with link (function call)"
+        if opcode in ("ret",):
+            return "return from function"
+        return "execute %s %s" % (opcode, operands)
+
+    if arch.startswith("ppc"):
+        if opcode in ("stdu", "stwu") and operands.find("(r1)") >= 0:
+            return "store with update: write value and update stack pointer r1"
+        if opcode in ("std", "stw", "stb", "sth"):
+            return "store register to memory"
+        if opcode in ("ld", "lwz", "lbz", "lhz", "lha", "lmw"):
+            return "load register from memory"
+        if opcode == "addi" and operands.startswith("r1,r1,"):
+            return "adjust stack pointer r1 by immediate"
+        if opcode == "bl":
+            return "branch with link (function call)"
+        if opcode.startswith("b"):
+            return "branch/jump control flow"
+        return "execute %s %s" % (opcode, operands)
+
+    if arch.startswith("s390") or arch in ("s390x"):
+        if opcode in ("stg", "stmg", "st", "sty"):
+            return "store register(s) to memory"
+        if opcode in ("lg", "lmg", "l", "ly"):
+            return "load register(s) from memory"
+        if opcode in ("aghi", "lay") and operands.find("r15") >= 0:
+            return "adjust stack pointer register r15"
+        if opcode in ("brasl", "bras"):
+            return "branch and save return (function call)"
+        if opcode.startswith("j") or opcode.startswith("br"):
+            return "jump/branch control flow"
+        return "execute %s %s" % (opcode, operands)
+
+    if arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
+        if opcode in ("sd", "sw", "sh", "sb"):
+            return "store register to memory"
+        if opcode in ("ld", "lw", "lh", "lhu", "lb", "lbu"):
+            return "load register from memory"
+        if opcode == "addi" and operands.startswith("sp,sp,"):
+            return "adjust stack pointer by immediate"
+        if opcode == "mv" and (operands == "s0,sp" or operands == "fp,sp"):
+            return "set frame pointer from stack pointer"
+        if opcode in ("jal", "jalr", "call"):
+            return "jump and link (function call)"
+        if opcode == "ret":
+            return "return from function"
+        return "execute %s %s" % (opcode, operands)
+
+    return "execute %s %s" % (opcode, operands)
+
+
 def read_stack_data(addr, unit):
     """
     Safely read stack data from memory.
@@ -274,6 +369,9 @@ def interpret_one_line(one_line):
         return result_str
 
     add_stack_debug("insn=%s" % one_line.strip())
+    explain = get_operand_explanation(one_line)
+    if explain != "":
+        add_stack_debug("hint=%s" % explain)
 
     for op in stack_op_dict:
         if words[2].startswith(op):
