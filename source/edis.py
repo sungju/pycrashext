@@ -368,7 +368,6 @@ def interpret_one_line(one_line):
     if len(words) < 3 or one_line.startswith("/") or one_line.startswith(" "):
         return result_str
 
-    add_stack_debug("insn=%s" % one_line.strip())
     explain = get_operand_explanation(one_line)
     if explain != "":
         add_stack_debug("hint=%s" % explain)
