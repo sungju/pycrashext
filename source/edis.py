@@ -602,7 +602,7 @@ def get_stack_offset(stack_word):
         return 0
 
 
-def format_stack_data(stackaddr_list, offset, unit, prefix="    ; "):
+def format_stack_data(stackaddr_list, offset, unit, prefix="    ; ", reg=None):
     """
     Format stack data for display.
 
@@ -611,6 +611,7 @@ def format_stack_data(stackaddr_list, offset, unit, prefix="    ; "):
         offset: Offset from stack address
         unit: Size of data to read (1, 2, 4, or 8 bytes)
         prefix: Prefix string for the comment
+        reg: Optional register name (e.g., "x19")
 
     Returns:
         str: Formatted string with stack values, empty string if no data
@@ -625,10 +626,18 @@ def format_stack_data(stackaddr_list, offset, unit, prefix="    ; "):
             data = read_stack_data(actual_addr, unit)
             # Format with correct width based on unit size
             data_str = ("%x" % data).zfill(unit * 2)
-            if idx == 0:
-                result = "%s0x%s" % (prefix, data_str)
+
+            # Format with register name if provided
+            if reg:
+                if idx == 0:
+                    result = "%s%s: 0x%s" % (prefix, reg, data_str)
+                else:
+                    result = "%s, %s: 0x%s" % (result, reg, data_str)
             else:
-                result = "%s, 0x%s" % (result, data_str)
+                if idx == 0:
+                    result = "%s0x%s" % (prefix, data_str)
+                else:
+                    result = "%s, 0x%s" % (result, data_str)
         except Exception as e:
             # Skip this entry if there's an error
             continue
@@ -636,7 +645,7 @@ def format_stack_data(stackaddr_list, offset, unit, prefix="    ; "):
     return result
 
 
-def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; "):
+def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; ", reg1=None, reg2=None):
     """
     Format pair of stack data values for display (used by ARM stp/ldp).
 
@@ -645,6 +654,8 @@ def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; "):
         offset: Offset from stack address
         unit: Size of data to read (4 or 8 bytes)
         prefix: Prefix string for the comment
+        reg1: Optional name of first register (e.g., "x21")
+        reg2: Optional name of second register (e.g., "x22")
 
     Returns:
         str: Formatted string with pairs of stack values, empty string if no data
@@ -660,10 +671,18 @@ def format_stack_data_pair(stackaddr_list, offset, unit, prefix="    ; "):
             data2 = read_stack_data(actual_addr + unit, unit)
             data1_str = ("%x" % data1).zfill(unit * 2)
             data2_str = ("%x" % data2).zfill(unit * 2)
-            if idx == 0:
-                result = "%s0x%s 0x%s" % (prefix, data1_str, data2_str)
+
+            # Format with register names if provided
+            if reg1 and reg2:
+                if idx == 0:
+                    result = "%s%s: 0x%s, %s: 0x%s" % (prefix, reg1, data1_str, reg2, data2_str)
+                else:
+                    result = "%s, %s: 0x%s, %s: 0x%s" % (result, reg1, data1_str, reg2, data2_str)
             else:
-                result = "%s, 0x%s 0x%s" % (result, data1_str, data2_str)
+                if idx == 0:
+                    result = "%s0x%s 0x%s" % (prefix, data1_str, data2_str)
+                else:
+                    result = "%s, 0x%s 0x%s" % (result, data1_str, data2_str)
         except Exception as e:
             # Skip this entry if there's an error
             continue
@@ -881,6 +900,10 @@ def arm_stack_reg_op(words, result_str):
 
     # Handle store pair: stp x29, x30, [sp,#-64]!
     elif words[2] == "stp" and len(words) >= 5:
+        # Extract register names (e.g., x29, x30)
+        reg1 = words[3].rstrip(",") if len(words) > 3 else None
+        reg2 = words[4].rstrip(",") if len(words) > 4 else None
+
         # Check if [sp is in the instruction (could be words[len-2] or words[len-1])
         found_sp = False
         stack_word = ""
@@ -942,10 +965,14 @@ def arm_stack_reg_op(words, result_str):
                 register_dict["%rsp"] = new_stackaddr_list
                 offset = 0
 
-            # Use helper function for formatting
-            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+            # Use helper function for formatting with register names
+            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit, reg1=reg1, reg2=reg2)
     # Handle load pair: ldp x29, x30, [sp],#16
     elif words[2] == "ldp" and len(words) >= 5:
+        # Extract register names (e.g., x29, x30)
+        reg1 = words[3].rstrip(",") if len(words) > 3 else None
+        reg2 = words[4].rstrip(",") if len(words) > 4 else None
+
         # Check for [sp in the instruction
         found_sp = False
         stack_word = ""
@@ -994,8 +1021,8 @@ def arm_stack_reg_op(words, result_str):
 
             offset = parse_offset(offset_str)
 
-            # Use helper function for formatting
-            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit)
+            # Use helper function for formatting with register names
+            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit, reg1=reg1, reg2=reg2)
 
             if update_sp == True:
                 stackaddr_list = register_dict["%rsp"]
@@ -1007,6 +1034,9 @@ def arm_stack_reg_op(words, result_str):
 
     # Handle single register store: str x19, [sp,#16] or str x19, [sp], #16
     elif opcode in ("str", "stur", "strb", "strh", "strw"):
+        # Extract register name (e.g., x19)
+        reg_name = words[3].rstrip(",") if len(words) > 3 else None
+
         mem_pos = operands.find("[sp")
         if mem_pos >= 0:
             mem_op = operands[mem_pos:]
@@ -1032,7 +1062,7 @@ def arm_stack_reg_op(words, result_str):
                 else:
                     access_offset = offset
 
-                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size)
+                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size, reg=reg_name)
 
                 if post_index:
                     reg_list = []
@@ -1042,6 +1072,9 @@ def arm_stack_reg_op(words, result_str):
 
     # Handle single register load: ldr x19, [sp,#16] / [sp],#16 / [sp,#-16]!
     elif opcode in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
+        # Extract register name (e.g., x19)
+        reg_name = words[3].rstrip(",") if len(words) > 3 else None
+
         mem_pos = operands.find("[sp")
         if mem_pos >= 0:
             mem_op = operands[mem_pos:]
@@ -1067,7 +1100,7 @@ def arm_stack_reg_op(words, result_str):
                 else:
                     access_offset = offset
 
-                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size)
+                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size, reg=reg_name)
 
                 if post_index:
                     reg_list = []
