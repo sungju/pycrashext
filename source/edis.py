@@ -687,10 +687,35 @@ def arm_stack_reg_op(words, result_str):
             reg_list.append(actual_addr)
         register_dict["%rbp"] = reg_list
 
+    # Handle frame pointer setup with offset: add x29, sp, #0x40
+    elif words[2] == "add" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
+        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
+        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+            # Format: add x29, sp,#0x40
+            offset_part = words[4].split(",")[-1]
+        elif len(words) > 5:
+            # Format: add x29, sp, #0x40 (offset is in words[5])
+            offset_part = words[5]
+        else:
+            offset_part = "0"
+        fp_offset = parse_offset(offset_part)
+        reg_list = []
+        for stackaddr in register_dict["%rsp"]:
+            actual_addr = stackaddr + fp_offset
+            reg_list.append(actual_addr)
+        register_dict["%rbp"] = reg_list
+
     # Handle stack allocation: sub sp, sp, #0x40
-    elif words[2] == "sub" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp,"):
-        # Extract offset from last part: sp,#0x40 -> 0x40
-        offset_part = words[4].split(",")[-1]
+    elif words[2] == "sub" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
+        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
+        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+            # Format: sub sp, sp,#0x40
+            offset_part = words[4].split(",")[-1]
+        elif len(words) > 5:
+            # Format: sub sp, sp, #0x40 (offset is in words[5])
+            offset_part = words[5]
+        else:
+            offset_part = "0"
         value_to_sub = parse_offset(offset_part)
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
@@ -699,9 +724,16 @@ def arm_stack_reg_op(words, result_str):
         register_dict["%rsp"] = reg_list
 
     # Handle stack cleanup: add sp, sp, #0x40
-    elif words[2] == "add" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp,"):
-        # Extract offset from last part: sp,#0x40 -> 0x40
-        offset_part = words[4].split(",")[-1]
+    elif words[2] == "add" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
+        # Extract offset - may be in words[4] as "sp,#0x40" or in words[5] as "#0x40"
+        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+            # Format: add sp, sp,#0x40
+            offset_part = words[4].split(",")[-1]
+        elif len(words) > 5:
+            # Format: add sp, sp, #0x40 (offset is in words[5])
+            offset_part = words[5]
+        else:
+            offset_part = "0"
         value_to_add = parse_offset(offset_part)
         reg_list = []
         for stackaddr in register_dict["%rsp"]:
@@ -1099,6 +1131,46 @@ def set_stack_data(disasm_str, disaddr_str):
 
             if words[2] == funcname and words[4] == disaddr_str:
                 stackfound = 1
+
+        # For ARM64, adjust stack address based on function prologue
+        # The backtrace shows where x29 is saved, but we need the initial SP
+        # Scan disasm to find: sub sp, sp, #N and stp x29, x30, [sp, #offset]
+        if len(stackaddr_list) > 0:
+            frame_addr = stackaddr_list[0]
+            sub_sp_amount = 0
+            stp_offset = 0
+
+            for one_line in disasm_str.splitlines():
+                words = one_line.split()
+                if len(words) < 3:
+                    continue
+
+                # Look for: sub sp, sp, #N
+                if words[2] == "sub" and len(words) >= 5:
+                    if words[3] == "sp," and words[4].startswith("sp"):
+                        if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+                            offset_part = words[4].split(",")[-1]
+                        elif len(words) > 5:
+                            offset_part = words[5]
+                        else:
+                            continue
+                        sub_sp_amount = parse_offset(offset_part)
+
+                # Look for: stp x29, x30, [sp, #offset] or stp x29, x30, [sp,#offset]
+                elif words[2] == "stp" and len(words) >= 6:
+                    if (words[3].startswith("x29") and words[4].startswith("x30") and
+                        words[len(words)-2].find("[sp") >= 0):
+                        stack_word = words[len(words)-1]
+                        if not stack_word.endswith("]!"):  # Not a pre-decrement
+                            stack_word = stack_word[1:stack_word.find("]")]
+                            stp_offset = parse_offset(stack_word)
+                            break  # Found both, can calculate now
+
+            # Calculate initial SP: frame_addr = (initial_SP - sub_sp_amount) + stp_offset
+            # Therefore: initial_SP = frame_addr - stp_offset + sub_sp_amount
+            if sub_sp_amount > 0 and stp_offset >= 0:
+                initial_sp = frame_addr - stp_offset + sub_sp_amount
+                stackaddr_list[0] = initial_sp
 
     elif (arch.startswith("ppc")):
         stack_op_dict = {}
