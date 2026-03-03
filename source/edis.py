@@ -708,10 +708,13 @@ def parse_aarch64_mem_operand(operand_text):
 
 def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
     """
-    Estimate runtime SP from bt frame address for AArch64.
-    bt frame address usually matches x29 (frame pointer) rather than SP.
+    Estimate ENTRY SP (before prologue stack allocation) from bt frame address
+    for AArch64. bt frame address usually matches x29 (frame pointer).
+
+    We replay from function start in edis -r, so initial %rsp must be entry SP.
     """
     fp_from_sp_off = None
+    sp_delta_before_fp = 0
     seen_insn = 0
 
     for one_line in disasm_str.splitlines():
@@ -724,6 +727,29 @@ def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
             break
 
         op = words[2]
+
+        # Track SP changes from function entry until FP is established.
+        # sub sp, sp, #imm
+        if op == "sub" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
+            if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+                offset_part = words[4].split(",")[-1]
+            elif len(words) > 5:
+                offset_part = words[5]
+            else:
+                offset_part = "0"
+            sp_delta_before_fp -= parse_offset(offset_part.rstrip(","))
+            continue
+
+        # add sp, sp, #imm
+        if op == "add" and len(words) >= 5 and words[3] == "sp," and words[4].startswith("sp"):
+            if "," in words[4] and len(words[4].split(",")[-1]) > 0:
+                offset_part = words[4].split(",")[-1]
+            elif len(words) > 5:
+                offset_part = words[5]
+            else:
+                offset_part = "0"
+            sp_delta_before_fp += parse_offset(offset_part.rstrip(","))
+            continue
 
         # add x29, sp, #0x60
         if op == "add" and len(words) >= 6 and words[3].startswith("x29"):
@@ -742,7 +768,9 @@ def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
             break
 
     if fp_from_sp_off is not None:
-        return frame_addr - fp_from_sp_off
+        # frame_addr(x29) = (entry_sp + sp_delta_before_fp) + fp_from_sp_off
+        # => entry_sp = frame_addr - fp_from_sp_off - sp_delta_before_fp
+        return frame_addr - fp_from_sp_off - sp_delta_before_fp
 
     return frame_addr
 
