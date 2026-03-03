@@ -738,6 +738,7 @@ def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
             break
 
         op = words[2]
+        ops_text = "".join(words[3:]) if len(words) > 3 else ""
 
         # Track SP changes from function entry until FP is established.
         # sub sp, sp, #imm
@@ -761,6 +762,21 @@ def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
                 offset_part = "0"
             sp_delta_before_fp += parse_offset(offset_part.rstrip(","))
             continue
+
+        # Track SP writeback forms before FP is established:
+        #   stp/ldp ..., [sp, #imm]!
+        #   stp/ldp ..., [sp], #imm
+        #   str/ldr ..., [sp, #imm]!
+        #   str/ldr ..., [sp], #imm
+        if op in ("stp", "ldp", "str", "stur", "strb", "strh", "strw",
+                  "ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
+            mem_pos = ops_text.find("[sp")
+            if mem_pos >= 0:
+                base_reg, wb_offset, writeback_pre, post_index = \
+                    parse_aarch64_mem_operand(ops_text[mem_pos:])
+                if base_reg == "sp" and (writeback_pre or post_index):
+                    sp_delta_before_fp += wb_offset
+                    continue
 
         # add x29, sp, #0x60
         if op == "add" and len(words) >= 6 and words[3].startswith("x29"):
