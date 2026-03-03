@@ -252,7 +252,7 @@ def get_operand_explanation(one_line):
             return "return from function"
         if "(%rsp)" in operands or "(%rbp)" in operands:
             return "stack/frame memory access via %s" % ("rsp/rbp")
-        return "execute %s %s" % (opcode, operands)
+        return ""
 
     if arch.startswith("arm") or arch in ("aarch64"):
         if opcode == "stp" and operands:
@@ -271,7 +271,7 @@ def get_operand_explanation(one_line):
             return "branch with link (function call)"
         if opcode in ("ret",):
             return "return from function"
-        return "execute %s %s" % (opcode, operands)
+        return ""
 
     if arch.startswith("ppc"):
         if opcode in ("stdu", "stwu") and operands.find("(r1)") >= 0:
@@ -286,7 +286,7 @@ def get_operand_explanation(one_line):
             return "branch with link (function call)"
         if opcode.startswith("b"):
             return "branch/jump control flow"
-        return "execute %s %s" % (opcode, operands)
+        return ""
 
     if arch.startswith("s390") or arch in ("s390x"):
         if opcode in ("stg", "stmg", "st", "sty"):
@@ -299,7 +299,7 @@ def get_operand_explanation(one_line):
             return "branch and save return (function call)"
         if opcode.startswith("j") or opcode.startswith("br"):
             return "jump/branch control flow"
-        return "execute %s %s" % (opcode, operands)
+        return ""
 
     if arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
         if opcode in ("sd", "sw", "sh", "sb"):
@@ -314,9 +314,9 @@ def get_operand_explanation(one_line):
             return "jump and link (function call)"
         if opcode == "ret":
             return "return from function"
-        return "execute %s %s" % (opcode, operands)
+        return ""
 
-    return "execute %s %s" % (opcode, operands)
+    return ""
 
 
 def read_stack_data(addr, unit):
