@@ -540,6 +540,9 @@ class ArmStackHandler(StackHandler):
             if handled:
                 return result_str
 
+        # If not handled by specific handlers, show generic equation for ldr/str
+        self._show_generic_load_store_equation(words, opcode, operands)
+
         return result_str
 
     def _handle_frame_pointer_setup(self, words, result_str):
@@ -592,10 +595,16 @@ class ArmStackHandler(StackHandler):
 
                 # sub decreases SP (negative), add increases SP (positive)
                 if opcode == "sub":
+                    self.add_debug("ARM sub: Stack allocation sp,sp,#%d" % abs(offset))
+                    self.add_debug("  Allocate %d bytes: sp = sp - %d" % (abs(offset), abs(offset)))
                     offset = -offset
+                else:
+                    self.add_debug("ARM add: Stack deallocation sp,sp,#%d" % offset)
+                    self.add_debug("  Free %d bytes: sp = sp + %d" % (offset, offset))
 
-                self.update_sp(offset, "SP adjust: sp %s %d" % (
-                    "+=" if offset >= 0 else "-=", abs(offset)))
+                self.update_sp(offset, "SP adjust: sp %s %d => %s" % (
+                    "+=" if offset >= 0 else "-=", abs(offset),
+                    ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
                 return result_str, True
 
         return result_str, False
@@ -621,19 +630,34 @@ class ArmStackHandler(StackHandler):
         if base_reg != "sp":
             return result_str, False
 
+        # Add detailed debug output for -D flag
         if writeback_pre:
-            # Pre-index: [sp,#-N]!
-            self.update_sp(offset)
+            # Pre-index: [sp,#-N]! - update SP first, then store to new SP
+            self.add_debug("ARM stp: Pre-index writeback [sp,#%d]!" % offset)
+            self.add_debug("  Step 1: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(pre): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
+            self.add_debug("  Step 2: Store pair %s,%s to new SP+0 and SP+%d" %
+                          (reg1 if reg1 else "?", reg2 if reg2 else "?", stack_unit))
             access_offset = 0
         else:
+            # Normal offset: [sp,#N] - store to SP+offset, no SP update
+            self.add_debug("ARM stp: Normal offset [sp,#%d]" % offset)
+            self.add_debug("  Store pair %s,%s to SP+%d and SP+%d" %
+                          (reg1 if reg1 else "?", reg2 if reg2 else "?",
+                           offset, offset + stack_unit))
             access_offset = offset
 
         result_str = result_str + format_stack_data_pair(
             self.get_sp_addresses(), access_offset, stack_unit, reg1=reg1, reg2=reg2)
 
         if post_index:
-            # Post-index: [sp],#N
-            self.update_sp(offset)
+            # Post-index: [sp],#N - store to current SP, then update SP
+            self.add_debug("ARM stp: Post-index writeback [sp],#%d" % offset)
+            self.add_debug("  Step 1: Store pair completed to SP+0 and SP+%d" % stack_unit)
+            self.add_debug("  Step 2: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(post): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
 
         return result_str, True
 
@@ -658,17 +682,31 @@ class ArmStackHandler(StackHandler):
         if base_reg != "sp":
             return result_str, False
 
+        # Add detailed debug output for -D flag
         if writeback_pre:
-            self.update_sp(offset)
+            self.add_debug("ARM ldp: Pre-index writeback [sp,#%d]!" % offset)
+            self.add_debug("  Step 1: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(pre): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
+            self.add_debug("  Step 2: Load pair from new SP+0 into %s,%s" %
+                          (reg1 if reg1 else "?", reg2 if reg2 else "?"))
             access_offset = 0
         else:
+            self.add_debug("ARM ldp: Normal offset [sp,#%d]" % offset)
+            self.add_debug("  Load pair from SP+%d and SP+%d into %s,%s" %
+                          (offset, offset + stack_unit,
+                           reg1 if reg1 else "?", reg2 if reg2 else "?"))
             access_offset = offset
 
         result_str = result_str + format_stack_data_pair(
             self.get_sp_addresses(), access_offset, stack_unit, reg1=reg1, reg2=reg2)
 
         if post_index:
-            self.update_sp(offset)
+            self.add_debug("ARM ldp: Post-index writeback [sp],#%d" % offset)
+            self.add_debug("  Step 1: Load pair completed from SP+0 and SP+%d" % stack_unit)
+            self.add_debug("  Step 2: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(post): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
 
         return result_str, True
 
@@ -692,17 +730,35 @@ class ArmStackHandler(StackHandler):
         # Determine data size
         data_size = self.get_instruction_size(opcode, stack_unit)
 
+        # Add detailed debug output for -D flag
         if writeback_pre:
-            self.update_sp(offset)
+            # Pre-index: [sp,#offset]! - update SP first, then store to new SP
+            self.add_debug("ARM %s: Pre-index writeback [sp,#%d]!" % (opcode, offset))
+            self.add_debug("  Step 1: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(pre): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
+            self.add_debug("  Step 2: Store %s to new SP+0" % (reg_name if reg_name else "register"))
             access_offset = 0
         else:
+            # Normal offset: [sp,#offset] - store to SP+offset, no SP update
+            self.add_debug("ARM %s: Normal offset [sp,#%d]" % (opcode, offset))
+            self.add_debug("  Store %s to SP+%d (%s)" %
+                          (reg_name if reg_name else "register",
+                           offset,
+                           "%+d" % offset if offset != 0 else "no offset"))
             access_offset = offset
 
+        # Format and display the data (format_stack_data adds its own debug output)
         result_str = result_str + format_stack_data(
             self.get_sp_addresses(), access_offset, data_size, reg=reg_name)
 
         if post_index:
-            self.update_sp(offset)
+            # Post-index: [sp],#offset - store to current SP, then update SP
+            self.add_debug("ARM %s: Post-index writeback [sp],#%d" % (opcode, offset))
+            self.add_debug("  Step 1: Store completed to SP+0")
+            self.add_debug("  Step 2: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(post): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
 
         return result_str, True
 
@@ -726,17 +782,35 @@ class ArmStackHandler(StackHandler):
         # Determine data size
         data_size = self.get_instruction_size(opcode, stack_unit)
 
+        # Add detailed debug output for -D flag
         if writeback_pre:
-            self.update_sp(offset)
+            # Pre-index: [sp,#offset]! - update SP first, then load from new SP
+            self.add_debug("ARM %s: Pre-index writeback [sp,#%d]!" % (opcode, offset))
+            self.add_debug("  Step 1: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(pre): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
+            self.add_debug("  Step 2: Load from new SP+0 into %s" % (reg_name if reg_name else "register"))
             access_offset = 0
         else:
+            # Normal offset: [sp,#offset] - load from SP+offset, no SP update
+            self.add_debug("ARM %s: Normal offset [sp,#%d]" % (opcode, offset))
+            self.add_debug("  Load from SP+%d (%s) into %s" %
+                          (offset,
+                           "%+d" % offset if offset != 0 else "no offset",
+                           reg_name if reg_name else "register"))
             access_offset = offset
 
+        # Format and read the data (format_stack_data adds its own debug output)
         result_str = result_str + format_stack_data(
             self.get_sp_addresses(), access_offset, data_size, reg=reg_name)
 
         if post_index:
-            self.update_sp(offset)
+            # Post-index: [sp],#offset - load from current SP, then update SP
+            self.add_debug("ARM %s: Post-index writeback [sp],#%d" % (opcode, offset))
+            self.add_debug("  Step 1: Load completed from SP+0")
+            self.add_debug("  Step 2: Update SP: sp = sp + %d" % offset)
+            self.update_sp(offset, "sp writeback(post): sp <- sp %+d => %s" %
+                          (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
 
         return result_str, True
 
@@ -745,6 +819,8 @@ class ArmStackHandler(StackHandler):
         if len(words) < 4:
             return result_str, False
 
+        opcode = words[2]
+        reg_name = words[3].rstrip(",") if len(words) > 3 else None
         operands = "".join(words[3:])
 
         # Check for x29 or fp addressing
@@ -755,10 +831,112 @@ class ArmStackHandler(StackHandler):
             base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
             if base_reg in ("x29", "fp"):
+                self.add_debug("ARM %s: Frame pointer access [%s,#%d]" % (opcode, fp_reg, offset))
+                self.add_debug("  Access via FP: x29+%d (%s) -> %s" %
+                              (offset,
+                               "%+d" % offset if offset != 0 else "no offset",
+                               reg_name if reg_name else "register"))
                 result_str = result_str + self.format_fp_data(offset, stack_unit)
                 return result_str, True
 
         return result_str, False
+
+    def _show_generic_load_store_equation(self, words, opcode, operands):
+        """
+        Show equation for any ldr/str instruction with any base register.
+        This is called for instructions not handled by specific handlers.
+        Only shows the mathematical expression, doesn't calculate values.
+        """
+        # Only show for load/store instructions
+        if opcode not in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb",
+                          "str", "stur", "strb", "strh", "strw",
+                          "ldp", "stp"):
+            return
+
+        if len(words) < 4:
+            return
+
+        # Get target/source register
+        target_reg = words[3].rstrip(",") if len(words) > 3 else "?"
+
+        # Parse memory operand to extract base register and offset
+        # Look for [register pattern
+        if "[" not in operands:
+            return
+
+        mem_start = operands.find("[")
+        mem_end = operands.find("]")
+        if mem_end == -1:
+            mem_end = len(operands)
+
+        mem_expr = operands[mem_start:mem_end+1]
+
+        # Try to parse using parse_aarch64_mem_operand
+        try:
+            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_expr)
+        except:
+            # If parsing fails, try simple extraction
+            import re
+            match = re.search(r'\[([a-z0-9]+)', mem_expr)
+            if match:
+                base_reg = match.group(1)
+                offset = 0
+                writeback_pre = False
+                post_index = False
+            else:
+                return
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode, stack_unit)
+        if data_size is None:
+            data_size = stack_unit
+
+        # Determine if it's a pair operation
+        is_pair = opcode in ("ldp", "stp")
+        if is_pair and len(words) > 4:
+            second_reg = words[4].rstrip(",")
+        else:
+            second_reg = None
+
+        # Build the equation string
+        if opcode.startswith("ldr") or opcode == "ldur":
+            # Load operation
+            operation = "Load"
+            if is_pair:
+                equation = "%s, %s = memory[%s + %d], memory[%s + %d]" % (
+                    target_reg, second_reg if second_reg else "?",
+                    base_reg, offset,
+                    base_reg, offset + data_size)
+            else:
+                if offset == 0:
+                    equation = "%s = memory[%s]" % (target_reg, base_reg)
+                else:
+                    equation = "%s = memory[%s %+d]" % (target_reg, base_reg, offset)
+        else:
+            # Store operation
+            operation = "Store"
+            if is_pair:
+                equation = "memory[%s + %d], memory[%s + %d] = %s, %s" % (
+                    base_reg, offset,
+                    base_reg, offset + data_size,
+                    target_reg, second_reg if second_reg else "?")
+            else:
+                if offset == 0:
+                    equation = "memory[%s] = %s" % (base_reg, target_reg)
+                else:
+                    equation = "memory[%s %+d] = %s" % (base_reg, offset, target_reg)
+
+        # Add debug output with the equation
+        self.add_debug("ARM %s: Generic register [%s,#%d]" % (opcode, base_reg, offset))
+        self.add_debug("  Equation: %s" % equation)
+        self.add_debug("  Base register: %s (value not tracked)" % base_reg)
+        self.add_debug("  Offset: %+d bytes" % offset)
+        self.add_debug("  Data size: %d bytes" % data_size)
+
+        if writeback_pre:
+            self.add_debug("  Note: Pre-index writeback - %s updated before access" % base_reg)
+        elif post_index:
+            self.add_debug("  Note: Post-index writeback - %s updated after access" % base_reg)
 
 
 class PpcStackHandler(StackHandler):
