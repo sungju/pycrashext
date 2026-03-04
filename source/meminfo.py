@@ -816,6 +816,53 @@ def get_meminfo():
     return result_str
 
 
+def get_meminfo_dict():
+    """
+    Get memory information as a dictionary (without formatting).
+
+    Returns:
+        dict: Memory information dictionary with keys like 'MemTotal', 'MemFree', etc.
+              Values are in KB.
+    """
+    global page_size
+
+    page_size = 1 << get_page_shift()
+    meminfo={}
+
+    resultlines = exec_crash_command("kmem -i").splitlines()
+    page_unit = page_size // 1024
+    meminfo['MemFree'] = 0
+    for line in resultlines:
+        words = line.split()
+        if len(words) == 0:
+            continue
+        if words[0] == 'TOTAL':
+            if words[1] == 'MEM':
+                meminfo['MemTotal'] = round(int(words[2]) * page_unit) # Convert pages
+            elif words[1] == 'HUGE':
+                meminfo['HugePages_Total'] = int(words[2])
+            elif words[1] == 'SWAP':
+                meminfo['SwapTotal'] = round(int(words[2]) * page_unit)
+        elif words[0] == 'HUGE':
+            if words[1] == 'FREE':
+                meminfo['HugePages_Free'] = int(words[2])
+        elif words[0] == 'FREE':
+            val = words[1]
+            if words[1] == 'HIGH' or words[1] == 'LOW':
+                val = words[2]
+            meminfo['MemFree'] = meminfo['MemFree'] + \
+                    round(int(val) * page_unit)
+        elif words[0] == 'BUFFERS':
+            meminfo['Buffers'] = round(int(words[1]) * page_unit)
+        elif words[0] == 'CACHED':
+            meminfo['Cached'] = round(int(words[1]) * page_unit)
+        elif words[0] == 'SWAP':
+            if words[1] == 'FREE':
+                meminfo['SwapFree'] = round(int(words[2]) * page_unit)
+
+    return meminfo
+
+
 def get_size_str(size, coloring = False):
     size_str = ""
     if size > (1024 * 1024 * 1024): # GiB
@@ -1100,7 +1147,7 @@ def show_tasks_memusage(options):
         print("It will take quite sometime to gather Pss based memory usage")
 
     # Get system's total memory for percentage calculation
-    system_meminfo = get_meminfo()
+    system_meminfo = get_meminfo_dict()
     system_total_mem_kb = system_meminfo.get('MemTotal', 0)
 
     if (options.nogroup):
@@ -1219,7 +1266,7 @@ def show_tasks_memusage(options):
 
 def show_slabtop(options):
     # Get system's total memory for percentage calculation
-    system_meminfo = get_meminfo()
+    system_meminfo = get_meminfo_dict()
     system_total_mem_kb = system_meminfo.get('MemTotal', 0)
 
     result = exec_crash_command("kmem -s")
