@@ -860,6 +860,8 @@ def get_meminfo_dict():
             meminfo['Buffers'] = round(int(words[1]) * page_unit)
         elif words[0] == 'CACHED':
             meminfo['Cached'] = round(int(words[1]) * page_unit)
+        elif words[0] == 'SLAB':
+            meminfo['Slab'] = round(int(words[1]) * page_unit)
         elif words[0] == 'SWAP':
             if words[1] == 'FREE':
                 meminfo['SwapFree'] = round(int(words[2]) * page_unit)
@@ -4276,122 +4278,77 @@ def show_overall_memory(options):
     print("=" * 80)
     crashcolor.set_color(crashcolor.RESET)
 
-    # Parse kmem -i output
-    kmem_output = exec_crash_command("kmem -i")
+    # Use existing working function to get memory info
+    meminfo = get_meminfo_dict()
 
     # Storage for memory categories
     mem_categories = {}
-    total_mem_kb = 0
-    total_huge_kb = 0
 
-    lines = kmem_output.splitlines()
-    for line in lines:
-        line = line.strip()
-        if not line:
-            continue
+    # Get total memory
+    total_mem_kb = meminfo.get('MemTotal', 0)
 
-        # Parse memory values
-        words = line.split()
-        if len(words) < 3:
-            continue
+    if total_mem_kb == 0:
+        crashcolor.set_color(crashcolor.RED)
+        print("Error: Could not determine total system memory")
+        crashcolor.set_color(crashcolor.RESET)
+        return
 
-        # Extract TOTAL MEM line
-        if "TOTAL MEM" in line:
-            # Format: TOTAL MEM  4027459      15.4 GB         ----
-            try:
-                pages = int(words[2])
-                total_mem_kb = pages * page_size / 1024
-            except:
-                pass
+    # Extract memory categories from meminfo dict
+    if 'MemFree' in meminfo and meminfo['MemFree'] > 0:
+        mem_categories['Free'] = meminfo['MemFree']
 
-        # Extract memory categories
-        elif "FREE" in line and "HUGE" not in line and "SWAP" not in line:
-            try:
-                pages = int(words[1])
-                mem_categories['Free'] = pages * page_size / 1024
-            except:
-                pass
+    if 'Buffers' in meminfo and meminfo['Buffers'] > 0:
+        mem_categories['Buffers'] = meminfo['Buffers']
 
-        elif "BUFFERS" in line:
-            try:
-                pages = int(words[1])
-                mem_categories['Buffers'] = pages * page_size / 1024
-            except:
-                pass
+    if 'Cached' in meminfo and meminfo['Cached'] > 0:
+        mem_categories['Cached'] = meminfo['Cached']
 
-        elif "CACHED" in line and "SWAP" not in line:
-            try:
-                pages = int(words[1])
-                mem_categories['Cached'] = pages * page_size / 1024
-            except:
-                pass
+    if 'Slab' in meminfo and meminfo['Slab'] > 0:
+        mem_categories['Slab'] = meminfo['Slab']
 
-        elif "SLAB" in line:
-            try:
-                pages = int(words[1])
-                mem_categories['Slab'] = pages * page_size / 1024
-            except:
-                pass
+    # Calculate HugePages used (total - free)
+    if 'HugePages_Total' in meminfo and 'HugePages_Free' in meminfo:
+        huge_total = meminfo['HugePages_Total']
+        huge_free = meminfo['HugePages_Free']
+        if huge_total > huge_free:
+            # Convert pages to KB
+            page_unit = page_size // 1024
+            hugepages_used_kb = (huge_total - huge_free) * page_unit
+            if hugepages_used_kb > 0:
+                mem_categories['HugePages'] = hugepages_used_kb
 
-        elif "TOTAL HUGE" in line:
-            try:
-                pages = int(words[2])
-                total_huge_kb = pages * page_size / 1024
-            except:
-                pass
-
-        elif "HUGE FREE" in line:
-            try:
-                pages = int(words[2])
-                huge_free_kb = pages * page_size / 1024
-                # Huge pages used = Total huge - Free huge
-                mem_categories['HugePages'] = total_huge_kb - huge_free_kb
-            except:
-                pass
-
-    # Get user-space memory usage
-    # Run through all tasks and calculate RSS
+    # Get user-space memory usage using the safe ps -G approach
+    # (same pattern as existing meminfo code lines 1188-1211)
     user_space_kb = 0
     try:
-        task_list = readSUListFromHead(sym2addr('init_task'), 'tasks',
-                                       'struct task_struct', maxel=999999999)
+        ps_output = exec_crash_command("ps -G")
+        result_lines = ps_output.splitlines()
 
-        for task in task_list:
+        for line in result_lines[1:]:  # Skip header
+            # Handle '>' marker for current task
+            if line.startswith('>'):
+                line = line.replace('>', ' ', 1)
+
+            words = line.split()
+            if len(words) < 8:
+                continue
+
+            # Check if first field is PID (numeric)
+            if not words[0].isdigit():
+                continue
+
             try:
-                if task.mm == 0:  # kernel thread
-                    continue
-
-                mm = readSU("struct mm_struct", task.mm)
-                if mm.rss_stat:
-                    # Modern kernel with rss_stat
-                    for idx in range(4):  # NR_MM_COUNTERS = 4
-                        try:
-                            count = mm.rss_stat.count[idx].counter
-                            user_space_kb += count * page_size / 1024
-                        except:
-                            pass
-                elif hasattr(mm, '_file_rss'):
-                    # Old kernel
-                    file_rss = mm._file_rss.counter if hasattr(mm._file_rss, 'counter') else mm._file_rss
-                    anon_rss = mm._anon_rss.counter if hasattr(mm._anon_rss, 'counter') else mm._anon_rss
-                    user_space_kb += (file_rss + anon_rss) * page_size / 1024
-            except:
+                # RSS is in column 7 (0-indexed)
+                rss_kb = int(words[7])
+                user_space_kb += rss_kb
+            except (ValueError, IndexError):
                 continue
 
     except Exception as e:
-        # Fallback: parse ps output
-        try:
-            ps_output = exec_crash_command("ps -G")
-            for line in ps_output.splitlines():
-                words = line.split()
-                if len(words) > 8 and words[0].isdigit():
-                    try:
-                        rss_kb = int(words[7])
-                        user_space_kb += rss_kb
-                    except:
-                        pass
-        except:
-            pass
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Warning: Could not calculate user-space memory from ps -G")
+        print("Error: %s" % str(e))
+        crashcolor.set_color(crashcolor.RESET)
 
     # Store user-space in categories
     if user_space_kb > 0:
@@ -4403,6 +4360,12 @@ def show_overall_memory(options):
 
     if kernel_other_kb > 0:
         mem_categories['Kernel-Other'] = kernel_other_kb
+    elif kernel_other_kb < 0:
+        # Negative value indicates double-counting or error
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\nWarning: Memory accounting shows negative Kernel-Other")
+        print("This may indicate overlapping categories or parsing errors")
+        crashcolor.set_color(crashcolor.RESET)
 
     # Sort categories by size (descending)
     sorted_categories = sorted(mem_categories.items(), key=lambda x: x[1], reverse=True)
