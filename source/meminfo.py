@@ -4373,8 +4373,8 @@ def show_overall_memory(options):
     # Display header
     print("\nTotal System Memory: %s\n" % get_size_str(total_mem_kb * 1024))
 
-    # Column headers
-    header_format = "%-20s %15s %10s  %s"
+    # Column headers - optimized for 80-column terminals
+    header_format = "%-15s %12s %8s  %s"
     print(header_format % ("Category", "Size", "Percent", "Usage Bar"))
     print("-" * 80)
 
@@ -4396,7 +4396,7 @@ def show_overall_memory(options):
         else:
             crashcolor.set_color(crashcolor.CYAN)
 
-        print("%-20s %15s %9.2f%%  %s" % (category, size_str, percentage, bar))
+        print("%-15s %12s %7.2f%%  %s" % (category, size_str, percentage, bar))
         crashcolor.set_color(crashcolor.RESET)
 
     print("-" * 80)
