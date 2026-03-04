@@ -551,10 +551,12 @@ class ArmStackHandler(StackHandler):
             if words[3].startswith("x29,") and words[4].startswith("x30,"):
                 operands = "".join(words[5:])
                 if "[sp" in operands and operands.endswith("]!"):
-                    # Pre-decrement store pair
-                    offset_match = extract_arm_mem_operand(operands)
-                    if offset_match and offset_match[0] == "sp":
-                        offset = offset_match[1]
+                    # Pre-decrement store pair - use parse_aarch64_mem_operand
+                    mem_pos = operands.find("[sp")
+                    mem_op = operands[mem_pos:]
+                    base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
+
+                    if base_reg == "sp":
                         self.update_sp(offset)
                         self.copy_sp_to_fp()
                         result_str = result_str + self.format_sp_data(0, stack_unit)
@@ -612,11 +614,12 @@ class ArmStackHandler(StackHandler):
         if "[sp" not in operands:
             return result_str, False
 
-        mem_data = extract_arm_mem_operand(operands)
-        if not mem_data or mem_data[0] != "sp":
-            return result_str, False
+        mem_pos = operands.find("[sp")
+        mem_op = operands[mem_pos:]
+        base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-        base_reg, offset, writeback_pre, post_index = mem_data
+        if base_reg != "sp":
+            return result_str, False
 
         if writeback_pre:
             # Pre-index: [sp,#-N]!
@@ -648,11 +651,12 @@ class ArmStackHandler(StackHandler):
         if "[sp" not in operands:
             return result_str, False
 
-        mem_data = extract_arm_mem_operand(operands)
-        if not mem_data or mem_data[0] != "sp":
-            return result_str, False
+        mem_pos = operands.find("[sp")
+        mem_op = operands[mem_pos:]
+        base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-        base_reg, offset, writeback_pre, post_index = mem_data
+        if base_reg != "sp":
+            return result_str, False
 
         if writeback_pre:
             self.update_sp(offset)
@@ -680,12 +684,10 @@ class ArmStackHandler(StackHandler):
 
         mem_pos = operands.find("[sp")
         mem_op = operands[mem_pos:]
-        mem_data = extract_arm_mem_operand(mem_op)
+        base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-        if not mem_data or mem_data[0] != "sp":
+        if base_reg != "sp":
             return result_str, False
-
-        base_reg, offset, writeback_pre, post_index = mem_data
 
         # Determine data size
         data_size = self.get_instruction_size(opcode, stack_unit)
@@ -716,12 +718,10 @@ class ArmStackHandler(StackHandler):
 
         mem_pos = operands.find("[sp")
         mem_op = operands[mem_pos:]
-        mem_data = extract_arm_mem_operand(mem_op)
+        base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-        if not mem_data or mem_data[0] != "sp":
+        if base_reg != "sp":
             return result_str, False
-
-        base_reg, offset, writeback_pre, post_index = mem_data
 
         # Determine data size
         data_size = self.get_instruction_size(opcode, stack_unit)
@@ -752,10 +752,9 @@ class ArmStackHandler(StackHandler):
             fp_reg = "x29" if "[x29" in operands else "fp"
             mem_pos = operands.find("[" + fp_reg)
             mem_op = operands[mem_pos:]
-            mem_data = extract_arm_mem_operand(mem_op)
+            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
 
-            if mem_data and mem_data[0] in ("x29", "fp"):
-                offset = mem_data[1]
+            if base_reg in ("x29", "fp"):
                 result_str = result_str + self.format_fp_data(offset, stack_unit)
                 return result_str, True
 
