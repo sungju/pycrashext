@@ -1067,8 +1067,14 @@ def get_memory_bar(percentage, width=20):
     # Use block characters for visual appeal
     filled_char = '█'
     empty_char = '░'
+    half_char = '▌'  # Half-filled character for very small percentages
 
-    bar = '[' + (filled_char * filled_width) + (empty_char * empty_width) + ']'
+    # Show minimal indicator for very small but non-zero percentages
+    if percentage > 0 and filled_width == 0:
+        # Use half-filled character to indicate minimal usage
+        bar = '[' + half_char + (empty_char * (width - 1)) + ']'
+    else:
+        bar = '[' + (filled_char * filled_width) + (empty_char * empty_width) + ']'
 
     # Add color coding based on usage level
     if percentage >= 90:
