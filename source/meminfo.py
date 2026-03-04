@@ -4386,7 +4386,7 @@ def show_overall_memory(options):
 
         # Color coding
         if category == 'User-Space':
-            crashcolor.set_color(crashcolor.BLUE | crashcolor.HIGHLIGHT)
+            crashcolor.set_color(crashcolor.BLUE | crashcolor.BOLD)
         elif category == 'Slab':
             crashcolor.set_color(crashcolor.GREEN)
         elif category == 'HugePages':
