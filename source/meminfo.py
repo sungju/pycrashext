@@ -1099,6 +1099,10 @@ def show_tasks_memusage(options):
         print("Experimental stage for Pss")
         print("It will take quite sometime to gather Pss based memory usage")
 
+    # Get system's total memory for percentage calculation
+    system_meminfo = get_meminfo()
+    system_total_mem_kb = system_meminfo.get('MemTotal', 0)
+
     if (options.nogroup):
         crash_command = "ps"
     else:
@@ -1191,7 +1195,8 @@ def show_tasks_memusage(options):
         if options.graph:
             # Truncate process name to fit column width
             pname = truncate_middle(pname, pname_width)
-            percentage = (rss_kb * 100.0 / total_rss) if total_rss > 0 else 0
+            # Calculate percentage based on system's total memory
+            percentage = (rss_kb * 100.0 / system_total_mem_kb) if system_total_mem_kb > 0 else 0
             bar = get_memory_bar(percentage, width=20)
             format_str = "%-" + str(pname_width) + "s %s %15s"
             print(format_str % (pname, bar, get_size_str(rss_kb * 1024)))
@@ -1213,6 +1218,10 @@ def show_tasks_memusage(options):
 
 
 def show_slabtop(options):
+    # Get system's total memory for percentage calculation
+    system_meminfo = get_meminfo()
+    system_total_mem_kb = system_meminfo.get('MemTotal', 0)
+
     result = exec_crash_command("kmem -s")
     result_lines = result.splitlines(True)
     slab_list = {}
@@ -1237,7 +1246,7 @@ def show_slabtop(options):
 
     print_count = min(len(sorted_slabtop) - 1, min_number)
 
-    # Calculate total for percentage
+    # Calculate total for display purposes
     total_slab = sum([item[1] for item in sorted_slabtop[:print_count]])
 
     # Calculate optimal column width based on terminal width and longest SLAB name
@@ -1320,7 +1329,8 @@ def show_slabtop(options):
         slab_name = truncate_middle(slab_name, slab_width)
 
         if options.graph:
-            percentage = (sorted_slabtop[i][1] * 100.0 / total_slab) if total_slab > 0 else 0
+            # Calculate percentage based on system's total memory
+            percentage = (sorted_slabtop[i][1] * 100.0 / system_total_mem_kb) if system_total_mem_kb > 0 else 0
             bar = get_memory_bar(percentage, width=20)
             format_str = "0x%16s %-" + str(slab_width) + "s %s %12s %8d"
             print(format_str % (sorted_slabtop[i][0], slab_name, bar,
