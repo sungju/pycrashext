@@ -394,6 +394,9 @@ class X86StackHandler(StackHandler):
             if handled:
                 return result_str
 
+        # If not handled by specific handlers, show generic equation for mov with memory
+        self._show_generic_mov_equation(words, opcode, operands)
+
         return result_str
 
     def _handle_frame_setup(self, words, result_str):
@@ -485,6 +488,145 @@ class X86StackHandler(StackHandler):
                     result_str = result_str + self.format_sp_data(offset, stack_unit)
                     return result_str, True
         return result_str, False
+
+    def _show_generic_mov_equation(self, words, opcode, operands):
+        """
+        Show detailed equation for any mov instruction with memory operands.
+        This shows the data size, operation, and addressing mode.
+        """
+        # Only show for mov instructions with memory operands
+        if not opcode.startswith("mov"):
+            return
+
+        if len(words) < 4:
+            return
+
+        # Parse operands
+        ops = [o.strip() for o in operands.split(",") if o.strip()]
+        if len(ops) < 2:
+            return
+
+        src = ops[0]
+        dst = ops[1]
+
+        # Check if this involves memory (has parentheses for addressing)
+        has_memory = "(" in src or ")" in src or "(" in dst or ")" in dst
+        if not has_memory:
+            return
+
+        # Determine data size and operation type from opcode
+        size_info = ""
+        operation = ""
+        data_bytes = 0
+
+        if opcode == "movzwl":
+            size_info = "16-bit word (2 bytes)"
+            operation = "zero-extend to 32-bit"
+            data_bytes = 2
+        elif opcode == "movzbl":
+            size_info = "8-bit byte (1 byte)"
+            operation = "zero-extend to 32-bit"
+            data_bytes = 1
+        elif opcode == "movzbq":
+            size_info = "8-bit byte (1 byte)"
+            operation = "zero-extend to 64-bit"
+            data_bytes = 1
+        elif opcode == "movzwq":
+            size_info = "16-bit word (2 bytes)"
+            operation = "zero-extend to 64-bit"
+            data_bytes = 2
+        elif opcode == "movsbl":
+            size_info = "8-bit byte (1 byte)"
+            operation = "sign-extend to 32-bit"
+            data_bytes = 1
+        elif opcode == "movswl":
+            size_info = "16-bit word (2 bytes)"
+            operation = "sign-extend to 32-bit"
+            data_bytes = 2
+        elif opcode == "movsbq":
+            size_info = "8-bit byte (1 byte)"
+            operation = "sign-extend to 64-bit"
+            data_bytes = 1
+        elif opcode == "movswq":
+            size_info = "16-bit word (2 bytes)"
+            operation = "sign-extend to 64-bit"
+            data_bytes = 2
+        elif opcode == "movslq" or opcode == "movsx":
+            size_info = "32-bit long (4 bytes)"
+            operation = "sign-extend to 64-bit"
+            data_bytes = 4
+        elif opcode == "movq":
+            size_info = "64-bit quadword (8 bytes)"
+            operation = "direct move"
+            data_bytes = 8
+        elif opcode == "movl":
+            size_info = "32-bit long (4 bytes)"
+            operation = "direct move"
+            data_bytes = 4
+        elif opcode == "movw":
+            size_info = "16-bit word (2 bytes)"
+            operation = "direct move"
+            data_bytes = 2
+        elif opcode == "movb":
+            size_info = "8-bit byte (1 byte)"
+            operation = "direct move"
+            data_bytes = 1
+        else:
+            # Generic mov
+            size_info = "word size"
+            operation = "direct move"
+            data_bytes = stack_unit
+
+        # Parse memory addressing
+        if "(" in src:
+            # Memory read: mov (%rdx),%eax or mov 0x10(%rdx),%eax
+            self.add_debug("x86 %s: Memory read" % opcode)
+            self.add_debug("  Operation: %s" % operation)
+            self.add_debug("  Data size: %s" % size_info)
+
+            # Extract base register and offset
+            import re
+            match = re.match(r'([-0-9a-fx]*)\(([%a-z0-9]+)\)', src)
+            if match:
+                offset_str = match.group(1)
+                base_reg = match.group(2)
+                offset = parse_offset(offset_str) if offset_str else 0
+
+                if offset == 0:
+                    equation = "%s = memory[%s]" % (dst, base_reg)
+                    self.add_debug("  Equation: %s" % equation)
+                    self.add_debug("  Read from: [%s] -> %s" % (base_reg, dst))
+                else:
+                    equation = "%s = memory[%s %+d]" % (dst, base_reg, offset)
+                    self.add_debug("  Equation: %s" % equation)
+                    self.add_debug("  Read from: [%s %+d] -> %s" % (base_reg, offset, dst))
+            else:
+                self.add_debug("  Source: %s -> %s" % (src, dst))
+
+        elif "(" in dst:
+            # Memory write: mov %eax,(%rdx) or mov %eax,0x10(%rdx)
+            self.add_debug("x86 %s: Memory write" % opcode)
+            self.add_debug("  Operation: %s" % operation)
+            self.add_debug("  Data size: %s" % size_info)
+
+            # Extract base register and offset
+            import re
+            match = re.match(r'([-0-9a-fx]*)\(([%a-z0-9]+)\)', dst)
+            if match:
+                offset_str = match.group(1)
+                base_reg = match.group(2)
+                offset = parse_offset(offset_str) if offset_str else 0
+
+                if offset == 0:
+                    equation = "memory[%s] = %s" % (base_reg, src)
+                    self.add_debug("  Equation: %s" % equation)
+                    self.add_debug("  Write to: %s -> [%s]" % (src, base_reg))
+                else:
+                    equation = "memory[%s %+d] = %s" % (base_reg, offset, src)
+                    self.add_debug("  Equation: %s" % equation)
+                    self.add_debug("  Write to: %s -> [%s %+d]" % (src, base_reg, offset))
+            else:
+                self.add_debug("  Destination: %s -> %s" % (src, dst))
 
 
 class ArmStackHandler(StackHandler):
@@ -1659,7 +1801,40 @@ def get_operand_explanation(one_line):
 
     if arch in ("x86_64", "i386", "i686", "athlon"):
         if opcode.startswith("mov") and len(ops) == 2:
-            return "move value from %s to %s" % (ops[0], ops[1])
+            # Provide detailed explanation for mov variants
+            src = ops[0]
+            dst = ops[1]
+
+            # Detect specific mov variants with size information
+            if opcode == "movzwl":
+                return "move zero-extend: read 16-bit word from %s, zero-extend to 32-bit, store in %s" % (src, dst)
+            elif opcode == "movzbl":
+                return "move zero-extend: read 8-bit byte from %s, zero-extend to 32-bit, store in %s" % (src, dst)
+            elif opcode == "movzbq":
+                return "move zero-extend: read 8-bit byte from %s, zero-extend to 64-bit, store in %s" % (src, dst)
+            elif opcode == "movzwq":
+                return "move zero-extend: read 16-bit word from %s, zero-extend to 64-bit, store in %s" % (src, dst)
+            elif opcode == "movsbl":
+                return "move sign-extend: read 8-bit byte from %s, sign-extend to 32-bit, store in %s" % (src, dst)
+            elif opcode == "movswl":
+                return "move sign-extend: read 16-bit word from %s, sign-extend to 32-bit, store in %s" % (src, dst)
+            elif opcode == "movsbq":
+                return "move sign-extend: read 8-bit byte from %s, sign-extend to 64-bit, store in %s" % (src, dst)
+            elif opcode == "movswq":
+                return "move sign-extend: read 16-bit word from %s, sign-extend to 64-bit, store in %s" % (src, dst)
+            elif opcode == "movslq" or opcode == "movsx":
+                return "move sign-extend: read 32-bit long from %s, sign-extend to 64-bit, store in %s" % (src, dst)
+            elif opcode == "movq":
+                return "move 64-bit quadword from %s to %s" % (src, dst)
+            elif opcode == "movl":
+                return "move 32-bit long from %s to %s" % (src, dst)
+            elif opcode == "movw":
+                return "move 16-bit word from %s to %s" % (src, dst)
+            elif opcode == "movb":
+                return "move 8-bit byte from %s to %s" % (src, dst)
+            else:
+                # Generic mov
+                return "move value from %s to %s" % (src, dst)
         if opcode == "lea" and len(ops) == 2:
             return "compute address %s into %s (no memory read)" % (ops[0], ops[1])
         if opcode in ("push", "pushq") and len(ops) == 1:
