@@ -1267,6 +1267,17 @@ def show_tasks_memusage(options):
     crashcolor.set_color(crashcolor.BLUE)
     print("Total memory usage from user-space = %s" %
           (get_size_str(total_rss * 1024)))
+
+    # Show total usage percentage with bar graph
+    if system_total_mem_kb > 0:
+        total_percentage = (total_rss * 100.0 / system_total_mem_kb)
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_kb * 1024)))
+        if options.graph:
+            bar = get_memory_bar(total_percentage, width=40)
+            print("\t       %s" % bar)
+            crashcolor.set_color(crashcolor.RESET)
+
     crashcolor.set_color(crashcolor.RESET)
 
 
@@ -1400,6 +1411,22 @@ def show_slabtop(options):
     if print_count < len(sorted_slabtop) - 1:
         print("\t<...>")
     print("=" * separator_width)
+
+    # Show total slab usage
+    crashcolor.set_color(crashcolor.BLUE)
+    print("Total slab memory usage = %s" % get_size_str(total_slab * 1024))
+
+    # Show total usage percentage with bar graph
+    if system_total_mem_kb > 0:
+        total_percentage = (total_slab * 100.0 / system_total_mem_kb)
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_kb * 1024)))
+        if options.graph:
+            bar = get_memory_bar(total_percentage, width=40)
+            print("\t       %s" % bar)
+            crashcolor.set_color(crashcolor.RESET)
+
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def show_full_slab(options, kmem_cache, addr, slab_addr, offset):
@@ -3853,6 +3880,10 @@ def show_oom_meminfo(op, meminfo_dict):
 
 
 def show_oom_memory_usage(op, oom_dict, total_usage):
+    # Get system's total memory for percentage calculation
+    system_meminfo = get_meminfo_dict()
+    system_total_mem_kb = system_meminfo.get('MemTotal', 0)
+
     sorted_oom_dict = sorted(oom_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
     min_number = getattr(op, 'oom_top', 10)
@@ -3914,7 +3945,8 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
         mem_usage = sorted_oom_dict[i][1]
 
         if show_graph:
-            percentage = (mem_usage * 100.0 / total_usage) if total_usage > 0 else 0
+            # Calculate percentage based on system's total memory
+            percentage = (mem_usage * 100.0 / (system_total_mem_kb * 1024)) if system_total_mem_kb > 0 else 0
             bar = get_memory_bar(percentage, width=20)
             format_str = "%-" + str(pname_width) + "s %s %15s"
             print(format_str % (pname, bar, get_size_str(mem_usage, True)))
@@ -3927,6 +3959,13 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
         print("\t<...>")
     print("=" * separator_width)
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
+    # Show total usage bar graph
+    if show_graph and system_total_mem_kb > 0:
+        total_percentage = (total_usage * 100.0 / (system_total_mem_kb * 1024))
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_kb * 1024, True)))
+        bar = get_memory_bar(total_percentage, width=40)
+        print("\t       %s" % bar)
     crashcolor.set_color(crashcolor.RESET)
 
 
