@@ -4266,6 +4266,205 @@ def show_oom_events(op):
         pass
 
 
+def show_overall_memory(options):
+    """
+    Show overall memory usage breakdown with bar graphs combining kmem -i and meminfo data
+    """
+    crashcolor.set_color(crashcolor.BLUE)
+    print("\n" + "=" * 80)
+    print("OVERALL MEMORY USAGE BREAKDOWN")
+    print("=" * 80)
+    crashcolor.set_color(crashcolor.RESET)
+
+    # Parse kmem -i output
+    kmem_output = exec_crash_command("kmem -i")
+
+    # Storage for memory categories
+    mem_categories = {}
+    total_mem_kb = 0
+    total_huge_kb = 0
+
+    lines = kmem_output.splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # Parse memory values
+        words = line.split()
+        if len(words) < 3:
+            continue
+
+        # Extract TOTAL MEM line
+        if "TOTAL MEM" in line:
+            # Format: TOTAL MEM  4027459      15.4 GB         ----
+            try:
+                pages = int(words[2])
+                total_mem_kb = pages * page_size / 1024
+            except:
+                pass
+
+        # Extract memory categories
+        elif "FREE" in line and "HUGE" not in line and "SWAP" not in line:
+            try:
+                pages = int(words[1])
+                mem_categories['Free'] = pages * page_size / 1024
+            except:
+                pass
+
+        elif "BUFFERS" in line:
+            try:
+                pages = int(words[1])
+                mem_categories['Buffers'] = pages * page_size / 1024
+            except:
+                pass
+
+        elif "CACHED" in line and "SWAP" not in line:
+            try:
+                pages = int(words[1])
+                mem_categories['Cached'] = pages * page_size / 1024
+            except:
+                pass
+
+        elif "SLAB" in line:
+            try:
+                pages = int(words[1])
+                mem_categories['Slab'] = pages * page_size / 1024
+            except:
+                pass
+
+        elif "TOTAL HUGE" in line:
+            try:
+                pages = int(words[2])
+                total_huge_kb = pages * page_size / 1024
+            except:
+                pass
+
+        elif "HUGE FREE" in line:
+            try:
+                pages = int(words[2])
+                huge_free_kb = pages * page_size / 1024
+                # Huge pages used = Total huge - Free huge
+                mem_categories['HugePages'] = total_huge_kb - huge_free_kb
+            except:
+                pass
+
+    # Get user-space memory usage
+    # Run through all tasks and calculate RSS
+    user_space_kb = 0
+    try:
+        task_list = readSUListFromHead(sym2addr('init_task'), 'tasks',
+                                       'struct task_struct', maxel=999999999)
+
+        for task in task_list:
+            try:
+                if task.mm == 0:  # kernel thread
+                    continue
+
+                mm = readSU("struct mm_struct", task.mm)
+                if mm.rss_stat:
+                    # Modern kernel with rss_stat
+                    for idx in range(4):  # NR_MM_COUNTERS = 4
+                        try:
+                            count = mm.rss_stat.count[idx].counter
+                            user_space_kb += count * page_size / 1024
+                        except:
+                            pass
+                elif hasattr(mm, '_file_rss'):
+                    # Old kernel
+                    file_rss = mm._file_rss.counter if hasattr(mm._file_rss, 'counter') else mm._file_rss
+                    anon_rss = mm._anon_rss.counter if hasattr(mm._anon_rss, 'counter') else mm._anon_rss
+                    user_space_kb += (file_rss + anon_rss) * page_size / 1024
+            except:
+                continue
+
+    except Exception as e:
+        # Fallback: parse ps output
+        try:
+            ps_output = exec_crash_command("ps -G")
+            for line in ps_output.splitlines():
+                words = line.split()
+                if len(words) > 8 and words[0].isdigit():
+                    try:
+                        rss_kb = int(words[7])
+                        user_space_kb += rss_kb
+                    except:
+                        pass
+        except:
+            pass
+
+    # Store user-space in categories
+    if user_space_kb > 0:
+        mem_categories['User-Space'] = user_space_kb
+
+    # Calculate kernel space (everything else)
+    accounted_kb = sum(mem_categories.values())
+    kernel_other_kb = total_mem_kb - accounted_kb
+
+    if kernel_other_kb > 0:
+        mem_categories['Kernel-Other'] = kernel_other_kb
+
+    # Sort categories by size (descending)
+    sorted_categories = sorted(mem_categories.items(), key=lambda x: x[1], reverse=True)
+
+    # Display header
+    print("\nTotal System Memory: %s\n" % get_size_str(total_mem_kb * 1024))
+
+    # Column headers
+    header_format = "%-20s %15s %10s  %s"
+    print(header_format % ("Category", "Size", "Percent", "Usage Bar"))
+    print("-" * 80)
+
+    # Display each category with bar graph
+    for category, size_kb in sorted_categories:
+        percentage = (size_kb * 100.0 / total_mem_kb) if total_mem_kb > 0 else 0
+        size_str = get_size_str(size_kb * 1024)
+        bar = get_memory_bar(percentage, TOTAL_BAR_WIDTH)
+
+        # Color coding
+        if category == 'User-Space':
+            crashcolor.set_color(crashcolor.BLUE | crashcolor.HIGHLIGHT)
+        elif category == 'Slab':
+            crashcolor.set_color(crashcolor.GREEN)
+        elif category == 'HugePages':
+            crashcolor.set_color(crashcolor.YELLOW)
+        elif category == 'Free':
+            crashcolor.set_color(crashcolor.RESET)
+        else:
+            crashcolor.set_color(crashcolor.CYAN)
+
+        print("%-20s %15s %9.2f%%  %s" % (category, size_str, percentage, bar))
+        crashcolor.set_color(crashcolor.RESET)
+
+    print("-" * 80)
+
+    # Summary
+    print("\nMemory Accounting:")
+    print("  Total Accounted: %s (%.2f%%)" %
+          (get_size_str(accounted_kb * 1024),
+           (accounted_kb * 100.0 / total_mem_kb) if total_mem_kb > 0 else 0))
+
+    # Additional details
+    crashcolor.set_color(crashcolor.BLUE)
+    print("\nKey Categories:")
+    crashcolor.set_color(crashcolor.RESET)
+
+    category_descriptions = {
+        'User-Space': 'Application/process memory (RSS from all tasks)',
+        'Slab': 'Kernel slab allocator cache',
+        'HugePages': 'Huge pages in use',
+        'Cached': 'Page cache (file-backed pages)',
+        'Buffers': 'Buffer cache',
+        'Free': 'Available free memory',
+        'Kernel-Other': 'Kernel memory (page tables, stacks, vmalloc, etc.)'
+    }
+
+    for category, size_kb in sorted_categories:
+        if category in category_descriptions:
+            print("  %-15s : %s" % (category, category_descriptions[category]))
+
+    crashcolor.set_color(crashcolor.RESET)
+    print("\n" + "=" * 80)
 
 
 def meminfo():
@@ -4332,6 +4531,9 @@ def meminfo():
     op.add_option("-O", "--OOM", dest="OOM", default=0,
                   action="store_true",
                   help="Analyse OOM messages in log")
+    op.add_option("--overall", dest="overall", default=0,
+                  action="store_true",
+                  help="Show overall memory usage breakdown with bar graphs")
     op.add_option("--oom-summary", dest="oom_summary", default=0,
                   action="store_true",
                   help="Show OOM summary dashboard with pattern analysis")
@@ -4416,6 +4618,9 @@ def meminfo():
         print(get_meminfo())
         sys.exit(0)
 
+    if (o.overall):
+        show_overall_memory(o)
+        sys.exit(0)
 
     if (o.percpu):
         show_percpu(o)
