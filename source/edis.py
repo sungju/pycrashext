@@ -62,6 +62,983 @@ INSTRUCTION_SIZES = {
     },
 }
 
+
+# ============================================================================
+# Stack Handler Base Class Architecture
+# ============================================================================
+
+class StackHandler(object):
+    """
+    Abstract base class for architecture-specific stack analysis handlers.
+
+    This class defines the standard interface that all architecture handlers
+    must implement. It provides common utilities and ensures consistent
+    behavior across different architectures.
+
+    To add a new architecture:
+    1. Create a subclass (e.g., MipsStackHandler)
+    2. Implement handle_instruction() method
+    3. Register in get_stack_handler() factory function
+    4. Add instruction size mappings to INSTRUCTION_SIZES if needed
+
+    Example:
+        class MyArchHandler(StackHandler):
+            def handle_instruction(self, words, result_str):
+                opcode = words[2] if len(words) > 2 else ""
+                if opcode == "addi":
+                    return self._handle_sp_adjust(words, result_str)
+                return result_str
+    """
+
+    def __init__(self, arch_name):
+        """
+        Initialize handler for specific architecture.
+
+        Args:
+            arch_name: Architecture identifier (e.g., "riscv", "x86_64")
+        """
+        self.arch_name = arch_name
+        self.arch_family = get_arch_family(arch_name)
+
+    def handle_instruction(self, words, result_str):
+        """
+        Process a single disassembled instruction for stack operations.
+
+        This is the main entry point called by the analysis engine.
+        Subclasses must override this method to implement architecture-
+        specific instruction handling.
+
+        Args:
+            words: List of instruction tokens [address, ":", opcode, operands]
+                   Example: ["0xffffffff81234567", ":", "mov", "%rsp,%rbp"]
+            result_str: Current analysis result string (may have annotations)
+
+        Returns:
+            str: Updated result_str with stack annotations appended
+        """
+        raise NotImplementedError("Subclasses must implement handle_instruction()")
+
+    # ========================================================================
+    # Common utility methods - available to all subclasses
+    # ========================================================================
+
+    def has_stack_pointer(self):
+        """Check if stack pointer is initialized in register tracking."""
+        return REG_STACK_POINTER in register_dict
+
+    def has_frame_pointer(self):
+        """Check if frame pointer is initialized in register tracking."""
+        return REG_FRAME_POINTER in register_dict
+
+    def get_sp_addresses(self):
+        """Get current stack pointer address list."""
+        return register_dict.get(REG_STACK_POINTER, [])
+
+    def get_fp_addresses(self):
+        """Get current frame pointer address list."""
+        return register_dict.get(REG_FRAME_POINTER, [])
+
+    def update_sp(self, offset, debug_msg=None):
+        """
+        Update stack pointer by applying offset to all tracked addresses.
+
+        Args:
+            offset: Integer offset to add to each stack address
+            debug_msg: Optional debug message to log
+
+        Returns:
+            list: Updated stack address list
+        """
+        return update_register_tracking(REG_STACK_POINTER, offset, debug_msg)
+
+    def update_fp(self, offset, debug_msg=None):
+        """Update frame pointer by applying offset."""
+        return update_register_tracking(REG_FRAME_POINTER, offset, debug_msg)
+
+    def set_sp(self, address_list):
+        """Set stack pointer to specific address list."""
+        register_dict[REG_STACK_POINTER] = address_list
+
+    def set_fp(self, address_list):
+        """Set frame pointer to specific address list."""
+        register_dict[REG_FRAME_POINTER] = address_list
+
+    def copy_sp_to_fp(self):
+        """Copy stack pointer addresses to frame pointer (frame setup)."""
+        if self.has_stack_pointer():
+            register_dict[REG_FRAME_POINTER] = list(register_dict[REG_STACK_POINTER])
+
+    def copy_fp_to_sp(self):
+        """Copy frame pointer addresses to stack pointer (frame teardown)."""
+        if self.has_frame_pointer():
+            register_dict[REG_STACK_POINTER] = list(register_dict[REG_FRAME_POINTER])
+
+    def format_sp_data(self, offset, data_size, prefix="    ; "):
+        """
+        Format stack data at SP + offset.
+
+        Args:
+            offset: Byte offset from stack pointer
+            data_size: Size of data to read (1, 2, 4, or 8 bytes)
+            prefix: String prefix for output
+
+        Returns:
+            str: Formatted stack data string or empty string if no SP
+        """
+        if not self.has_stack_pointer():
+            return ""
+        return format_stack_data(self.get_sp_addresses(), offset, data_size, prefix)
+
+    def format_fp_data(self, offset, data_size, prefix="    ; "):
+        """Format stack data at FP + offset."""
+        if not self.has_frame_pointer():
+            return ""
+        return format_stack_data(self.get_fp_addresses(), offset, data_size, prefix)
+
+    def get_instruction_size(self, opcode, default_size=None):
+        """
+        Get data size for an instruction opcode.
+
+        Args:
+            opcode: Instruction opcode (e.g., "sd", "lw")
+            default_size: Default size if opcode not found
+
+        Returns:
+            int: Data size in bytes, or default_size if not found
+        """
+        return get_instruction_data_size(opcode, self.arch_name, default_size)
+
+    def add_debug(self, msg):
+        """Add debug message if debugging enabled."""
+        if stack_debug_enabled:
+            add_stack_debug(msg)
+
+
+# ============================================================================
+# Concrete Handler Implementations
+# ============================================================================
+
+class RiscVStackHandler(StackHandler):
+    """
+    RISC-V architecture stack handler.
+
+    Handles RISC-V stack operations including:
+    - Stack pointer adjustments: addi sp, sp, -32
+    - Frame pointer setup: mv s0, sp
+    - Store operations: sd/sw/sh/sb reg, offset(sp)
+    - Load operations: ld/lw/lh/lb reg, offset(sp)
+    - Frame-based access: ld reg, offset(s0)
+
+    Register naming conventions:
+    - sp: Stack pointer
+    - s0/fp/x8: Frame pointer (all aliases for same register)
+    - ra: Return address
+    """
+
+    def __init__(self):
+        super(RiscVStackHandler, self).__init__("riscv")
+
+        # RISC-V specific register patterns
+        self.sp_patterns = ("sp",)
+        self.fp_patterns = ("s0", "fp", "x8")
+
+    def handle_instruction(self, words, result_str):
+        """Process RISC-V instruction for stack operations."""
+
+        if not self.has_stack_pointer():
+            return result_str
+
+        if len(words) < 3:
+            return result_str
+
+        opcode = words[2]
+        operands = words[3] if len(words) > 3 else ""
+
+        # Dispatch to specific handlers based on opcode
+        if opcode == "addi":
+            return self._handle_sp_adjust(words, operands, result_str)
+        elif opcode == "mv":
+            return self._handle_move(words, operands, result_str)
+        elif opcode in ("sd", "sw", "sh", "sb"):
+            return self._handle_store(words, opcode, operands, result_str)
+        elif opcode in ("ld", "lw", "lh", "lhu", "lb", "lbu"):
+            return self._handle_load(words, opcode, operands, result_str)
+        else:
+            # Check for frame pointer based operations
+            return self._handle_frame_access(words, operands, result_str)
+
+    def _handle_sp_adjust(self, words, operands, result_str):
+        """Handle stack pointer adjustment: addi sp, sp, -32"""
+        if not operands.startswith("sp,sp,"):
+            return result_str
+
+        # Extract offset: sp,sp,-32 -> -32
+        offset_str = operands.split(",")[-1]
+        offset = parse_offset(offset_str)
+
+        self.update_sp(offset, "sp update: sp += %d => %s" %
+                       (offset, ",".join(["0x%x" % a for a in self.get_sp_addresses()])))
+
+        return result_str
+
+    def _handle_move(self, words, operands, result_str):
+        """Handle register moves: mv s0, sp"""
+        if operands in ("s0,sp", "fp,sp"):
+            # Frame pointer setup - copy SP to FP
+            self.copy_sp_to_fp()
+            self.add_debug("FP setup: s0 = sp")
+
+        return result_str
+
+    def _handle_store(self, words, opcode, operands, result_str):
+        """Handle store operations: sd ra, 24(sp)"""
+        if "(sp)" not in operands:
+            return result_str
+
+        # Extract offset from format: reg, 24(sp)
+        offset, found = extract_mem_offset(operands, "sp")
+        if not found:
+            return result_str
+
+        # Get data size from opcode
+        data_size = self.get_instruction_size(opcode)
+        if data_size is None:
+            return result_str
+
+        return result_str + self.format_sp_data(offset, data_size)
+
+    def _handle_load(self, words, opcode, operands, result_str):
+        """Handle load operations: ld ra, 24(sp)"""
+        if "(sp)" not in operands:
+            return result_str
+
+        # Extract offset from format: reg, 24(sp)
+        offset, found = extract_mem_offset(operands, "sp")
+        if not found:
+            return result_str
+
+        # Get data size from opcode
+        data_size = self.get_instruction_size(opcode)
+        if data_size is None:
+            return result_str
+
+        return result_str + self.format_sp_data(offset, data_size)
+
+    def _handle_frame_access(self, words, operands, result_str):
+        """Handle frame pointer based access: ld a0, 16(s0)"""
+        if not self.has_frame_pointer():
+            return result_str
+
+        # Check for any frame pointer pattern
+        for fp_reg in self.fp_patterns:
+            pattern = "(%s)" % fp_reg
+            if pattern in operands:
+                offset, found = extract_mem_offset(operands, fp_reg)
+                if found:
+                    # Use stack_unit as data size for frame access
+                    return result_str + self.format_fp_data(offset, stack_unit)
+
+        return result_str
+
+
+class X86StackHandler(StackHandler):
+    """
+    x86/x86_64 architecture stack handler.
+
+    Handles x86 stack operations including:
+    - Frame pointer setup: mov %rsp,%rbp
+    - Stack allocation: sub $N,%rsp
+    - Stack cleanup: add $N,%rsp
+    - Push/pop operations: push/pop %reg
+    - Enter/leave instructions
+    - Memory access: mov offset(%rsp), mov offset(%rbp)
+
+    Register naming conventions:
+    - %rsp: Stack pointer
+    - %rbp: Frame pointer (base pointer)
+    """
+
+    def __init__(self):
+        super(X86StackHandler, self).__init__("x86")
+
+        # x86 specific register patterns
+        self.sp_patterns = ("%rsp", "%esp")
+        self.fp_patterns = ("%rbp", "%ebp")
+
+    def handle_instruction(self, words, result_str):
+        """Process x86 instruction for stack operations."""
+
+        if not self.has_stack_pointer():
+            return result_str
+
+        if len(words) < 3:
+            return result_str
+
+        opcode = words[2]
+        operands = words[3] if len(words) > 3 else ""
+
+        # Dispatch to specific handlers
+        handlers = [
+            lambda: self._handle_frame_setup(words, result_str),
+            lambda: self._handle_stack_alloc(words, result_str),
+            lambda: self._handle_stack_cleanup(words, result_str),
+            lambda: self._handle_pop(words, result_str),
+            lambda: self._handle_enter(words, result_str),
+            lambda: self._handle_leave(words, result_str),
+            lambda: self._handle_frame_access(words, result_str),
+            lambda: self._handle_sp_access(words, result_str),
+        ]
+
+        for handler in handlers:
+            result_str, handled = handler()
+            if handled:
+                return result_str
+
+        return result_str
+
+    def _handle_frame_setup(self, words, result_str):
+        """Handle x86 frame pointer setup: mov %rsp,%rbp"""
+        if words[2] == "mov" and words[3] == "%rsp,%rbp":
+            self.copy_sp_to_fp()
+            self.add_debug("FP setup: rbp = rsp")
+            return result_str, True
+        return result_str, False
+
+    def _handle_stack_alloc(self, words, result_str):
+        """Handle stack allocation: sub $128,%rsp"""
+        if words[2] == "sub" and len(words) >= 4:
+            parts = words[3].split(",")
+            if len(parts) == 2 and parts[1] in ("%rsp", "%esp"):
+                offset_str = parts[0]
+                offset = -parse_offset(offset_str)  # sub means negative
+                self.update_sp(offset, "Stack alloc: rsp -= %d" % abs(offset))
+                return result_str, True
+        return result_str, False
+
+    def _handle_stack_cleanup(self, words, result_str):
+        """Handle stack cleanup: add $128,%rsp"""
+        if words[2] == "add" and len(words) >= 4:
+            parts = words[3].split(",")
+            if len(parts) == 2 and parts[1] in ("%rsp", "%esp"):
+                offset_str = parts[0]
+                offset = parse_offset(offset_str)  # add means positive
+                self.update_sp(offset, "Stack cleanup: rsp += %d" % offset)
+                return result_str, True
+        return result_str, False
+
+    def _handle_pop(self, words, result_str):
+        """Handle pop instruction: pop %rbx"""
+        if words[2] == "pop":
+            result_str = result_str + self.format_sp_data(0, stack_unit)
+            self.update_sp(stack_unit, "Pop: rsp += %d" % stack_unit)
+            return result_str, True
+        return result_str, False
+
+    def _handle_enter(self, words, result_str):
+        """Handle enter instruction: enter $0x20,$0x0"""
+        if words[2] == "enter" and len(words) >= 4:
+            parts = words[3].split(",")
+            if len(parts) >= 1:
+                alloc_str = parts[0]
+                alloc_size = parse_offset(alloc_str)
+
+                # enter pushes rbp and allocates space
+                # Simulated as: push rbp; mov rsp, rbp; sub alloc_size, rsp
+                self.update_sp(-stack_unit)  # push rbp
+                self.copy_sp_to_fp()          # mov rsp, rbp
+                self.update_sp(-alloc_size)   # sub alloc_size, rsp
+
+                self.add_debug("Enter: alloc %d bytes" % alloc_size)
+                return result_str, True
+        return result_str, False
+
+    def _handle_leave(self, words, result_str):
+        """Handle leave instruction: leave"""
+        if words[2] == "leave":
+            # leave = mov rbp, rsp; pop rbp
+            self.copy_fp_to_sp()
+            self.update_sp(stack_unit)
+            self.add_debug("Leave: restore frame")
+            return result_str, True
+        return result_str, False
+
+    def _handle_frame_access(self, words, result_str):
+        """Handle frame pointer access: mov -0x10(%rbp),%rax"""
+        if len(words) >= 4 and ("(%rbp)" in words[3] or "(%ebp)" in words[3]):
+            parts = words[3].split(",")
+            for part in parts:
+                if "(%rbp)" in part or "(%ebp)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+                    result_str = result_str + self.format_fp_data(offset, stack_unit)
+                    return result_str, True
+        return result_str, False
+
+    def _handle_sp_access(self, words, result_str):
+        """Handle stack pointer access: mov 0x8(%rsp),%rax"""
+        if len(words) >= 4 and ("(%rsp)" in words[3] or "(%esp)" in words[3]):
+            parts = words[3].split(",")
+            for part in parts:
+                if "(%rsp)" in part or "(%esp)" in part:
+                    offset_str = part.split("(")[0]
+                    offset = parse_offset(offset_str)
+                    result_str = result_str + self.format_sp_data(offset, stack_unit)
+                    return result_str, True
+        return result_str, False
+
+
+class ArmStackHandler(StackHandler):
+    """
+    ARM/AArch64 architecture stack handler.
+
+    Handles ARM stack operations including:
+    - Frame pointer setup: stp x29, x30, [sp,#-N]! or mov x29, sp
+    - Stack pointer adjustments: sub sp, sp, #N
+    - Pair operations: stp/ldp x29, x30, [sp,#N]
+    - Single operations: str/ldr xN, [sp,#N]
+    - Frame access: ldr x0, [x29,#N]
+
+    Register naming conventions:
+    - sp: Stack pointer
+    - x29/fp: Frame pointer
+    - x30/lr: Link register (return address)
+    """
+
+    def __init__(self):
+        super(ArmStackHandler, self).__init__("arm")
+
+        # ARM specific register patterns
+        self.sp_patterns = ("sp",)
+        self.fp_patterns = ("x29", "fp")
+
+    def handle_instruction(self, words, result_str):
+        """Process ARM instruction for stack operations."""
+
+        if not self.has_stack_pointer():
+            return result_str
+
+        if len(words) < 3:
+            return result_str
+
+        opcode = words[2]
+        operands = "".join(words[3:]) if len(words) > 3 else ""
+
+        # Dispatch to specific handlers
+        handlers = [
+            lambda: self._handle_frame_pointer_setup(words, result_str),
+            lambda: self._handle_sp_from_fp(words, result_str),
+            lambda: self._handle_sp_adjustment(words, result_str),
+            lambda: self._handle_store_pair(words, result_str),
+            lambda: self._handle_load_pair(words, result_str),
+            lambda: self._handle_store_single(words, opcode, operands, result_str),
+            lambda: self._handle_load_single(words, opcode, operands, result_str),
+            lambda: self._handle_frame_access(words, result_str),
+        ]
+
+        for handler in handlers:
+            result_str, handled = handler()
+            if handled:
+                return result_str
+
+        return result_str
+
+    def _handle_frame_pointer_setup(self, words, result_str):
+        """Handle frame pointer setup: stp x29, x30, [sp,#-64]! or mov x29, sp"""
+        opcode = words[2]
+
+        # Method 1: stp x29, x30, [sp,#-N]! (push FP and LR, update SP)
+        if opcode == "stp" and len(words) >= 5:
+            if words[3].startswith("x29,") and words[4].startswith("x30,"):
+                operands = "".join(words[5:])
+                if "[sp" in operands and operands.endswith("]!"):
+                    # Pre-decrement store pair
+                    offset_match = extract_arm_mem_operand(operands)
+                    if offset_match and offset_match[0] == "sp":
+                        offset = offset_match[1]
+                        self.update_sp(offset)
+                        self.copy_sp_to_fp()
+                        result_str = result_str + self.format_sp_data(0, stack_unit)
+                        self.add_debug("FP setup: stp x29,x30 with sp update")
+                        return result_str, True
+
+        # Method 2: mov x29, sp (simple frame pointer setup)
+        elif opcode in ("mov", "add") and len(words) >= 4:
+            if words[3] == "x29,sp" or words[3].startswith("x29,sp,"):
+                self.copy_sp_to_fp()
+                self.add_debug("FP setup: x29 = sp")
+                return result_str, True
+
+        return result_str, False
+
+    def _handle_sp_from_fp(self, words, result_str):
+        """Handle SP restoration from FP: mov sp, x29"""
+        if words[2] in ("mov", "add") and len(words) >= 4:
+            if words[3] == "sp,x29" or words[3].startswith("sp,x29,"):
+                self.copy_fp_to_sp()
+                self.add_debug("SP restore: sp = x29")
+                return result_str, True
+        return result_str, False
+
+    def _handle_sp_adjustment(self, words, result_str):
+        """Handle stack pointer adjustment: sub sp, sp, #128 or add sp, sp, #128"""
+        opcode = words[2]
+
+        if opcode in ("sub", "add") and len(words) >= 4:
+            if words[3].startswith("sp,sp,"):
+                offset_str = words[3].split(",")[-1]
+                offset = parse_offset(offset_str)
+
+                # sub decreases SP (negative), add increases SP (positive)
+                if opcode == "sub":
+                    offset = -offset
+
+                self.update_sp(offset, "SP adjust: sp %s %d" % (
+                    "+=" if offset >= 0 else "-=", abs(offset)))
+                return result_str, True
+
+        return result_str, False
+
+    def _handle_store_pair(self, words, result_str):
+        """Handle store pair: stp x19, x20, [sp,#16]"""
+        if words[2] != "stp" or len(words) < 5:
+            return result_str, False
+
+        # Extract register names
+        reg1 = words[3].rstrip(",") if len(words) > 3 else None
+        reg2 = words[4].rstrip(",") if len(words) > 4 else None
+
+        # Look for [sp in remaining words
+        operands = "".join(words[5:])
+        if "[sp" not in operands:
+            return result_str, False
+
+        mem_data = extract_arm_mem_operand(operands)
+        if not mem_data or mem_data[0] != "sp":
+            return result_str, False
+
+        base_reg, offset, writeback_pre, post_index = mem_data
+
+        if writeback_pre:
+            # Pre-index: [sp,#-N]!
+            self.update_sp(offset)
+            access_offset = 0
+        else:
+            access_offset = offset
+
+        result_str = result_str + format_stack_data_pair(
+            self.get_sp_addresses(), access_offset, stack_unit, reg1=reg1, reg2=reg2)
+
+        if post_index:
+            # Post-index: [sp],#N
+            self.update_sp(offset)
+
+        return result_str, True
+
+    def _handle_load_pair(self, words, result_str):
+        """Handle load pair: ldp x19, x20, [sp,#16]"""
+        if words[2] != "ldp" or len(words) < 5:
+            return result_str, False
+
+        # Extract register names
+        reg1 = words[3].rstrip(",") if len(words) > 3 else None
+        reg2 = words[4].rstrip(",") if len(words) > 4 else None
+
+        # Look for [sp in remaining words
+        operands = "".join(words[5:])
+        if "[sp" not in operands:
+            return result_str, False
+
+        mem_data = extract_arm_mem_operand(operands)
+        if not mem_data or mem_data[0] != "sp":
+            return result_str, False
+
+        base_reg, offset, writeback_pre, post_index = mem_data
+
+        if writeback_pre:
+            self.update_sp(offset)
+            access_offset = 0
+        else:
+            access_offset = offset
+
+        result_str = result_str + format_stack_data_pair(
+            self.get_sp_addresses(), access_offset, stack_unit, reg1=reg1, reg2=reg2)
+
+        if post_index:
+            self.update_sp(offset)
+
+        return result_str, True
+
+    def _handle_store_single(self, words, opcode, operands, result_str):
+        """Handle single register store: str x19, [sp,#16]"""
+        if opcode not in ("str", "stur", "strb", "strh", "strw"):
+            return result_str, False
+
+        reg_name = words[3].rstrip(",") if len(words) > 3 else None
+
+        if "[sp" not in operands:
+            return result_str, False
+
+        mem_pos = operands.find("[sp")
+        mem_op = operands[mem_pos:]
+        mem_data = extract_arm_mem_operand(mem_op)
+
+        if not mem_data or mem_data[0] != "sp":
+            return result_str, False
+
+        base_reg, offset, writeback_pre, post_index = mem_data
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode, stack_unit)
+
+        if writeback_pre:
+            self.update_sp(offset)
+            access_offset = 0
+        else:
+            access_offset = offset
+
+        result_str = result_str + format_stack_data(
+            self.get_sp_addresses(), access_offset, data_size, reg=reg_name)
+
+        if post_index:
+            self.update_sp(offset)
+
+        return result_str, True
+
+    def _handle_load_single(self, words, opcode, operands, result_str):
+        """Handle single register load: ldr x19, [sp,#16]"""
+        if opcode not in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
+            return result_str, False
+
+        reg_name = words[3].rstrip(",") if len(words) > 3 else None
+
+        if "[sp" not in operands:
+            return result_str, False
+
+        mem_pos = operands.find("[sp")
+        mem_op = operands[mem_pos:]
+        mem_data = extract_arm_mem_operand(mem_op)
+
+        if not mem_data or mem_data[0] != "sp":
+            return result_str, False
+
+        base_reg, offset, writeback_pre, post_index = mem_data
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode, stack_unit)
+
+        if writeback_pre:
+            self.update_sp(offset)
+            access_offset = 0
+        else:
+            access_offset = offset
+
+        result_str = result_str + format_stack_data(
+            self.get_sp_addresses(), access_offset, data_size, reg=reg_name)
+
+        if post_index:
+            self.update_sp(offset)
+
+        return result_str, True
+
+    def _handle_frame_access(self, words, result_str):
+        """Handle frame pointer access: ldr x0, [x29,#16]"""
+        if len(words) < 4:
+            return result_str, False
+
+        operands = "".join(words[3:])
+
+        # Check for x29 or fp addressing
+        if "[x29" in operands or "[fp" in operands:
+            fp_reg = "x29" if "[x29" in operands else "fp"
+            mem_pos = operands.find("[" + fp_reg)
+            mem_op = operands[mem_pos:]
+            mem_data = extract_arm_mem_operand(mem_op)
+
+            if mem_data and mem_data[0] in ("x29", "fp"):
+                offset = mem_data[1]
+                result_str = result_str + self.format_fp_data(offset, stack_unit)
+                return result_str, True
+
+        return result_str, False
+
+
+class PpcStackHandler(StackHandler):
+    """
+    PPC/PPC64 architecture stack handler.
+
+    Handles PowerPC stack operations including:
+    - Stack pointer adjustments: addi r1, r1, -128
+    - Store operations: std/stw/sth/stb rN, offset(r1)
+    - Load operations: ld/lwz/lhz/lbz rN, offset(r1)
+    - Store with update: stdu/stwu (updates r1)
+    - Multiple register operations: stmw/lmw
+
+    Register naming conventions:
+    - r1: Stack pointer
+    - r31: Frame pointer (by convention, not enforced)
+    """
+
+    def __init__(self):
+        super(PpcStackHandler, self).__init__("ppc")
+
+        # PPC specific register patterns
+        self.sp_patterns = ("r1",)
+        self.fp_patterns = ("r31",)
+
+    def handle_instruction(self, words, result_str):
+        """Process PPC instruction for stack operations."""
+
+        if not self.has_stack_pointer():
+            return result_str
+
+        if len(words) < 3:
+            return result_str
+
+        opcode = words[2]
+        operands = words[3] if len(words) > 3 else ""
+
+        # Dispatch to specific handlers
+        if opcode == "addi":
+            return self._handle_sp_adjust(words, operands, result_str)
+        elif opcode in ("std", "stw", "sth", "stb", "stdu", "stwu"):
+            return self._handle_store(words, opcode, operands, result_str)
+        elif opcode in ("ld", "lwz", "lwzu", "lhz", "lha", "lbz"):
+            return self._handle_load(words, opcode, operands, result_str)
+        elif opcode in ("stmw", "lmw"):
+            return self._handle_multiple(words, opcode, operands, result_str)
+
+        return result_str
+
+    def _handle_sp_adjust(self, words, operands, result_str):
+        """Handle stack pointer adjustment: addi r1, r1, -128"""
+        if not operands.startswith("r1,r1,"):
+            return result_str
+
+        offset_str = operands.split(",")[-1]
+        offset = parse_offset(offset_str)
+        self.update_sp(offset, "sp update: r1 += %d" % offset)
+        return result_str
+
+    def _handle_store(self, words, opcode, operands, result_str):
+        """Handle store operations: std r17, -120(r1)"""
+        if "(r1)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "r1")
+        if not found:
+            return result_str
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode, stack_unit)
+        if data_size is None:
+            data_size = stack_unit
+
+        result_str = result_str + self.format_sp_data(offset, data_size)
+
+        # Handle update instructions (stdu, stwu)
+        if opcode in ("stdu", "stwu"):
+            # These instructions update r1 to the effective address
+            op_words = operands.split(",")
+            if op_words[0] == "r1":
+                self.update_sp(offset, "sp update: %s updates r1 by %d" % (opcode, offset))
+
+        return result_str
+
+    def _handle_load(self, words, opcode, operands, result_str):
+        """Handle load operations: ld r17, -120(r1)"""
+        if "(r1)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "r1")
+        if not found:
+            return result_str
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode, stack_unit)
+        if data_size is None:
+            data_size = stack_unit
+
+        result_str = result_str + self.format_sp_data(offset, data_size)
+        return result_str
+
+    def _handle_multiple(self, words, opcode, operands, result_str):
+        """Handle multiple register operations: stmw r27, -20(r1)"""
+        if "(r1)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "r1")
+        if not found:
+            return result_str
+
+        # Multiple word operations (4 bytes each)
+        result_str = result_str + self.format_sp_data(offset, 4)
+        result_str = result_str + " ..."  # Indicate multiple registers
+        return result_str
+
+
+class S390xStackHandler(StackHandler):
+    """
+    s390x (IBM Z) architecture stack handler.
+
+    Handles s390x stack operations including:
+    - Stack pointer adjustments: aghi r15, -160 or lay r15, -160(r15)
+    - Store operations: stg/st rN, offset(r15)
+    - Load operations: lg/l rN, offset(r15)
+    - Multiple register operations: stmg/lmg
+    - Frame pointer operations: using r11 or r13
+
+    Register naming conventions:
+    - r15: Stack pointer
+    - r11/r13: Frame pointer (by convention)
+    """
+
+    def __init__(self):
+        super(S390xStackHandler, self).__init__("s390x")
+
+        # s390x specific register patterns
+        self.sp_patterns = ("r15",)
+        self.fp_patterns = ("r11", "r13")
+
+    def handle_instruction(self, words, result_str):
+        """Process s390x instruction for stack operations."""
+
+        if not self.has_stack_pointer():
+            return result_str
+
+        if len(words) < 3:
+            return result_str
+
+        opcode = words[2]
+        operands = words[3] if len(words) > 3 else ""
+
+        # Dispatch to specific handlers
+        if opcode in ("aghi", "lay"):
+            return self._handle_sp_adjust(words, opcode, operands, result_str)
+        elif opcode in ("stg", "stmg", "st", "sty"):
+            return self._handle_store(words, opcode, operands, result_str)
+        elif opcode in ("lg", "lmg", "l", "ly"):
+            return self._handle_load(words, opcode, operands, result_str)
+        else:
+            # Check for frame pointer operations
+            return self._handle_frame_access(words, operands, result_str)
+
+    def _handle_sp_adjust(self, words, opcode, operands, result_str):
+        """Handle stack pointer adjustment: aghi r15, -160 or lay r15, -160(r15)"""
+        if opcode == "aghi" and operands.startswith("r15,"):
+            offset_str = operands.split(",")[-1]
+            offset = parse_offset(offset_str)
+            self.update_sp(offset, "sp update: r15 += %d" % offset)
+            return result_str
+
+        elif opcode == "lay" and operands.startswith("r15,") and "(r15)" in operands:
+            # lay r15, -160(r15)
+            offset_str = operands.split(",")[1].split("(")[0]
+            offset = parse_offset(offset_str)
+            self.update_sp(offset, "sp update: lay r15,%d(r15)" % offset)
+            return result_str
+
+        return result_str
+
+    def _handle_store(self, words, opcode, operands, result_str):
+        """Handle store operations: stg r14, 112(r15)"""
+        if "(r15)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "r15")
+        if not found:
+            return result_str
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode)
+        if data_size is None:
+            data_size = stack_unit
+
+        result_str = result_str + self.format_sp_data(offset, data_size)
+
+        if opcode == "stmg":
+            result_str = result_str + " ..."  # Multiple registers
+
+        return result_str
+
+    def _handle_load(self, words, opcode, operands, result_str):
+        """Handle load operations: lg r14, 112(r15)"""
+        if "(r15)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "r15")
+        if not found:
+            return result_str
+
+        # Determine data size
+        data_size = self.get_instruction_size(opcode)
+        if data_size is None:
+            data_size = stack_unit
+
+        result_str = result_str + self.format_sp_data(offset, data_size)
+
+        if opcode == "lmg":
+            result_str = result_str + " ..."  # Multiple registers
+
+        return result_str
+
+    def _handle_frame_access(self, words, operands, result_str):
+        """Handle frame pointer operations with r11 or r13"""
+        if "(r11)" in operands or "(r13)" in operands:
+            reg_name = "r11" if "(r11)" in operands else "r13"
+            offset, found = extract_mem_offset(operands, reg_name)
+
+            if found and self.has_frame_pointer():
+                result_str = result_str + self.format_fp_data(offset, stack_unit)
+
+        return result_str
+
+
+# ============================================================================
+# Handler Factory
+# ============================================================================
+
+def get_stack_handler(arch):
+    """
+    Factory function to get appropriate stack handler for architecture.
+
+    All supported architectures now use the StackHandler class architecture
+    for consistent, reusable, and extensible stack analysis.
+
+    Args:
+        arch: Architecture string from sys_info.machine
+
+    Returns:
+        StackHandler: Appropriate handler instance, or None if unsupported
+
+    Example:
+        handler = get_stack_handler("x86_64")
+        if handler:
+            result = handler.handle_instruction(words, result_str)
+    """
+    # x86 family
+    if arch in ("x86_64", "i386", "i686", "athlon"):
+        return X86StackHandler()
+
+    # ARM family
+    elif arch.startswith("arm") or arch in ("aarch64",):
+        return ArmStackHandler()
+
+    # PowerPC family
+    elif arch.startswith("ppc"):
+        return PpcStackHandler()
+
+    # s390x (IBM Z)
+    elif arch.startswith("s390") or arch in ("s390x",):
+        return S390xStackHandler()
+
+    # RISC-V family
+    elif arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
+        return RiscVStackHandler()
+
+    # Unsupported architecture
+    return None
+
+
 jump_op_set = []
 exclude_set = []
 
@@ -669,7 +1646,14 @@ def interpret_one_line(one_line):
 
 
 def s390x_stack_reg_op(words, result_str):
-    """Enhanced s390x (IBM Z) stack register operations handler"""
+    """
+    DEPRECATED: Legacy s390x stack register operations handler.
+
+    This function has been replaced by S390xStackHandler class.
+    Kept for reference during migration period.
+
+    See S390xStackHandler for the new implementation.
+    """
 
     # Ensure we have stack pointer initialized
     if "%rsp" not in register_dict:
@@ -766,7 +1750,14 @@ def s390x_stack_reg_op(words, result_str):
 
 
 def riscv_stack_reg_op(words, result_str):
-    """Enhanced RISC-V stack register operations handler"""
+    """
+    DEPRECATED: Legacy RISC-V stack register operations handler.
+
+    This function has been replaced by RiscVStackHandler class.
+    Kept for reference during migration period.
+
+    See RiscVStackHandler for the new implementation.
+    """
 
     # Ensure we have stack pointer initialized
     if "%rsp" not in register_dict:
@@ -866,23 +1857,47 @@ def riscv_stack_reg_op(words, result_str):
 
 
 def stack_reg_op(words, result_str):
-    arch = sys_info.machine
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
-        result_str = x86_stack_reg_op(words, result_str)
-    elif (arch.startswith("arm") or (arch in ("aarch64"))):
-        result_str = arm_stack_reg_op(words, result_str)
-    elif (arch.startswith("ppc")):
-        result_str = ppc_stack_reg_op(words, result_str)
-    elif (arch.startswith("s390") or arch in ("s390x")):
-        result_str = s390x_stack_reg_op(words, result_str)
-    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
-        result_str = riscv_stack_reg_op(words, result_str)
+    """
+    Main dispatcher for architecture-specific stack analysis.
 
+    Routes instructions to the appropriate StackHandler based on system
+    architecture. All supported architectures now use the unified handler
+    architecture for consistency and maintainability.
+
+    Supported architectures:
+    - x86/x86_64: X86StackHandler
+    - ARM/AArch64: ArmStackHandler
+    - PPC/PPC64: PpcStackHandler
+    - s390x: S390xStackHandler
+    - RISC-V: RiscVStackHandler
+
+    Args:
+        words: List of instruction tokens [address, ":", opcode, operands]
+        result_str: Current analysis result string
+
+    Returns:
+        str: Updated result_str with stack annotations appended
+    """
+    arch = sys_info.machine
+
+    # Get appropriate handler for this architecture
+    handler = get_stack_handler(arch)
+    if handler:
+        return handler.handle_instruction(words, result_str)
+
+    # No handler available for this architecture
     return result_str
 
 
 def ppc_stack_reg_op(words, result_str):
-    """Enhanced PPC/PPC64 stack register operations handler"""
+    """
+    DEPRECATED: Legacy PPC/PPC64 stack register operations handler.
+
+    This function has been replaced by PpcStackHandler class.
+    Kept for reference during migration period.
+
+    See PpcStackHandler for the new implementation.
+    """
 
     # Ensure we have stack pointer initialized
     if "%rsp" not in register_dict:
@@ -1535,9 +2550,12 @@ def _arm_handle_frame_access(words, result_str):
 
 def arm_stack_reg_op(words, result_str):
     """
-    Enhanced ARM/AArch64 stack register operations handler.
+    DEPRECATED: Legacy ARM/AArch64 stack register operations handler.
 
-    Dispatches to specialized handlers for different instruction types.
+    This function has been replaced by ArmStackHandler class.
+    Kept for reference during migration period.
+
+    See ArmStackHandler for the new implementation.
     """
     # Ensure we have stack pointer initialized
     if REG_STACK_POINTER not in register_dict:
@@ -1579,251 +2597,8 @@ Benefits:
 """
 
 
-def x86_stack_reg_op(words, result_str):
-
-    # Handle store pair: stp x29, x30, [sp,#-64]!
-    elif words[2] == "stp" and len(words) >= 5:
-        # Extract register names (e.g., x29, x30)
-        reg1 = words[3].rstrip(",") if len(words) > 3 else None
-        reg2 = words[4].rstrip(",") if len(words) > 4 else None
-
-        # Check if [sp is in the instruction (could be words[len-2] or words[len-1])
-        found_sp = False
-        stack_word = ""
-
-        # Format 1: stp x29, x30, [sp, #64] -> second-to-last word is [sp,
-        if len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
-            stack_word = words[len(words)-1]
-            found_sp = True
-        # Format 2: stp x29, x30, [sp,#64] -> last word is [sp,#64]
-        elif words[len(words)-1].find("[sp") >= 0:
-            stack_word = words[len(words)-1]
-            found_sp = True
-
-        if not found_sp:
-            # Not an sp-relative stp, skip
-            pass
-        else:
-            # Determine if it's pre-decrement or normal
-            if stack_word.endswith("]!"):
-                # Stack Push
-                # Example:
-                # 0xffff800010386560 <vfs_read+16>:	stp	x29, x30, [sp,#-64]!
-                # sp = sp - 64
-                # [sp] = x29
-                # [sp + 8] = x30
-                update_sp=True
-            else:
-                # Normal stack access
-                # Example:
-                # 0xffff800010386568 <vfs_read+24>:	stp	x19, x20, [sp,#16]
-                # [sp + 16] = x19
-                # [sp + 16 + 8] = x20
-                update_sp=False
-
-            # Extract offset from stack_word
-            # Could be "#64]" or "[sp,#64]" or "[sp, #64]"
-            if stack_word.startswith("[sp"):
-                # Format: [sp,#64] or [sp, #64] -> find the offset part
-                offset_start = stack_word.find("#")
-                if offset_start > 0:
-                    # Extract from # to ]
-                    offset_end = stack_word.find("]")
-                    offset_str = stack_word[offset_start:offset_end]
-                else:
-                    # No # found, extract from comma
-                    offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
-            else:
-                # Format: #64] -> already just the offset
-                offset_str = stack_word[1:stack_word.find("]")]
-
-            offset = parse_offset(offset_str)
-
-            if update_sp == True:
-                stackaddr_list = register_dict["%rsp"]
-                new_stackaddr_list = []
-                for stackaddr in stackaddr_list:
-                    stackaddr = stackaddr + offset
-                    new_stackaddr_list.append(stackaddr)
-                register_dict["%rsp"] = new_stackaddr_list
-                offset = 0
-
-            # Use helper function for formatting with register names
-            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit, reg1=reg1, reg2=reg2)
-    # Handle load pair: ldp x29, x30, [sp],#16
-    elif words[2] == "ldp" and len(words) >= 5:
-        # Extract register names (e.g., x29, x30)
-        reg1 = words[3].rstrip(",") if len(words) > 3 else None
-        reg2 = words[4].rstrip(",") if len(words) > 4 else None
-
-        # Check for [sp in the instruction
-        found_sp = False
-        stack_word = ""
-        update_sp = False
-        sp_offset = 0
-
-        # Format 1: ldp x29, x30, [sp],#16 -> post-increment
-        if len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
-            stack_word = words[len(words)-2]
-            stack_op = words[len(words) - 1]
-            if stack_op.startswith("#"):
-                stack_op = stack_op[1:]
-            if stack_op.endswith("]"):
-                stack_op = stack_op[:-1]
-            sp_offset = parse_offset(stack_op)
-            update_sp = True
-            found_sp = True
-        # Format 2: ldp x19, x20, [sp, #16] or [sp,#16] -> normal access
-        elif words[len(words)-1].find("[sp") >= 0:
-            stack_word = words[len(words)-1]
-            update_sp = False
-            sp_offset = 0
-            found_sp = True
-        elif len(words) >= 6 and words[len(words)-2].find("[sp") >= 0:
-            stack_word = words[len(words)-1]
-            update_sp = False
-            sp_offset = 0
-            found_sp = True
-
-        if found_sp:
-            # Extract offset from stack_word
-            if stack_word.startswith("[sp"):
-                # Format: [sp,#16] -> extract offset
-                offset_start = stack_word.find("#")
-                if offset_start > 0:
-                    offset_end = stack_word.find("]")
-                    offset_str = stack_word[offset_start:offset_end]
-                else:
-                    offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
-            else:
-                # Format: #16] or just numbers
-                if stack_word.find("]") > 0:
-                    offset_str = stack_word[1:stack_word.find("]")]
-                else:
-                    offset_str = stack_word
-
-            offset = parse_offset(offset_str)
-
-            # Use helper function for formatting with register names
-            result_str = result_str + format_stack_data_pair(register_dict["%rsp"], offset, stack_unit, reg1=reg1, reg2=reg2)
-
-            if update_sp == True:
-                stackaddr_list = register_dict["%rsp"]
-                new_stackaddr_list = []
-                for stackaddr in stackaddr_list:
-                    stackaddr = stackaddr + sp_offset
-                    new_stackaddr_list.append(stackaddr)
-                register_dict["%rsp"] = new_stackaddr_list
-
-    # Handle single register store: str x19, [sp,#16] or str x19, [sp], #16
-    elif opcode in ("str", "stur", "strb", "strh", "strw"):
-        # Extract register name (e.g., x19)
-        reg_name = words[3].rstrip(",") if len(words) > 3 else None
-
-        mem_pos = operands.find("[sp")
-        if mem_pos >= 0:
-            mem_op = operands[mem_pos:]
-            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
-
-            if base_reg == "sp":
-                # Determine data size based on instruction
-                if opcode == "strb":
-                    data_size = 1
-                elif opcode == "strh":
-                    data_size = 2
-                elif opcode == "strw":
-                    data_size = 4
-                else:
-                    data_size = stack_unit
-
-                if writeback_pre:
-                    reg_list = []
-                    for stackaddr in register_dict["%rsp"]:
-                        reg_list.append(stackaddr + offset)
-                    register_dict["%rsp"] = reg_list
-                    access_offset = 0
-                    add_stack_debug("sp writeback(pre): sp <- sp %+d => %s" %
-                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-                else:
-                    access_offset = offset
-
-                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size, reg=reg_name)
-
-                if post_index:
-                    reg_list = []
-                    for stackaddr in register_dict["%rsp"]:
-                        reg_list.append(stackaddr + offset)
-                    register_dict["%rsp"] = reg_list
-                    add_stack_debug("sp writeback(post): sp <- sp %+d => %s" %
-                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    # Handle single register load: ldr x19, [sp,#16] / [sp],#16 / [sp,#-16]!
-    elif opcode in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
-        # Extract register name (e.g., x19)
-        reg_name = words[3].rstrip(",") if len(words) > 3 else None
-
-        mem_pos = operands.find("[sp")
-        if mem_pos >= 0:
-            mem_op = operands[mem_pos:]
-            base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
-
-            if base_reg == "sp":
-                # Determine data size based on instruction
-                if opcode in ("ldrb", "ldrsb"):
-                    data_size = 1
-                elif opcode in ("ldrh", "ldrsh"):
-                    data_size = 2
-                elif opcode in ("ldrw", "ldrsw"):
-                    data_size = 4
-                else:
-                    data_size = stack_unit
-
-                if writeback_pre:
-                    reg_list = []
-                    for stackaddr in register_dict["%rsp"]:
-                        reg_list.append(stackaddr + offset)
-                    register_dict["%rsp"] = reg_list
-                    access_offset = 0
-                    add_stack_debug("sp writeback(pre): sp <- sp %+d => %s" %
-                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-                else:
-                    access_offset = offset
-
-                result_str = result_str + format_stack_data(register_dict["%rsp"], access_offset, data_size, reg=reg_name)
-
-                if post_index:
-                    reg_list = []
-                    for stackaddr in register_dict["%rsp"]:
-                        reg_list.append(stackaddr + offset)
-                    register_dict["%rsp"] = reg_list
-                    add_stack_debug("sp writeback(post): sp <- sp %+d => %s" %
-                                    (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    # Handle operations with frame pointer (x29): ldr x0, [x29,#16]
-    elif len(words) > 3:
-        # Check for [x29] or [fp] addressing
-        stack_word = ""
-        use_fp = False
-        for word in words[3:]:
-            if word.startswith("[x29") or word.startswith("[fp"):
-                stack_word = word
-                use_fp = True
-                break
-            elif word.startswith("[sp"):
-                stack_word = word
-                break
-
-        if stack_word != "":
-            stack_word = stack_word[1:stack_word.find("]")]
-            offset = parse_offset(stack_word)
-
-            # Use frame pointer or stack pointer
-            if use_fp and "%rbp" in register_dict:
-                result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
-            elif "%rsp" in register_dict:
-                result_str = result_str + format_stack_data(register_dict["%rsp"], offset, stack_unit)
-
-    return result_str
+# Old ARM implementation removed - see new refactored ARM handlers above
+# (_arm_handle_store_pair, _arm_handle_load_pair, etc.)
 
 
 def _x86_handle_frame_setup(words, result_str):
@@ -1998,9 +2773,12 @@ def _x86_handle_sp_access(words, result_str):
 
 def x86_stack_reg_op(words, result_str):
     """
-    Enhanced x86/x86_64 stack register operations handler.
+    DEPRECATED: Legacy x86/x86_64 stack register operations handler.
 
-    Dispatches to specialized handlers for different instruction types.
+    This function has been replaced by X86StackHandler class.
+    Kept for reference during migration period.
+
+    See X86StackHandler for the new implementation.
     """
     # Ensure we have stack pointer initialized
     if REG_STACK_POINTER not in register_dict:
@@ -2769,6 +3547,205 @@ def edis():
     else:
         print("ERROR> edis needs an address or a symbol\n",
               "\ti.e) edis 0xffffffff81c76fca or edis hugetlb_init")
+
+
+# ============================================================================
+# TEMPLATE: Adding a New Architecture Handler
+# ============================================================================
+"""
+MIGRATION GUIDE: Adding a New Architecture to StackHandler Architecture
+
+This guide shows how to migrate an architecture from the legacy function-based
+approach to the new StackHandler class architecture.
+
+STEP 1: Create Handler Class
+-----------------------------
+Create a new handler class inheriting from StackHandler:
+
+    class MipsStackHandler(StackHandler):
+        '''
+        MIPS architecture stack handler.
+
+        Handles MIPS stack operations including:
+        - Stack pointer adjustments: addiu $sp, $sp, -32
+        - Frame pointer setup: move $fp, $sp
+        - Store operations: sw $ra, 28($sp)
+        - Load operations: lw $ra, 28($sp)
+        '''
+
+        def __init__(self):
+            super(MipsStackHandler, self).__init__("mips")
+
+            # MIPS specific register patterns
+            self.sp_patterns = ("$sp", "$29")
+            self.fp_patterns = ("$fp", "$30")
+
+        def handle_instruction(self, words, result_str):
+            '''Process MIPS instruction for stack operations.'''
+
+            if not self.has_stack_pointer():
+                return result_str
+
+            if len(words) < 3:
+                return result_str
+
+            opcode = words[2]
+            operands = words[3] if len(words) > 3 else ""
+
+            # Dispatch to handlers
+            if opcode in ("addiu", "addi"):
+                return self._handle_sp_adjust(words, operands, result_str)
+            elif opcode == "move":
+                return self._handle_move(words, operands, result_str)
+            elif opcode in ("sw", "sd", "sh", "sb"):
+                return self._handle_store(words, opcode, operands, result_str)
+            elif opcode in ("lw", "ld", "lh", "lb"):
+                return self._handle_load(words, opcode, operands, result_str)
+
+            return result_str
+
+
+STEP 2: Implement Handler Methods
+----------------------------------
+Break down the logic into focused handler methods:
+
+    def _handle_sp_adjust(self, words, operands, result_str):
+        '''Handle stack pointer adjustment: addiu $sp, $sp, -32'''
+        if not operands.startswith("$sp,$sp,"):
+            return result_str
+
+        offset_str = operands.split(",")[-1]
+        offset = parse_offset(offset_str)
+        self.update_sp(offset)
+        return result_str
+
+    def _handle_store(self, words, opcode, operands, result_str):
+        '''Handle store operations: sw $ra, 28($sp)'''
+        if "($sp)" not in operands:
+            return result_str
+
+        offset, found = extract_mem_offset(operands, "$sp")
+        if not found:
+            return result_str
+
+        data_size = self.get_instruction_size(opcode)
+        return result_str + self.format_sp_data(offset, data_size)
+
+
+STEP 3: Add Instruction Sizes (if needed)
+------------------------------------------
+If your architecture has specific instruction size mappings, add them to
+INSTRUCTION_SIZES dictionary:
+
+    INSTRUCTION_SIZES = {
+        # ... existing entries ...
+        "mips": {
+            "sd": 8, "ld": 8,
+            "sw": 4, "lw": 4,
+            "sh": 2, "lh": 2,
+            "sb": 1, "lb": 1,
+        },
+    }
+
+
+STEP 4: Register in Factory
+----------------------------
+Add your handler to get_stack_handler() factory function:
+
+    def get_stack_handler(arch):
+        if arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
+            return RiscVStackHandler()
+        elif arch.startswith("mips") or arch in ("mips64", "mips32"):
+            return MipsStackHandler()
+        # ... more handlers ...
+        return None
+
+
+STEP 5: Test and Validate
+--------------------------
+1. Test with real crash dumps from the target architecture
+2. Compare output with legacy handler (if migrating existing code)
+3. Verify all instruction types are handled correctly
+4. Check debug output with -r flag
+
+Example test command:
+    edis -r function_name
+
+
+STEP 6: Deprecate Legacy Handler
+----------------------------------
+Once validated, mark the old handler as deprecated:
+
+    def mips_stack_reg_op(words, result_str):
+        '''
+        DEPRECATED: Legacy MIPS stack register operations handler.
+        This function has been replaced by MipsStackHandler class.
+        '''
+        # ... keep old code for reference ...
+
+
+BENEFITS OF NEW ARCHITECTURE:
+-----------------------------
+1. Testability: Each handler method can be unit tested independently
+2. Reusability: Common operations inherit from StackHandler base class
+3. Extensibility: Adding new instruction types requires minimal changes
+4. Maintainability: Smaller, focused methods (avg 15-25 lines vs 100-300)
+5. Documentation: Clear interface and method contracts
+6. Consistency: All architectures follow same patterns
+
+REFERENCE IMPLEMENTATION:
+-------------------------
+See RiscVStackHandler class for a complete working example.
+The RISC-V handler demonstrates:
+- Complete instruction dispatch pattern
+- Use of base class utilities
+- Proper offset extraction
+- Frame pointer handling
+- Debug logging integration
+
+COMMON BASE CLASS UTILITIES:
+----------------------------
+Available to all handler subclasses:
+
+    # Stack pointer operations
+    self.has_stack_pointer()           # Check if SP initialized
+    self.get_sp_addresses()            # Get SP address list
+    self.update_sp(offset, debug_msg)  # Update SP by offset
+    self.set_sp(address_list)          # Set SP to specific addresses
+
+    # Frame pointer operations
+    self.has_frame_pointer()           # Check if FP initialized
+    self.get_fp_addresses()            # Get FP address list
+    self.update_fp(offset, debug_msg)  # Update FP by offset
+    self.set_fp(address_list)          # Set FP to specific addresses
+
+    # Common patterns
+    self.copy_sp_to_fp()               # Frame setup (FP = SP)
+    self.copy_fp_to_sp()               # Frame teardown (SP = FP)
+
+    # Data formatting
+    self.format_sp_data(offset, size)  # Format data at SP+offset
+    self.format_fp_data(offset, size)  # Format data at FP+offset
+
+    # Utilities
+    self.get_instruction_size(opcode)  # Get data size for opcode
+    self.add_debug(msg)                # Add debug message
+
+ESTIMATED MIGRATION EFFORT:
+---------------------------
+Based on RiscVStackHandler migration experience:
+
+- Simple architecture (RISC-V, MIPS): 2-3 days
+- Medium complexity (PPC, s390x): 3-5 days
+- Complex architecture (x86, ARM): 5-7 days
+
+Time includes: coding, testing, validation, documentation.
+
+QUESTIONS?
+----------
+Review RiscVStackHandler implementation and base class StackHandler
+for detailed examples and patterns.
+"""
 
 
 if ( __name__ == '__main__'):
