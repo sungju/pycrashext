@@ -1051,34 +1051,58 @@ def truncate_middle(text, max_width):
 
 def get_memory_bar(percentage, width=20):
     """
-    Generate ASCII bar chart for memory usage percentage
+    Generate ASCII bar chart for memory usage percentage with 4 gradual shading levels
 
     Args:
         percentage: Usage percentage (0-100)
         width: Total width of bar in characters
 
     Returns:
-        String representation of bar chart like: [████████░░░░]
+        String representation of bar chart like: [████▓▒░░░░░]
+        Uses 4 shading characters:
+        ░ (light)  - empty portion
+        ▒ (medium) - 0-33% of fractional character
+        ▓ (heavy)  - 33-66% of fractional character
+        █ (full)   - fully filled characters
     """
     if percentage < 0:
         percentage = 0
     if percentage > 100:
         percentage = 100
 
-    filled_width = int((percentage / 100.0) * width)
-    empty_width = width - filled_width
+    # Calculate exact filled width (as float to get fractional part)
+    exact_filled = (percentage / 100.0) * width
+    filled_count = int(exact_filled)
+    fraction = exact_filled - filled_count
 
-    # Use block characters for visual appeal
-    filled_char = '█'
-    empty_char = '░'
-    half_char = '▌'  # Half-filled character for very small percentages
+    # Shading characters for gradual fill
+    empty_char = '░'   # Light shade for empty
+    light_char = '▒'   # Medium shade for 0-33% fill
+    medium_char = '▓'  # Heavy shade for 33-66% fill
+    full_char = '█'    # Full block for 100% fill
 
-    # Show minimal indicator for very small but non-zero percentages
-    if percentage > 0 and filled_width == 0:
-        # Use half-filled character to indicate minimal usage
-        bar = '[' + half_char + (empty_char * (width - 1)) + ']'
-    else:
-        bar = '[' + (filled_char * filled_width) + (empty_char * empty_width) + ']'
+    # Build the bar with gradual shading
+    bar_chars = []
+
+    # Add fully filled characters
+    bar_chars.extend([full_char] * filled_count)
+
+    # Add fractional character if there's remaining space
+    if filled_count < width:
+        if fraction >= 0.66:
+            bar_chars.append(full_char)    # 66-100% shows as full (almost complete)
+        elif fraction >= 0.33:
+            bar_chars.append(medium_char)  # 33-66% shows as heavy shade
+        elif fraction > 0:
+            bar_chars.append(light_char)   # 1-33% shows as medium shade
+        else:
+            bar_chars.append(empty_char)   # Exactly 0 shows as empty
+
+    # Fill remaining with empty characters
+    remaining = width - len(bar_chars)
+    bar_chars.extend([empty_char] * remaining)
+
+    bar = '[' + ''.join(bar_chars) + ']'
 
     # Add color coding based on usage level
     if percentage >= 90:
