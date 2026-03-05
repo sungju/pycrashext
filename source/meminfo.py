@@ -4306,16 +4306,15 @@ def show_overall_memory(options):
     if 'Slab' in meminfo and meminfo['Slab'] > 0:
         mem_categories['Slab'] = meminfo['Slab']
 
-    # Calculate HugePages used (total - free)
-    if 'HugePages_Total' in meminfo and 'HugePages_Free' in meminfo:
+    # Calculate HugePages total allocated (not just used)
+    if 'HugePages_Total' in meminfo and 'Hugepagesize' in meminfo:
         huge_total = meminfo['HugePages_Total']
-        huge_free = meminfo['HugePages_Free']
-        if huge_total > huge_free:
-            # Convert pages to KB
-            page_unit = page_size // 1024
-            hugepages_used_kb = (huge_total - huge_free) * page_unit
-            if hugepages_used_kb > 0:
-                mem_categories['HugePages'] = hugepages_used_kb
+        huge_pagesize_kb = meminfo['Hugepagesize']
+        if huge_total > 0:
+            # Total allocated huge pages in KB
+            hugepages_total_kb = huge_total * huge_pagesize_kb
+            if hugepages_total_kb > 0:
+                mem_categories['HugePages'] = hugepages_total_kb
 
     # Get user-space memory usage using the safe ps -G approach
     # (same pattern as existing meminfo code lines 1188-1211)
@@ -4415,7 +4414,7 @@ def show_overall_memory(options):
     category_descriptions = {
         'User-Space': 'Application/process memory (RSS from all tasks)',
         'Slab': 'Kernel slab allocator cache',
-        'HugePages': 'Huge pages in use',
+        'HugePages': 'Huge pages allocated (total)',
         'Cached': 'Page cache (file-backed pages)',
         'Buffers': 'Buffer cache',
         'Free': 'Available free memory',
