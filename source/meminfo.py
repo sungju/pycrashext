@@ -4483,60 +4483,18 @@ def show_overall_memory(options):
             print("░", end='')
             crashcolor.set_color(crashcolor.RESET)
             print(" Free: %s (%.2f%%)" % (get_size_str(hp_free_kb * 1024), free_percent))
-            print("")
 
-            # Table header
-            header_format = "%-20s %12s %12s %8s"
-            print("\n" + header_format % ("Metric", "Count", "Size", "Percent"))
-            print("-" * 80)
-
-            # Total allocated
-            crashcolor.set_color(crashcolor.YELLOW | crashcolor.BOLD)
-            print("%-20s %12d %12s %7.2f%%" %
-                  ("Total Allocated", hp_total, get_size_str(hp_total_kb * 1024), 100.0))
-            crashcolor.set_color(crashcolor.RESET)
-
-            # Used
-            crashcolor.set_color(crashcolor.RED)
-            print("%-20s %12d %12s %7.2f%%" %
-                  ("Used", hp_used, get_size_str(hp_used_kb * 1024), used_percent))
-            crashcolor.set_color(crashcolor.RESET)
-
-            # Free
-            crashcolor.set_color(crashcolor.GREEN)
-            print("%-20s %12d %12s %7.2f%%" %
-                  ("Free", hp_free, get_size_str(hp_free_kb * 1024), free_percent))
-            crashcolor.set_color(crashcolor.RESET)
-
-            # Reserved (if any)
-            if hp_rsvd > 0:
-                rsvd_percent = (hp_rsvd * 100.0 / hp_total) if hp_total > 0 else 0
-                crashcolor.set_color(crashcolor.CYAN)
-                print("%-20s %12d %12s %7.2f%%" %
-                      ("Reserved", hp_rsvd, get_size_str(hp_rsvd_kb * 1024), rsvd_percent))
-                crashcolor.set_color(crashcolor.RESET)
-
-            # Surplus (if any)
-            if hp_surp > 0:
-                surp_percent = (hp_surp * 100.0 / hp_total) if hp_total > 0 else 0
-                crashcolor.set_color(crashcolor.MAGENTA)
-                print("%-20s %12d %12s %7.2f%%" %
-                      ("Surplus", hp_surp, get_size_str(hp_surp_kb * 1024), surp_percent))
-                crashcolor.set_color(crashcolor.RESET)
-
-            print("-" * 80)
+            # Total allocated (right after Used/Free line)
+            print("  Total Allocated: %s (%d pages)" % (get_size_str(hp_total_kb * 1024), hp_total))
 
             # Page size info
             print("\nHugePage Size: %s" % get_size_str(hp_size_kb * 1024))
 
-            # Usage summary
-            print("\nUsage Summary:")
-            print("  Utilization: %.2f%% (%s of %s)" %
-                  (used_percent, get_size_str(hp_used_kb * 1024), get_size_str(hp_total_kb * 1024)))
+            # Reserved and Surplus (if any)
             if hp_rsvd > 0:
-                print("  Reserved pages are allocated but not yet mapped to processes")
+                print("Reserved: %d pages (%s)" % (hp_rsvd, get_size_str(hp_rsvd_kb * 1024)))
             if hp_surp > 0:
-                print("  Surplus pages exceed the pool size and can be freed")
+                print("Surplus: %d pages (%s)" % (hp_surp, get_size_str(hp_surp_kb * 1024)))
 
     crashcolor.set_color(crashcolor.RESET)
     print("\n" + "=" * 80)
