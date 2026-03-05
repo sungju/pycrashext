@@ -4465,25 +4465,15 @@ def show_overall_memory(options):
             print("=" * 80)
             crashcolor.set_color(crashcolor.RESET)
 
-            # Bar graph showing used vs free
+            # Bar graph showing used vs free with gradual shading
+            # Use the same get_memory_bar() function as meminfo -g
             bar_width = 60
-            used_bar_len = int((used_percent / 100.0) * bar_width)
-            free_bar_len = bar_width - used_bar_len
-
-            # Build the bar with darker marks for used, lighter for free
-            used_bar = '█' * used_bar_len
-            free_bar = '░' * free_bar_len
+            bar = get_memory_bar(used_percent, bar_width)
 
             print("\nUtilization:")
-            print("[", end='')
-            crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
-            print(used_bar, end='')
-            crashcolor.set_color(crashcolor.GREEN)
-            print(free_bar, end='')
-            crashcolor.set_color(crashcolor.RESET)
-            print("]")
+            print(bar)
 
-            # Legend
+            # Legend (showing only darkest and lightest)
             print("  ", end='')
             crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
             print("█", end='')
