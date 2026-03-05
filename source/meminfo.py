@@ -866,6 +866,14 @@ def get_meminfo_dict():
             if words[1] == 'FREE':
                 meminfo['SwapFree'] = round(int(words[2]) * page_unit)
 
+    # Add huge page size for overall memory calculations
+    if 'HugePages_Total' in meminfo and meminfo['HugePages_Total'] > 0:
+        try:
+            hp_total, hp_free, hp_rsvd, hp_surp, hp_size = get_hugepages_details()
+            meminfo['Hugepagesize'] = hp_size
+        except:
+            pass
+
     return meminfo
 
 
