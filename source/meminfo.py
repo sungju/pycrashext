@@ -4437,6 +4437,117 @@ def show_overall_memory(options):
         if category in category_descriptions:
             print("  %-15s : %s" % (category, category_descriptions[category]))
 
+    # Show HugePages allocation vs actual usage breakdown
+    if 'HugePages_Total' in meminfo and 'Hugepagesize' in meminfo:
+        hp_total = meminfo.get('HugePages_Total', 0)
+        hp_free = meminfo.get('HugePages_Free', 0)
+        hp_rsvd = meminfo.get('HugePages_Rsvd', 0)
+        hp_surp = meminfo.get('HugePages_Surp', 0)
+        hp_size_kb = meminfo.get('Hugepagesize', 0)
+
+        if hp_total > 0:
+            hp_used = hp_total - hp_free
+
+            # Calculate sizes in KB
+            hp_total_kb = hp_total * hp_size_kb
+            hp_used_kb = hp_used * hp_size_kb
+            hp_free_kb = hp_free * hp_size_kb
+            hp_rsvd_kb = hp_rsvd * hp_size_kb
+            hp_surp_kb = hp_surp * hp_size_kb
+
+            # Calculate percentages
+            used_percent = (hp_used * 100.0 / hp_total) if hp_total > 0 else 0
+            free_percent = (hp_free * 100.0 / hp_total) if hp_total > 0 else 0
+
+            crashcolor.set_color(crashcolor.BLUE)
+            print("\n" + "=" * 80)
+            print("HUGEPAGES ALLOCATION vs USAGE")
+            print("=" * 80)
+            crashcolor.set_color(crashcolor.RESET)
+
+            # Bar graph showing used vs free
+            bar_width = 60
+            used_bar_len = int((used_percent / 100.0) * bar_width)
+            free_bar_len = bar_width - used_bar_len
+
+            # Build the bar with darker marks for used, lighter for free
+            used_bar = '█' * used_bar_len
+            free_bar = '░' * free_bar_len
+
+            print("\nUtilization:")
+            print("[", end='')
+            crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
+            print(used_bar, end='')
+            crashcolor.set_color(crashcolor.GREEN)
+            print(free_bar, end='')
+            crashcolor.set_color(crashcolor.RESET)
+            print("]")
+
+            # Legend
+            print("  ", end='')
+            crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
+            print("█", end='')
+            crashcolor.set_color(crashcolor.RESET)
+            print(" Used: %s (%.2f%%)    " % (get_size_str(hp_used_kb * 1024), used_percent), end='')
+            crashcolor.set_color(crashcolor.GREEN)
+            print("░", end='')
+            crashcolor.set_color(crashcolor.RESET)
+            print(" Free: %s (%.2f%%)" % (get_size_str(hp_free_kb * 1024), free_percent))
+            print("")
+
+            # Table header
+            header_format = "%-20s %12s %12s %8s"
+            print("\n" + header_format % ("Metric", "Count", "Size", "Percent"))
+            print("-" * 80)
+
+            # Total allocated
+            crashcolor.set_color(crashcolor.YELLOW | crashcolor.BOLD)
+            print("%-20s %12d %12s %7.2f%%" %
+                  ("Total Allocated", hp_total, get_size_str(hp_total_kb * 1024), 100.0))
+            crashcolor.set_color(crashcolor.RESET)
+
+            # Used
+            crashcolor.set_color(crashcolor.RED)
+            print("%-20s %12d %12s %7.2f%%" %
+                  ("Used", hp_used, get_size_str(hp_used_kb * 1024), used_percent))
+            crashcolor.set_color(crashcolor.RESET)
+
+            # Free
+            crashcolor.set_color(crashcolor.GREEN)
+            print("%-20s %12d %12s %7.2f%%" %
+                  ("Free", hp_free, get_size_str(hp_free_kb * 1024), free_percent))
+            crashcolor.set_color(crashcolor.RESET)
+
+            # Reserved (if any)
+            if hp_rsvd > 0:
+                rsvd_percent = (hp_rsvd * 100.0 / hp_total) if hp_total > 0 else 0
+                crashcolor.set_color(crashcolor.CYAN)
+                print("%-20s %12d %12s %7.2f%%" %
+                      ("Reserved", hp_rsvd, get_size_str(hp_rsvd_kb * 1024), rsvd_percent))
+                crashcolor.set_color(crashcolor.RESET)
+
+            # Surplus (if any)
+            if hp_surp > 0:
+                surp_percent = (hp_surp * 100.0 / hp_total) if hp_total > 0 else 0
+                crashcolor.set_color(crashcolor.MAGENTA)
+                print("%-20s %12d %12s %7.2f%%" %
+                      ("Surplus", hp_surp, get_size_str(hp_surp_kb * 1024), surp_percent))
+                crashcolor.set_color(crashcolor.RESET)
+
+            print("-" * 80)
+
+            # Page size info
+            print("\nHugePage Size: %s" % get_size_str(hp_size_kb * 1024))
+
+            # Usage summary
+            print("\nUsage Summary:")
+            print("  Utilization: %.2f%% (%s of %s)" %
+                  (used_percent, get_size_str(hp_used_kb * 1024), get_size_str(hp_total_kb * 1024)))
+            if hp_rsvd > 0:
+                print("  Reserved pages are allocated but not yet mapped to processes")
+            if hp_surp > 0:
+                print("  Surplus pages exceed the pool size and can be freed")
+
     crashcolor.set_color(crashcolor.RESET)
     print("\n" + "=" * 80)
 
