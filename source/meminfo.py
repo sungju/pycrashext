@@ -866,13 +866,17 @@ def get_meminfo_dict():
             if words[1] == 'FREE':
                 meminfo['SwapFree'] = round(int(words[2]) * page_unit)
 
-    # Add huge page size for overall memory calculations
-    if 'HugePages_Total' in meminfo and meminfo['HugePages_Total'] > 0:
-        try:
-            hp_total, hp_free, hp_rsvd, hp_surp, hp_size = get_hugepages_details()
-            meminfo['Hugepagesize'] = hp_size
-        except:
-            pass
+    # Get actual huge page details from kernel structures
+    # Note: kmem -i shows huge pages in regular 4KB page units, but we need
+    # the actual count of huge pages from the kernel structures
+    try:
+        hp_total, hp_free, hp_rsvd, hp_surp, hp_size = get_hugepages_details()
+        if hp_total > 0:
+            meminfo['HugePages_Total'] = hp_total  # Actual count of huge pages
+            meminfo['HugePages_Free'] = hp_free
+            meminfo['Hugepagesize'] = hp_size  # Size of each huge page in KB
+    except:
+        pass
 
     return meminfo
 
