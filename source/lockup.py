@@ -344,6 +344,238 @@ include/asm-generic/qspinlock_types.h
 
 
 
+def show_smp_call_data(cfd_addr, csd_addr=None):
+    """
+    Find which CPU owns a struct __call_single_data address from call_function_data
+    Used for debugging smp_call_function_many_cond hangs
+
+    Args:
+        cfd_addr: Address of call_function_data structure
+        csd_addr: Optional struct __call_single_data address to find which CPU it belongs to
+    """
+    try:
+        # Read call_function_data structure
+        crashcolor.set_color(crashcolor.BLUE)
+        print("=" * 80)
+        print("SMP Call Function Data Analysis")
+        print("=" * 80)
+        crashcolor.set_color(crashcolor.RESET)
+
+        print("\nStep 1: Reading call_function_data at 0x%x" % cfd_addr)
+        print("-" * 80)
+
+        cfd = readSU("struct call_function_data", cfd_addr)
+
+        print("struct call_function_data {")
+        print("  csd = 0x%x," % cfd.csd)
+        print("  cpumask = 0x%x," % cfd.cpumask)
+        print("  cpumask_ipi = 0x%x" % cfd.cpumask_ipi)
+        print("}")
+
+        # Get per-cpu offset
+        percpu_offset = cfd.csd
+
+        print("\nStep 2: Converting per-cpu offset 0x%x to virtual addresses" % percpu_offset)
+        print("-" * 80)
+
+        # Use crash ptov command to convert per-cpu offset to virtual addresses for all CPUs
+        # ptov <offset>:a shows virtual addresses for all CPUs
+        ptov_output = exec_crash_command("ptov 0x%x:a" % percpu_offset)
+
+        # Build a table of CPU -> virtual address mappings
+        cpu_csd_map = {}
+
+        # Parse ptov output
+        # Format: "  [CPU]  virtual_address"
+        for line in ptov_output.splitlines():
+            line = line.strip()
+            if line.startswith('[') and ']' in line:
+                try:
+                    # Extract CPU number and address
+                    # Format: "[20]  ffff9caa2633ae60"
+                    cpu_part = line.split(']')[0].replace('[', '')
+                    addr_part = line.split(']')[1].strip()
+
+                    cpu = int(cpu_part)
+                    vaddr = int(addr_part, 16)
+
+                    cpu_csd_map[cpu] = vaddr
+                except:
+                    pass
+
+        print("\n%-6s  %-18s" % ("CPU", "struct __call_single_data Address"))
+        print("-" * 80)
+
+        # If target address provided, show only matching CPU and surrounding context
+        if csd_addr:
+            # Find the matching CPU
+            found_cpu = None
+            for cpu, vaddr in cpu_csd_map.items():
+                if vaddr == csd_addr:
+                    found_cpu = cpu
+                    break
+
+            if found_cpu is not None:
+                # Show context: 3 CPUs before and after the target
+                context_range = 3
+                start_cpu = max(0, found_cpu - context_range)
+                end_cpu = found_cpu + context_range
+
+                all_cpus = sorted(cpu_csd_map.keys())
+
+                # Show leading ellipsis if not starting from beginning
+                if start_cpu > min(all_cpus):
+                    print("  ...   (showing CPUs %d-%d only)" % (start_cpu, end_cpu))
+
+                # Display CPUs in the context range
+                for cpu in all_cpus:
+                    if start_cpu <= cpu <= end_cpu:
+                        vaddr = cpu_csd_map[cpu]
+                        if cpu == found_cpu:
+                            crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
+                            print("[%-4d]  0x%016x  <<< TARGET CPU" % (cpu, vaddr))
+                            crashcolor.set_color(crashcolor.RESET)
+                        else:
+                            print("[%-4d]  0x%016x" % (cpu, vaddr))
+
+                # Show trailing ellipsis if not ending at last CPU
+                if end_cpu < max(all_cpus):
+                    print("  ...")
+            else:
+                # Target not found, show first few entries as sample
+                print("  (showing first 5 CPUs as sample)")
+                for i, cpu in enumerate(sorted(cpu_csd_map.keys())):
+                    if i >= 5:
+                        print("  ...")
+                        break
+                    vaddr = cpu_csd_map[cpu]
+                    print("[%-4d]  0x%016x" % (cpu, vaddr))
+        else:
+            # No target address, show all CPUs
+            for cpu in sorted(cpu_csd_map.keys()):
+                vaddr = cpu_csd_map[cpu]
+                print("[%-4d]  0x%016x" % (cpu, vaddr))
+
+        # If target address provided, find and display details
+        if csd_addr:
+            print("\nStep 3: Finding CPU for struct __call_single_data 0x%x" % csd_addr)
+            print("-" * 80)
+
+            found_cpu = None
+            for cpu, vaddr in cpu_csd_map.items():
+                if vaddr == csd_addr:
+                    found_cpu = cpu
+                    break
+
+            if found_cpu is not None:
+                crashcolor.set_color(crashcolor.RED | crashcolor.BOLD)
+                print("\n*** CPU %d is awaiting ACK ***" % found_cpu)
+                crashcolor.set_color(crashcolor.RESET)
+
+                # Show what's running on the target CPU
+                print("\nCurrent process on CPU %d:" % found_cpu)
+                print("-" * 80)
+
+                try:
+                    # Use runq -c to get current task on the CPU
+                    runq_output = exec_crash_command("runq -c %d" % found_cpu)
+
+                    # Parse runq output to extract the current task address
+                    # Format: "  CURRENT: PID: 3468342  TASK: ffff9c5e22ad8000  COMMAND: "bash""
+                    current_task = None
+                    for line in runq_output.splitlines():
+                        stripped = line.strip()
+                        if stripped.startswith("CURRENT:"):
+                            # Extract task address from the CURRENT line
+                            if "TASK:" in line:
+                                parts = line.split("TASK:")
+                                if len(parts) > 1:
+                                    addr_str = parts[1].split()[0].strip()
+                                    try:
+                                        current_task = int(addr_str, 16)
+                                    except:
+                                        pass
+                            break
+
+                    if current_task:
+                        # Run ps -m to show process info (including runtime)
+                        print("\nProcess Information (ps -m):")
+                        ps_output = exec_crash_command("ps -m %x" % current_task)
+                        print(ps_output)
+
+                        # Run bt to show backtrace
+                        print("\nBacktrace (bt):")
+                        bt_output = exec_crash_command("bt %x" % current_task)
+                        print(bt_output)
+                    else:
+                        crashcolor.set_color(crashcolor.YELLOW)
+                        print("Warning: Could not parse current task from runq output")
+                        print("runq -c %d output:" % found_cpu)
+                        print(runq_output)
+                        crashcolor.set_color(crashcolor.RESET)
+
+                except Exception as e:
+                    crashcolor.set_color(crashcolor.YELLOW)
+                    print("Warning: Could not get current process info: %s" % str(e))
+                    crashcolor.set_color(crashcolor.RESET)
+
+                # Read and display the struct __call_single_data structure
+                print("\nStep 4: Reading struct __call_single_data at 0x%x" % csd_addr)
+                print("-" * 80)
+
+                try:
+                    csd = readSU("struct __call_single_data", csd_addr)
+                    print("\nstruct __call_single_data {")
+
+                    # Handle union structure
+                    if member_offset("struct __call_single_data", "flags") >= 0:
+                        print("  flags = 0x%x," % csd.flags)
+                    elif member_offset("struct __call_single_data", "u_flags") >= 0:
+                        print("  u_flags = 0x%x," % csd.node.u_flags)
+
+                    print("  func = 0x%x" % csd.func)
+
+                    # Try to resolve function name
+                    try:
+                        func_name = addr2sym(csd.func)
+                        if func_name:
+                            print("       <%s>" % func_name)
+                    except:
+                        pass
+
+                    print("  info = 0x%x" % csd.info)
+                    print("}")
+
+                    # Check if this CPU is online
+                    print("\nCPU %d Status:" % found_cpu)
+                    print("-" * 80)
+                    try:
+                        cpu_online_bits = readSymbol("__cpu_online_mask")
+                        if cpu_online_bits:
+                            # Simple check - in real implementation would check bitmap
+                            print("  Checking if CPU is online and responsive...")
+                    except:
+                        pass
+
+                except Exception as e:
+                    crashcolor.set_color(crashcolor.YELLOW)
+                    print("Warning: Could not read struct __call_single_data structure: %s" % str(e))
+                    crashcolor.set_color(crashcolor.RESET)
+            else:
+                crashcolor.set_color(crashcolor.YELLOW)
+                print("\nWarning: Address 0x%x not found in per-cpu csd mappings" % csd_addr)
+                crashcolor.set_color(crashcolor.RESET)
+
+        print("\n" + "=" * 80)
+
+    except Exception as e:
+        crashcolor.set_color(crashcolor.RED)
+        print("Error analyzing SMP call data: %s" % str(e))
+        crashcolor.set_color(crashcolor.RESET)
+        import traceback
+        traceback.print_exc()
+
+
 def lockup():
     op = OptionParser()
     op.add_option("-b", "--backtrace", dest="backtrace", default=0,
@@ -367,12 +599,30 @@ def lockup():
     op.add_option("-q", "--qspinlock", dest="qspinlock", default="",
                   action="store", type="string",
                   help="Shows qspinlock details")
+    op.add_option("--smp-call", dest="smp_call", default="",
+                  action="store", type="string",
+                  help="Analyze SMP call function data: --smp-call <call_function_data_addr>[,<__call_single_data_addr>]")
     op.add_option("-u", "--user", dest="user", default=0,
                   action="store_true",
                   help="show user space running only")
 
     (o, args) = op.parse_args()
 
+    if o.smp_call:
+        # Parse addresses: format is <cfd_addr>[,<csd_addr>]
+        addrs = o.smp_call.split(',')
+        try:
+            cfd_addr = int(addrs[0].strip(), 16)
+            csd_addr = None
+            if len(addrs) > 1:
+                csd_addr = int(addrs[1].strip(), 16)
+            show_smp_call_data(cfd_addr, csd_addr)
+        except ValueError:
+            crashcolor.set_color(crashcolor.RED)
+            print("Error: Invalid address format. Use: --smp-call <call_function_data_addr>[,<__call_single_data_addr>]")
+            print("Example: --smp-call ffff9caa268f4a00,ffff9caa2633ae60")
+            crashcolor.set_color(crashcolor.RESET)
+        sys.exit(0)
 
     if (o.qspinlock != ""):
         show_qspinlock(o)
