@@ -118,10 +118,9 @@ def balloon_info(options):
     try:
         if symbol_exists('balloon'):
             balloon = readSymbol('balloon')
-        # balloon_stats is for XEN
-        #elif symbol_exists('balloon_stats'):
-        #    balloon = readSymbol('balloon_stats')
-        #    balloon_stats = True
+        elif symbol_exists('balloon_stats'):
+            balloon = readSymbol('balloon_stats')
+            balloon_stats = True
     except:
         pass
 
