@@ -4093,8 +4093,9 @@ def show_oom_events(op):
             print("Invalid filter pattern: %s" % process_filter)
             return
 
-    # Get count limit
+    # Get count limit and skip count
     oom_count = getattr(op, 'oom_count', 0)
+    oom_skip = getattr(op, 'oom_skip', 0)
 
     try:
         result_lines = exec_crash_command('log').splitlines()
@@ -4110,10 +4111,22 @@ def show_oom_events(op):
         meminfo_dict = {}
         cgroup_dict = {}
         total_usage = 0
+        oom_display_counter = 0  # Counter for displayed events
+        skip_message_shown = False  # Track if we've shown the skip message
+        in_displayed_event = False  # Track if we're in an event that should be displayed
         for line in result_lines:
             if "invoked oom-killer:" in line:
-                # Check if we've hit the count limit
-                if oom_count > 0 and oom_event_counter >= oom_count:
+                oom_event_counter += 1
+
+                # Check if we should skip this event
+                should_skip_event = oom_skip > 0 and oom_event_counter <= oom_skip
+                if should_skip_event:
+                    in_displayed_event = False
+                    continue
+
+                # Check if we've hit the display count limit
+                if oom_count > 0 and oom_display_counter >= oom_count:
+                    in_displayed_event = False
                     break
 
                 # Check process filter
@@ -4121,10 +4134,21 @@ def show_oom_events(op):
                     invoker = extract_invoker_process(line)
                     if not process_filter_pattern.search(invoker):
                         # Skip this OOM event - wrong process
+                        in_displayed_event = False
                         continue
 
                 oom_invoked = True
-                oom_event_counter += 1
+                in_displayed_event = True
+                oom_display_counter += 1
+
+                # Show skip message before the first displayed event
+                if not skip_message_shown and oom_skip > 0:
+                    crashcolor.set_color(crashcolor.YELLOW)
+                    print("\n... < skipped %d OOM event%s > ...\n" %
+                          (oom_skip, "s" if oom_skip > 1 else ""))
+                    crashcolor.set_color(crashcolor.RESET)
+                    skip_message_shown = True
+
                 if not is_first_oom:
                     print()
 
@@ -4135,9 +4159,11 @@ def show_oom_events(op):
                 continue
 
             if "Out of memory: Kill" in line or "Killed process" in line:
-                crashcolor.set_color(crashcolor.GREEN)
-                print(line)
-                crashcolor.set_color(crashcolor.RESET)
+                # Only show if we're in a displayed OOM event
+                if in_displayed_event:
+                    crashcolor.set_color(crashcolor.GREEN)
+                    print(line)
+                    crashcolor.set_color(crashcolor.RESET)
                 continue
 
 
@@ -4504,18 +4530,28 @@ def show_overall_memory(options):
     # If found, automatically display OOM analysis with graphs
     try:
         result_lines = exec_crash_command('log').splitlines()
-        has_oom_events = any("invoked oom-killer:" in line for line in result_lines)
 
-        if has_oom_events:
+        # Count total OOM events
+        total_oom_events = sum(1 for line in result_lines if "invoked oom-killer:" in line)
+
+        if total_oom_events > 0:
             # Create a copy of options with graph enabled for OOM display
             oom_options = copy.copy(options)
             oom_options.graph = True
+
+            # Show only the last OOM event
+            oom_options.oom_count = 1
+            oom_options.oom_skip = total_oom_events - 1
 
             # Display separator and OOM analysis
             print("\n")
             crashcolor.set_color(crashcolor.YELLOW)
             print("=" * 80)
-            print("OOM EVENTS DETECTED - Displaying OOM Analysis (meminfo -Og)")
+            if total_oom_events > 1:
+                print("OOM EVENTS DETECTED - %d events found, skipping first %d, showing last one" %
+                      (total_oom_events, total_oom_events - 1))
+            else:
+                print("OOM EVENTS DETECTED - Displaying OOM Analysis (meminfo -Og)")
             print("=" * 80)
             crashcolor.set_color(crashcolor.RESET)
             print()
