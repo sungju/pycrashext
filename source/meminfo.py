@@ -4311,6 +4311,42 @@ def show_overall_memory(options):
     """
     Show overall memory usage breakdown with bar graphs combining kmem -i and meminfo data
     """
+    # Check if there are any OOM events in the log first
+    # If found, automatically display OOM analysis with graphs
+    try:
+        result_lines = exec_crash_command('log').splitlines()
+
+        # Count total OOM events
+        total_oom_events = sum(1 for line in result_lines if "invoked oom-killer:" in line)
+
+        if total_oom_events > 0:
+            # Create a copy of options with graph enabled for OOM display
+            oom_options = copy.copy(options)
+            oom_options.graph = True
+
+            # Show only the last OOM event
+            oom_options.oom_count = 1
+            oom_options.oom_skip = total_oom_events - 1
+
+            # Display separator and OOM analysis
+            print("\n")
+            crashcolor.set_color(crashcolor.YELLOW)
+            print("=" * 80)
+            if total_oom_events > 1:
+                print("OOM EVENTS DETECTED - %d events found, skipping first %d, showing last one" %
+                      (total_oom_events, total_oom_events - 1))
+            else:
+                print("OOM EVENTS DETECTED - Displaying OOM Analysis (meminfo -Og)")
+            print("=" * 80)
+            crashcolor.set_color(crashcolor.RESET)
+            print()
+
+            # Call show_oom_events with graph mode enabled
+            show_oom_events(oom_options)
+    except Exception as e:
+        # Silently ignore errors in OOM detection to not break --overall display
+        pass
+
     crashcolor.set_color(crashcolor.BLUE)
     print("\n" + "=" * 80)
     print("OVERALL MEMORY USAGE BREAKDOWN")
@@ -4525,42 +4561,6 @@ def show_overall_memory(options):
 
     crashcolor.set_color(crashcolor.RESET)
     print("\n" + "=" * 80)
-
-    # Check if there are any OOM events in the log
-    # If found, automatically display OOM analysis with graphs
-    try:
-        result_lines = exec_crash_command('log').splitlines()
-
-        # Count total OOM events
-        total_oom_events = sum(1 for line in result_lines if "invoked oom-killer:" in line)
-
-        if total_oom_events > 0:
-            # Create a copy of options with graph enabled for OOM display
-            oom_options = copy.copy(options)
-            oom_options.graph = True
-
-            # Show only the last OOM event
-            oom_options.oom_count = 1
-            oom_options.oom_skip = total_oom_events - 1
-
-            # Display separator and OOM analysis
-            print("\n")
-            crashcolor.set_color(crashcolor.YELLOW)
-            print("=" * 80)
-            if total_oom_events > 1:
-                print("OOM EVENTS DETECTED - %d events found, skipping first %d, showing last one" %
-                      (total_oom_events, total_oom_events - 1))
-            else:
-                print("OOM EVENTS DETECTED - Displaying OOM Analysis (meminfo -Og)")
-            print("=" * 80)
-            crashcolor.set_color(crashcolor.RESET)
-            print()
-
-            # Call show_oom_events with graph mode enabled
-            show_oom_events(oom_options)
-    except Exception as e:
-        # Silently ignore errors in OOM detection to not break --overall display
-        pass
 
 
 def meminfo():
