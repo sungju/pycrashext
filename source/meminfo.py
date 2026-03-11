@@ -2198,11 +2198,83 @@ def show_vm(options, pid):
         print(result_lines[i])
     print("%10s %s" % ("", result_lines[3]))
 
+    # Dictionary to track memory by type
+    mem_by_type = {}
+    total_vm_size = 0
+
     for i in range(4, total_lines):
         words = result_lines[i].split()
         size = int(words[2], 16) - int(words[1], 16)
+        total_vm_size += size
 
         size_str = get_size_str(size, True)
+
+        # Categorize this VMA by type
+        try:
+            vma_addr = int(words[0], 16)
+            vma = readSU("struct vm_area_struct", vma_addr)
+            vm_flags = int(words[3], 16)
+
+            # Determine the type of this VMA
+            vma_type = None
+            vma_name = ""
+
+            # Get filename from vm output if available (words[4])
+            filename = None
+            if len(words) >= 5:
+                filename = ' '.join(words[4:])  # Join in case filename has spaces
+
+            # Check for HugePages
+            if vm_flags & VM_HUGETLB:
+                vma_type = "HugePages"
+            # Check for SYSV shared memory first (by filename)
+            elif filename and filename.startswith('SYSV'):
+                vma_type = "Shared Memory (SYSV)"
+                vma_name = filename
+            # Check if it has a file mapping (do this before VM_SHM check)
+            elif vma.vm_file != 0:
+                try:
+                    # If we don't have filename from vm output, get it from structure
+                    if not filename:
+                        vm_file = vma.vm_file
+                        dentry = vm_file.f_path.dentry
+                        filename = dentry.d_name.name.string_()
+
+                    # Categorize by filename
+                    if filename.endswith('.so') or '.so.' in filename:
+                        vma_type = "Shared Objects (.so)"
+                        vma_name = filename
+                    elif filename.startswith('['):
+                        # Special mappings like [heap], [stack], [vdso], etc.
+                        vma_type = filename
+                        vma_name = filename
+                    else:
+                        # Regular file mapping (executable, data files, etc.)
+                        vma_type = "File Mapping"
+                        vma_name = filename
+                except Exception as e:
+                    # Debug: print exception to understand what's failing
+                    if debug_mode:
+                        print(f"Exception getting filename: {e}")
+                    vma_type = "File Mapping"
+            # Check for shared memory flag (as fallback)
+            elif vm_flags & VM_SHM:
+                vma_type = "Shared Memory (SYSV)"
+            else:
+                # Anonymous mapping
+                if vm_flags & VM_GROWSDOWN:
+                    vma_type = "[stack]"
+                else:
+                    vma_type = "Anonymous"
+
+            # Aggregate size by type
+            if vma_type:
+                if vma_type not in mem_by_type:
+                    mem_by_type[vma_type] = 0
+                mem_by_type[vma_type] += size
+        except:
+            # If we can't categorize, skip
+            pass
 
         print("%10s %s" % (size_str, result_lines[i]), end="")
         if options.longer:
@@ -2225,6 +2297,33 @@ def show_vm(options, pid):
     if options.details:
         print("\n\tPrivate memory pages = %d" % private_mem_pages)
         print("\n\tShared memory pages = %d" % shared_mem_pages)
+
+    # Show graphical breakdown by memory type
+    if len(mem_by_type) > 0:
+        print("\n")
+        crashcolor.set_color(crashcolor.BLUE)
+        print("=" * 80)
+        print("MEMORY BREAKDOWN BY TYPE")
+        print("=" * 80)
+        crashcolor.set_color(crashcolor.RESET)
+
+        # Sort by size (descending)
+        sorted_types = sorted(mem_by_type.items(), key=lambda x: x[1], reverse=True)
+
+        # Display header
+        print("\nTotal Virtual Memory: %s\n" % get_size_str(total_vm_size))
+        print("%-25s %10s %7s  %s" % ("Type", "Size", "Percent", "Usage Bar"))
+        print("-" * 80)
+
+        # Display each type with bar graph
+        for mem_type, size in sorted_types:
+            percentage = (size * 100.0 / total_vm_size) if total_vm_size > 0 else 0
+            bar = get_memory_bar(percentage, width=25)
+
+            print("%-25s %10s %6.2f%%  %s" %
+                  (mem_type[:25], get_size_str(size), percentage, bar))
+
+        print("=" * 80)
 
 
 

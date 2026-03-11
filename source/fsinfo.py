@@ -633,6 +633,62 @@ def pages_to_str(pages):
 #
 # There's a little bit of differece between the calculated totla
 # and the output of kmem -i (CACHED).
+def get_memory_bar(percentage, width=20):
+    """
+    Generate ASCII bar chart for memory usage percentage with 4 gradual shading levels
+    """
+    if percentage < 0:
+        percentage = 0
+    if percentage > 100:
+        percentage = 100
+
+    # Calculate exact filled width (as float to get fractional part)
+    exact_filled = (percentage / 100.0) * width
+    filled_count = int(exact_filled)
+    fraction = exact_filled - filled_count
+
+    # Shading characters for gradual fill
+    empty_char = '░'   # Light shade for empty
+    light_char = '▒'   # Medium shade for 0-33% fill
+    medium_char = '▓'  # Heavy shade for 33-66% fill
+    full_char = '█'    # Full block for 100% fill
+
+    # Build the bar with gradual shading
+    bar_chars = []
+
+    # Add fully filled characters
+    bar_chars.extend([full_char] * filled_count)
+
+    # Add fractional character if there's remaining space
+    if filled_count < width:
+        if fraction >= 0.66:
+            bar_chars.append(full_char)    # 66-100% shows as full (almost complete)
+        elif fraction >= 0.33:
+            bar_chars.append(medium_char)  # 33-66% shows as heavy shade
+        elif fraction > 0:
+            bar_chars.append(light_char)   # 1-33% shows as medium shade
+        else:
+            bar_chars.append(empty_char)   # Exactly 0 shows as empty
+
+    # Fill remaining with empty characters
+    remaining = width - len(bar_chars)
+    bar_chars.extend([empty_char] * remaining)
+
+    bar = '[' + ''.join(bar_chars) + ']'
+
+    # Add color coding based on usage level
+    if percentage >= 90:
+        crashcolor.set_color(crashcolor.RED)
+    elif percentage >= 70:
+        crashcolor.set_color(crashcolor.YELLOW)
+    elif percentage >= 50:
+        crashcolor.set_color(crashcolor.CYAN)
+    else:
+        crashcolor.set_color(crashcolor.GREEN)
+
+    return bar
+
+
 def show_page_caches(options):
     global page_caches
     global wb_caches
@@ -654,35 +710,43 @@ def show_page_caches(options):
 
     sorted_sb_dict = sorted(page_caches.items(),
                             key=operator.itemgetter(1), reverse=True)
+
+    # Calculate total first for percentage calculation
     total_count = 0
+    for sb, count in sorted_sb_dict:
+        total_count = total_count + count
+
     exclude_count = 0
-    print("=" * 79)
-    print("%18s %9s %9s %-12s %-15s // %s" %\
-          ("super_block   ", "pages ", "bytes  ", " s_id", "root", "wb"))
-    print("-" * 79)
+    print("=" * 80)
+    print("%18s %8s %7s %6s  %-22s %s" %
+          ("super_block", "pages", "bytes", "%", "Usage Bar", "root"))
+    print("-" * 80)
     for sb, count in sorted_sb_dict:
         try:
-            total_count = total_count + count
             filename = dentry_to_filename(sb.s_root)
             if filename == "<blank>" or filename == "/dev/":
                 exclude_count = exclude_count + count
                 s_op_name = addr2sym(sb.s_op)
                 if s_op_name == "shmem_ops":
                     filename = "shared memory"
+
             page_bytes = pages_to_str(count)
-            wb_bytes = pages_to_str(wb_caches[sb])
-            print("0x%x %9d (%7s) %-12s %-15s // %s" %
-                  (sb, count, page_bytes, sb.s_id, filename, wb_bytes))
+            percentage = (count * 100.0 / total_count) if total_count > 0 else 0
+            bar = get_memory_bar(percentage, width=20)
+
+            print("0x%16x %8d %7s %5.1f%%  %-22s %s" %
+                  (sb, count, page_bytes, percentage, bar, filename[:20]))
+            crashcolor.set_color(crashcolor.RESET)
         except:
             pass
 
-    print("-" * 79)
+    print("-" * 80)
     print("Total number of page caches = %d (%s)" %
           (total_count, pages_to_str(total_count)))
     pages_without_dev = (total_count - exclude_count)
     print("   (exclude /dev/ and unnamed root) = %d (%s)" %
           (pages_without_dev, pages_to_str(pages_without_dev)))
-    print("=" * 79)
+    print("=" * 80)
 
 
 FS_HAS_WBLIST=131072
