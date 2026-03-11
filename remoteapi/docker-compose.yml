@@ -1,23 +1,24 @@
 #
-# Providing remote supporiting for crash extension
+# Providing remote support for crash extension
 #
 # Written by Daniel Sungju Kwon
 # dkwon@redhat.com
-version: "3.1"
 
 services:
   crashext:
+    container_name: crashext
     image: crashext
     build:
       context: ./web
       dockerfile: crashext.Dockerfile
+    restart: "no"
     ports:
       - "5000:5000"
     volumes:
       - ./web/plugins:/app/plugins:z
-      - ./insights-rules:/insights-rules:z,cached
-      - ${RHEL_SOURCE_DIR}:${RHEL_SOURCE_DIR}:z,cached
+      - ./insights-rules:/insights-rules:z
+      - "${RHEL_SOURCE_DIR:?RHEL_SOURCE_DIR is required}:${RHEL_SOURCE_DIR:?RHEL_SOURCE_DIR is required}:z"
     environment:
-      - RHEL_SOURCE_DIR=${RHEL_SOURCE_DIR}
-      - PYCRASHEXT_PORT=${PYCRASHEXT_PORT}
-      - INSIGHTS_RULES=${INSIGHTS_RULES}
+      RHEL_SOURCE_DIR: ${RHEL_SOURCE_DIR:?RHEL_SOURCE_DIR is required}
+      PYCRASHEXT_PORT: ${PYCRASHEXT_PORT:-5000}
+      INSIGHTS_RULES: ${INSIGHTS_RULES:-}

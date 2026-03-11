@@ -2,23 +2,18 @@ import json
 import sys
 import base64
 import requests as r
+from requests.exceptions import RequestException, Timeout
 import os
 from optparse import OptionParser
 
 
 def ai_send():
+    # Parse options before checking environment so we don't reference orig_query
+    # before assignment and keep behavior consistent.
     try:
         encode_url = os.environ['CRASHEXT_SERVER'] + '/api/ai'
     except:
         encode_url = ""
-
-
-    if encode_url == "":
-        res = "\tCRASHEXT_SERVER environment variable not configured\n\n"\
-               + orig_query
-        print(res, end='')
-        return
-
 
     # Additional options that can pass to the server
     op = OptionParser()
@@ -57,7 +52,6 @@ def ai_send():
                   help="vmcore taskid")
     (o, args) = op.parse_args()
 
-
     orig_query = "".join(sys.stdin.readlines())
     if o.input_file != "":
         try:
@@ -68,7 +62,13 @@ def ai_send():
         except:
             pass
 
-    encoded_query = base64.b64encode(orig_query.encode())
+    if encode_url == "":
+        res = "\tCRASHEXT_SERVER environment variable not configured\n\n" \
+              + orig_query
+        print(res, end='')
+        return
+
+    encoded_query = base64.b64encode(orig_query.encode()).decode("ascii")
 
     data = {"query" : encoded_query}
     data["session_id"] = o.taskid
@@ -99,18 +99,33 @@ def ai_send():
     if o.reset:
         data['reset'] = 'reset'
 
+    parsed = None
     try:
-        res = r.post(encode_url, data = data).text
-        parsed = json.loads(res)
-    except r.exceptions.RequestException as e:
+        timeout_seconds = int(os.environ.get('AI_REQUEST_TIMEOUT', '30'))
+        response = r.post(encode_url, data=data, timeout=timeout_seconds)
+        res = response.text
+        response.raise_for_status()
+        parsed = response.json()
+    except Timeout:
+        res = "\tServer is not reachable.\n" + \
+              "\tServer address is <" + encode_url + ">" + \
+              "\n" + orig_query
+    except RequestException as e:
+        res = "\tServer request failed: " + str(e) + \
+              "\n" + orig_query
+    except ValueError:
         res = "\tServer is not reachable.\n" + \
               "\tServer address is <" + encode_url + ">" + \
               "\n" + orig_query
     except:
-        res = "\tUnexpected error:" + sys.exc_info()[0] + \
+        res = "\tUnexpected error.\n" + str(sys.exc_info()[0]) + \
               "\n" + orig_query
 
     # Print the result
+    if parsed is None:
+        print(res, end='')
+        return
+
     try:
         from rich.console import Console
         from rich.markdown import Markdown
@@ -119,11 +134,17 @@ def ai_send():
         except:
             code_theme = "tango"
 
+        if "response" not in parsed:
+            raise KeyError("response")
+
         console = Console(color_system="truecolor")
         console.print(Markdown(parsed['response'], code_theme=code_theme))
         #console.print(Markdown(parsed['response'], code_theme="manni"))
     except:
-        print(parsed['response'])
+        if isinstance(parsed, dict) and "response" in parsed:
+            print(parsed["response"])
+        else:
+            print(res, end='')
         print("\nNotes) 'pip install rich' can enhance the output", end='')
 
 

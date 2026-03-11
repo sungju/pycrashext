@@ -23,24 +23,45 @@ from pykdump.API import *
 from os.path import expanduser
 import os
 import sys
+import time
+import shlex
+import tempfile
 
 
 def run_command_with_file(func, command, file_content):
     """exec_gdb_command() is failing to capture the output
     if the command is with '!' which is important to execute
     shell commands. Below will capture it properly."""
+    temp_output_name = ""
+    temp_error_name = ""
+    temp_input_name = ""
+    lines = ""
+
+    def _safe_remove(path_name):
+        try:
+            if path_name != "" and os.path.exists(path_name):
+                os.remove(path_name)
+        except:
+            pass
+
     try:
-        temp_output_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-output-tmp")
-        temp_error_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-error-tmp")
-        temp_input_name = expanduser("~") + "/" + time.strftime("%Y%m%d-%H%M%S-pycrashext-input-tmp")
-        command = command + " > " + temp_output_name + " 2> " + temp_error_name
+        tmp_output = tempfile.NamedTemporaryFile(delete=False, prefix="pycrashext-output-", suffix=".txt")
+        tmp_error = tempfile.NamedTemporaryFile(delete=False, prefix="pycrashext-error-", suffix=".txt")
+        temp_output_name = tmp_output.name
+        temp_error_name = tmp_error.name
+        tmp_output.close()
+        tmp_error.close()
+
+        command = command + " > " + shlex.quote(temp_output_name) + \
+                " 2> " + shlex.quote(temp_error_name)
         if file_content != "":
-            with open(temp_input_name, 'w') as f:
-                f.write(file_content)
-            command = command + " < " + temp_input_name
+            with tempfile.NamedTemporaryFile(delete=False, mode='w',
+                                            prefix="pycrashext-input-", suffix=".txt") as fp:
+                fp.write(file_content)
+                temp_input_name = fp.name
+            command = command + " < " + shlex.quote(temp_input_name)
 
         func(command)
-        lines = ""
         if os.path.exists(temp_output_name):
             with open(temp_output_name, 'r') as f:
                 try:
@@ -54,15 +75,11 @@ def run_command_with_file(func, command, file_content):
                     lines = lines + "".join(f.readlines())
                 except:
                     lines = "Failed to read " + temp_error_name
-
-        try:
-            os.remove(temp_output_name)
-            os.remove(temp_error_name)
-            os.remove(temp_input_name)
-        except:
-            pass
     except Exception as e:
         lines = str(e)
+    finally:
+        for tmp_name in [temp_output_name, temp_error_name, temp_input_name]:
+            _safe_remove(tmp_name)
 
     return lines
 
@@ -90,7 +107,10 @@ def run_crash_command_with_file(command, file_content):
 def get_sizeof_struct(struct_name):
     result_size = 0
     try:
-        result_str = run_crsh_command(struct_name).splitlines()[-1]
+        output_lines = run_crash_command(struct_name).splitlines()
+        if len(output_lines) == 0:
+            return result_size
+        result_str = output_lines[-1]
         size_str = result_str.split()[1]
         if size_str.startswith("0x"):
             result_size = int(size_str, 16)
@@ -101,4 +121,3 @@ def get_sizeof_struct(struct_name):
         pass
 
     return result_size
-
