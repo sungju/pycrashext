@@ -2194,6 +2194,31 @@ def show_vm(options, pid):
         print(result_str)
         return
 
+    # Extract process name and PID from the first line
+    # Format: PID: 15539    TASK: ff235ea432eb0000  CPU: 3    COMMAND: "P37_00_DIA_W85"
+    process_name = "unknown"
+    actual_pid = pid
+    if total_lines > 0:
+        try:
+            # The first line contains PID and COMMAND
+            first_line = result_lines[0]
+            # Parse the vm command output format
+            # Example: PID: 15539    TASK: ff235ea432eb0000  CPU: 3    COMMAND: "P37_00_DIA_W85"
+            if "PID:" in first_line and "COMMAND:" in first_line:
+                # Extract PID
+                if pid == -1:
+                    pid_part = first_line.split("TASK:")[0]  # Get the part before TASK:
+                    pid_str = pid_part.split("PID:")[1].strip()  # Get the number after PID:
+                    actual_pid = int(pid_str)
+
+                # Extract COMMAND (process name)
+                cmd_part = first_line.split("COMMAND:")[1].strip()  # Get the part after COMMAND:
+                # Remove quotes if present
+                process_name = cmd_part.strip('"')
+        except Exception as e:
+            if debug_mode:
+                print("Error parsing vm output: %s" % str(e))
+
     for i in range(0, 3):
         print(result_lines[i])
     print("%10s %s" % ("", result_lines[3]))
@@ -2303,7 +2328,10 @@ def show_vm(options, pid):
         print("\n")
         crashcolor.set_color(crashcolor.BLUE)
         print("=" * 80)
-        print("MEMORY BREAKDOWN BY TYPE")
+        if actual_pid != -1:
+            print("MEMORY BREAKDOWN BY TYPE FOR \"%s\" (%d)" % (process_name, actual_pid))
+        else:
+            print("MEMORY BREAKDOWN BY TYPE")
         print("=" * 80)
         crashcolor.set_color(crashcolor.RESET)
 
