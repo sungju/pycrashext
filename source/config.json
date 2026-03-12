@@ -181,10 +181,10 @@
 			"help"    : "Using AI model to check the command output"
 		},
 		{
-			"command" : "git",
+			"command" : "rgit",
 			"desc"    : "Execute git log/show on remote source server",
 			"options" : "-h   - list available options",
-			"help"    : "Execute git log/show commands in remote kernel source repositories\n\nUsage:\n  git <log|show> [git-options]\n\nSubcommands:\n  log              Search git log (supports all git log options, default: --max-count=1)\n  show             Show commit details (supports all git show options)\n\nOptions:\n  --repos=<repos>  Comma-separated list of repos (e.g., rhel9,linux,upstream)\n  --timeout=<n>    Request timeout in seconds (default: 3600)\n  --verbose        Show verbose output\n  -h, --help       Show help\n\nExamples:\n  git log -Sclip_push --max-count=5\n  git show abc123def --stat\n  git log -Sinit_new_ldt --repos=rhel9,upstream"
+			"help"    : "Execute git log/show commands in remote kernel source repositories\n\nUsage:\n  rgit <log|show> [git-options]\n\nSubcommands:\n  log              Search git log (supports all git log options, default: --max-count=1)\n  show             Show commit details (supports all git show options)\n\nOptions:\n  --repos=<repos>  Comma-separated list of repos (e.g., rhel9,linux,upstream)\n  --timeout=<n>    Request timeout in seconds (default: 3600)\n  --verbose        Show verbose output\n  -h, --help       Show help\n\nExamples:\n  rgit log -Sclip_push --max-count=5\n  rgit show abc123def --stat\n  rgit log -Sinit_new_ldt --repos=rhel9,upstream"
 		}
 	]
 }
