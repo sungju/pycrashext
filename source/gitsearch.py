@@ -1,0 +1,105 @@
+"""
+Written by Daniel Sungju Kwon
+
+Search git log in remote source server for matching commits
+"""
+
+from pykdump.API import *
+from LinuxDump import Tasks
+
+import sys
+import os
+from os.path import expanduser
+import base64
+import requests as r
+
+import crashcolor
+import crashhelper
+
+
+def gitsearch():
+    op = OptionParser()
+    op.add_option('-l', '--lines', dest='lines', default=20,
+                  action='store', type='int',
+                  help='Maximum lines to show per commit (default: 20, use 0 for all)')
+
+    op.add_option('-m', '--maxmatch', dest='maxmatch', default=5,
+                  action='store', type='int',
+                  help='Maximum matching commits to show (default: 5, use 0 for all)')
+
+    op.add_option('-e', '--extraversion', dest='extraversion', default='',
+                  action='store', type='string',
+                  help='Additional RHEL versions to search (comma-separated, e.g., rhel9,rhel10,rhel7)')
+
+    op.add_option('-v', '--verbose', dest='verbose', default=False,
+                  action='store_true',
+                  help='Show verbose output')
+
+    op.add_option('--context', dest='context', default=False,
+                  action='store_true',
+                  help='Show file context in patches')
+
+    (o, args) = op.parse_args()
+
+    if len(args) == 0:
+        op.print_help()
+        return
+
+    search_pattern = ' '.join(args)
+
+    # Check if CRASHEXT_SERVER is configured
+    try:
+        server_url = os.environ['CRASHEXT_SERVER']
+    except:
+        print("CRASHEXT_SERVER environment variable not configured")
+        print("\nPlease set it to your remote source server URL:")
+        print("  export CRASHEXT_SERVER=http://your-server:5000")
+        return
+
+    # Get kernel version for context
+    try:
+        kernel_ver = exec_crash_command("sys | grep RELEASE").split()[2]
+    except:
+        kernel_ver = "unknown"
+
+    # Prepare request data
+    data = {
+        'pattern': search_pattern,
+        'lines': o.lines,
+        'maxmatch': o.maxmatch,
+        'extraversion': o.extraversion,
+        'verbose': o.verbose,
+        'context': o.context,
+        'kernel_version': kernel_ver
+    }
+
+    # Make API request
+    api_url = server_url + '/api/gitsearch'
+
+    try:
+        if o.verbose:
+            print("Searching for: %s" % search_pattern)
+            print("Connecting to: %s" % api_url)
+
+        response = r.post(api_url, data=data, timeout=300)
+
+        if response.status_code == 200:
+            print(response.text)
+        else:
+            print("Error: Server returned status code %d" % response.status_code)
+            print(response.text)
+
+    except r.exceptions.RequestException as e:
+        print("\nServer is not reachable.")
+        print("Server address is <%s>" % api_url)
+        print("\nError: %s" % str(e))
+        print("\nMake sure:")
+        print("  1. CRASHEXT_SERVER is set correctly")
+        print("  2. The remote server is running")
+        print("  3. Network connectivity is available")
+    except Exception as e:
+        print("Unexpected error: %s" % str(e))
+
+
+if __name__ == '__main__':
+    gitsearch()
