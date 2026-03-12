@@ -69,11 +69,19 @@ def set_kernel_version(asm_str):
     if cur_kernel_version == kernel_version:
         return kernel_version
 
+    # Validate kernel_version format to prevent command injection
+    # Allow alphanumeric, dots, dashes, underscores
+    if not re.match(r'^[a-zA-Z0-9._-]+$', kernel_version):
+        return "FAILED: Invalid kernel version format: %s" % kernel_version
+
     try:
-        process = subprocess.Popen('git checkout -f ' + kernel_version,
-                                   shell=True,
-                                   stdout=subprocess.PIPE,
-                                   stderr=subprocess.PIPE)
+        # Use subprocess without shell=True to prevent command injection
+        process = subprocess.Popen(
+            ['git', 'checkout', '-f', kernel_version],
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
         result = process.wait()
         out = b"".join(process.stdout.readlines())
         err = b"".join(process.stderr.readlines())
@@ -83,22 +91,38 @@ def set_kernel_version(asm_str):
             print("Initial git checkout failed for %s, attempting to fetch from remotes..." % kernel_version)
 
             # Get list of all remotes
-            remote_process = subprocess.Popen('git remote -v | awk \'{ print $1 }\' | sort | uniq',
-                                            shell=True,
-                                            stdout=subprocess.PIPE,
-                                            stderr=subprocess.PIPE)
+            remote_process = subprocess.Popen(
+                ['git', 'remote', '-v'],
+                shell=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
             remote_process.wait()
-            remotes = remote_process.stdout.read().decode("utf-8").strip().split('\n')
+            remote_output = remote_process.stdout.read().decode("utf-8")
+
+            # Parse remotes manually instead of using awk/sort/uniq
+            remotes = set()
+            for line in remote_output.strip().split('\n'):
+                if line.strip():
+                    parts = line.split()
+                    if len(parts) >= 1:
+                        remotes.add(parts[0])
 
             # Fetch from each remote
             fetch_success = False
             for remote in remotes:
                 if remote.strip():  # Skip empty lines
+                    # Validate remote name format
+                    if not re.match(r'^[a-zA-Z0-9._-]+$', remote):
+                        continue
+
                     print("Fetching from %s..." % remote)
-                    fetch_process = subprocess.Popen('git fetch %s --tags -f' % remote,
-                                                    shell=True,
-                                                    stdout=subprocess.PIPE,
-                                                    stderr=subprocess.PIPE)
+                    fetch_process = subprocess.Popen(
+                        ['git', 'fetch', remote, '--tags', '-f'],
+                        shell=False,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE
+                    )
                     fetch_result = fetch_process.wait()
                     if fetch_result == 0:
                         fetch_success = True
@@ -106,10 +130,12 @@ def set_kernel_version(asm_str):
             # Try git checkout again after fetching
             if fetch_success:
                 print("Retrying git checkout after fetch...")
-                retry_process = subprocess.Popen('git checkout -f ' + kernel_version,
-                                               shell=True,
-                                               stdout=subprocess.PIPE,
-                                               stderr=subprocess.PIPE)
+                retry_process = subprocess.Popen(
+                    ['git', 'checkout', '-f', kernel_version],
+                    shell=False,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE
+                )
                 retry_result = retry_process.wait()
                 retry_out = b"".join(retry_process.stdout.readlines())
                 retry_err = b"".join(retry_process.stderr.readlines())

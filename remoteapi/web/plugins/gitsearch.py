@@ -138,21 +138,29 @@ def git_checkout_latest(repo_path):
         os.chdir(repo_path)
 
         # Get the default branch (usually main or master)
+        # Use subprocess without shell=True to prevent command injection
         branch_process = subprocess.Popen(
-            'git --no-pager remote show origin | grep "HEAD branch" | cut -d: -f2',
-            shell=True,
+            ['git', '--no-pager', 'remote', 'show', 'origin'],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
         branch_process.wait()
-        default_branch = branch_process.stdout.read().decode('utf-8').strip()
+        remote_output = branch_process.stdout.read().decode('utf-8')
+
+        # Parse output to find HEAD branch
+        default_branch = ''
+        for line in remote_output.splitlines():
+            if 'HEAD branch' in line:
+                default_branch = line.split(':', 1)[1].strip()
+                break
 
         if not default_branch:
             # Fallback to common branch names
             for branch in ['main', 'master', 'trunk']:
                 check_process = subprocess.Popen(
-                    'git --no-pager rev-parse --verify %s' % branch,
-                    shell=True,
+                    ['git', '--no-pager', 'rev-parse', '--verify', branch],
+                    shell=False,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
                 )
@@ -163,11 +171,15 @@ def git_checkout_latest(repo_path):
         if not default_branch:
             default_branch = 'master'  # Ultimate fallback
 
+        # Validate branch name format (alphanumeric, slashes, dashes, underscores)
+        if not re.match(r'^[a-zA-Z0-9/_-]+$', default_branch):
+            os.chdir(original_dir)
+            return False, "Invalid branch name format: %s" % default_branch
+
         # Fetch latest changes (doesn't require clean working directory)
-        fetch_cmd = 'git --no-pager fetch origin %s' % default_branch
         fetch_process = subprocess.Popen(
-            fetch_cmd,
-            shell=True,
+            ['git', '--no-pager', 'fetch', 'origin', default_branch],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -179,10 +191,24 @@ def git_checkout_latest(repo_path):
             return False, "Failed to fetch: %s" % fetch_err
 
         # Reset to latest (discards any local changes - safe for read-only source repos)
-        reset_cmd = 'git --no-pager checkout -f %s && git --no-pager reset --hard origin/%s' % (default_branch, default_branch)
+        # Execute checkout
+        checkout_process = subprocess.Popen(
+            ['git', '--no-pager', 'checkout', '-f', default_branch],
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        checkout_result = checkout_process.wait()
+        checkout_err = checkout_process.stderr.read().decode('utf-8')
+
+        if checkout_result != 0:
+            os.chdir(original_dir)
+            return False, "Failed to checkout: %s" % checkout_err
+
+        # Execute reset
         reset_process = subprocess.Popen(
-            reset_cmd,
-            shell=True,
+            ['git', '--no-pager', 'reset', '--hard', 'origin/' + default_branch],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -230,12 +256,10 @@ def search_git_log(repo_path, pattern, max_lines=30, max_commits=1, show_context
             search_limit = max_commits
 
         # Simple git log search with --grep and --max-count
-        # Use --format=%H to get just commit hashes, one per line
-        git_cmd = 'git --no-pager log --format=%%H --grep="%s" --max-count=%d' % (pattern, search_limit)
-
+        # Use subprocess with argument list to prevent command injection
         process = subprocess.Popen(
-            git_cmd,
-            shell=True,
+            ['git', '--no-pager', 'log', '--format=%H', '--grep=' + pattern, '--max-count=' + str(search_limit)],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -263,15 +287,19 @@ def search_git_log(repo_path, pattern, max_lines=30, max_commits=1, show_context
         # Get detailed info for each commit
         results = []
         for commit in commits:
-            # Get commit details
-            show_cmd = 'git --no-pager show --stat %s' % commit
+            # Validate commit hash format (40 hex characters)
+            if not re.match(r'^[a-f0-9]{7,40}$', commit):
+                continue  # Skip invalid commit hashes
 
+            # Get commit details - use argument list to prevent command injection
             if show_context:
-                show_cmd = 'git --no-pager show %s' % commit
+                git_args = ['git', '--no-pager', 'show', commit]
+            else:
+                git_args = ['git', '--no-pager', 'show', '--stat', commit]
 
             detail_process = subprocess.Popen(
-                show_cmd,
-                shell=True,
+                git_args,
+                shell=False,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
@@ -333,12 +361,15 @@ def show_commit(repo_path, commit_id):
         original_dir = os.getcwd()
         os.chdir(repo_path)
 
-        # Show full commit content
-        git_cmd = 'git --no-pager show %s' % commit_id
+        # Validate commit_id format (alphanumeric, dots, dashes, underscores only)
+        if not re.match(r'^[a-zA-Z0-9._-]+$', commit_id):
+            os.chdir(original_dir)
+            return False, "Error: Invalid commit ID format"
 
+        # Show full commit content - use argument list to prevent command injection
         process = subprocess.Popen(
-            git_cmd,
-            shell=True,
+            ['git', '--no-pager', 'show', commit_id],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -398,6 +429,10 @@ def gitsearch():
 
         # Determine which directory to use
         if extraversion:
+            # Validate extraversion to prevent path traversal
+            if '..' in extraversion or extraversion.startswith('/') or '/' in extraversion or '\\' in extraversion:
+                return "Error: Invalid extraversion parameter - path traversal not allowed"
+
             # User specified a specific version (e.g., rhel8, rhel9, linux, etc.)
             try:
                 base_dir = os.environ['RHEL_SOURCE_DIR']
@@ -405,6 +440,12 @@ def gitsearch():
                 version_name = extraversion
             except KeyError:
                 return "Error: RHEL_SOURCE_DIR environment variable not set"
+
+            # Normalize path and verify it's within base_dir
+            repo_path = os.path.normpath(repo_path)
+            base_dir_normalized = os.path.normpath(base_dir)
+            if not repo_path.startswith(base_dir_normalized + os.sep):
+                return "Error: Path traversal detected in extraversion parameter"
 
             if not os.path.isdir(repo_path):
                 return "Error: Directory not found: %s" % repo_path
@@ -503,7 +544,21 @@ def gitsearch():
         extra_versions = [v.strip() for v in extraversion.split(',')]
 
         for version in extra_versions:
+            # Validate version to prevent path traversal
+            if '..' in version or version.startswith('/') or '/' in version or '\\' in version:
+                results.append(YELLOW + "[%s] Invalid version parameter - path traversal not allowed" % version + RESET)
+                results.append("")
+                continue
+
             version_path = os.path.join(base_dir, version)
+
+            # Normalize path and verify it's within base_dir
+            version_path = os.path.normpath(version_path)
+            base_dir_normalized = os.path.normpath(base_dir)
+            if not version_path.startswith(base_dir_normalized + os.sep):
+                results.append(YELLOW + "[%s] Path traversal detected" % version + RESET)
+                results.append("")
+                continue
 
             if not os.path.isdir(version_path):
                 results.append(YELLOW + "[%s] Directory not found: %s" % (version, version_path) + RESET)
