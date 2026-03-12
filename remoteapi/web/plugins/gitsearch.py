@@ -56,7 +56,7 @@ def git_checkout_latest(repo_path):
 
         # Get the default branch (usually main or master)
         branch_process = subprocess.Popen(
-            'git remote show origin | grep "HEAD branch" | cut -d: -f2',
+            'git --no-pager remote show origin | grep "HEAD branch" | cut -d: -f2',
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -68,7 +68,7 @@ def git_checkout_latest(repo_path):
             # Fallback to common branch names
             for branch in ['main', 'master', 'trunk']:
                 check_process = subprocess.Popen(
-                    'git rev-parse --verify %s' % branch,
+                    'git --no-pager rev-parse --verify %s' % branch,
                     shell=True,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE
@@ -81,7 +81,7 @@ def git_checkout_latest(repo_path):
             default_branch = 'master'  # Ultimate fallback
 
         # Checkout the latest
-        checkout_cmd = 'git checkout %s && git pull origin %s' % (default_branch, default_branch)
+        checkout_cmd = 'git --no-pager checkout %s && git --no-pager pull origin %s' % (default_branch, default_branch)
         process = subprocess.Popen(
             checkout_cmd,
             shell=True,
@@ -138,16 +138,18 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         # Search in commit messages and diffs
         # Use -S to search for string in diffs, --all to search all branches
         # Add --max-count to limit how far back git searches
-        git_cmd = 'git log --all --oneline --source --decorate --max-count=%d' % search_limit
+        # Use --no-pager to output immediately without buffering
+        git_cmd = 'git --no-pager log --all --oneline --source --decorate --max-count=%d' % search_limit
 
         # Add pickaxe search for pattern in diffs
         git_cmd += ' -S"%s"' % pattern
 
         # Also search in commit messages
-        grep_cmd = 'git log --all --oneline --source --decorate --max-count=%d --grep="%s"' % (search_limit, pattern)
+        grep_cmd = 'git --no-pager log --all --oneline --source --decorate --max-count=%d --grep="%s"' % (search_limit, pattern)
 
         # Combine both searches
         combined_cmd = '{ %s; %s; } | sort -u' % (git_cmd, grep_cmd)
+        print(combined_cmd)
 
         process = subprocess.Popen(
             combined_cmd,
@@ -157,6 +159,7 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         )
         process.wait()
         commit_list = process.stdout.read().decode('utf-8').strip()
+        print(commit_list)
 
         if not commit_list:
             os.chdir(original_dir)
@@ -182,10 +185,10 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         results = []
         for commit in commits:
             # Get commit details
-            show_cmd = 'git show --stat %s' % commit
+            show_cmd = 'git --no-pager show --stat %s' % commit
 
             if show_context:
-                show_cmd = 'git show %s' % commit
+                show_cmd = 'git --no-pager show %s' % commit
 
             detail_process = subprocess.Popen(
                 show_cmd,
