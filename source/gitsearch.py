@@ -43,13 +43,20 @@ def gitsearch():
                   action='store', type='int',
                   help='Request timeout in seconds (default: 3600 = 1 hour)')
 
+    op.add_option('-c', '--commit', dest='commit', default='',
+                  action='store', type='string',
+                  help='Show full content of a specific commit ID')
+
     (o, args) = op.parse_args()
 
-    if len(args) == 0:
+    # For --commit option, no search pattern needed
+    if o.commit:
+        search_pattern = ''
+    elif len(args) == 0:
         op.print_help()
         return
-
-    search_pattern = ' '.join(args)
+    else:
+        search_pattern = ' '.join(args)
 
     # Check if CRASHEXT_SERVER is configured
     try:
@@ -81,7 +88,8 @@ def gitsearch():
         'extraversion': o.extraversion,
         'verbose': o.verbose,
         'context': o.context,
-        'kernel_version': kernel_ver
+        'kernel_version': kernel_ver,
+        'commit': o.commit
     }
 
     # Make API request

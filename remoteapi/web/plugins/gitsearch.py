@@ -248,6 +248,52 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         return False, "Exception during search: %s" % str(e)
 
 
+def show_commit(repo_path, commit_id):
+    """
+    Show full content of a specific commit.
+
+    Args:
+        repo_path: Path to git repository
+        commit_id: Commit hash or reference
+
+    Returns:
+        tuple: (success, commit_content)
+    """
+    try:
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+
+        # Show full commit content
+        git_cmd = 'git --no-pager show %s' % commit_id
+
+        process = subprocess.Popen(
+            git_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        process.wait()
+        commit_content = process.stdout.read().decode('utf-8')
+        error_output = process.stderr.read().decode('utf-8')
+
+        os.chdir(original_dir)
+
+        if error_output and ('fatal:' in error_output or 'error:' in error_output):
+            return False, "Error: %s" % error_output
+
+        if not commit_content:
+            return False, "No content found for commit %s" % commit_id
+
+        return True, commit_content
+
+    except Exception as e:
+        try:
+            os.chdir(original_dir)
+        except:
+            pass
+        return False, "Exception during show commit: %s" % str(e)
+
+
 def gitsearch():
     """
     Main gitsearch endpoint handler.
@@ -256,16 +302,75 @@ def gitsearch():
     """
     # Get parameters from request
     try:
-        pattern = request.form['pattern']
+        pattern = request.form.get('pattern', '')
         lines = int(request.form.get('lines', 20))
         maxmatch = int(request.form.get('maxmatch', 5))
         extraversion = request.form.get('extraversion', '')
         verbose = request.form.get('verbose', 'False') == 'True'
         show_context = request.form.get('context', 'False') == 'True'
         kernel_version = request.form.get('kernel_version', 'unknown')
+        commit_id = request.form.get('commit', '')
     except Exception as e:
         return "Error parsing request parameters: %s" % str(e)
 
+    # Handle --commit option (show specific commit)
+    if commit_id:
+        results = []
+        separator = "=" * 80
+
+        # Determine which directory to use
+        if extraversion:
+            # User specified a specific version (e.g., rhel8, rhel9, linux, etc.)
+            try:
+                base_dir = os.environ['RHEL_SOURCE_DIR']
+                repo_path = os.path.join(base_dir, extraversion)
+                version_name = extraversion
+            except KeyError:
+                return "Error: RHEL_SOURCE_DIR environment variable not set"
+
+            if not os.path.isdir(repo_path):
+                return "Error: Directory not found: %s" % repo_path
+        else:
+            # Use current RHEL version from kernel
+            current_dir, current_version = get_current_rhel_dir(kernel_version)
+            if not current_dir:
+                return "Error: Could not detect RHEL version from kernel version '%s'\n" \
+                       "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
+                       "Or RHEL_SOURCE_DIR not set" % kernel_version
+            repo_path = current_dir
+            version_name = current_version
+
+        # Add header
+        results.append(separator)
+        results.append("Git Commit Details")
+        results.append("Commit ID: %s" % commit_id)
+        results.append("Repository: %s" % version_name)
+        results.append(separator)
+        results.append("")
+
+        if verbose:
+            results.append("Checking out latest code...")
+
+        success, msg = git_checkout_latest(repo_path)
+        if not success:
+            results.append("Warning: %s" % msg)
+        elif verbose:
+            results.append(msg)
+
+        # Show the commit
+        success, commit_content = show_commit(repo_path, commit_id)
+        if success:
+            results.append(commit_content)
+        else:
+            results.append(commit_content)  # Error message
+
+        # Add footer
+        results.append("")
+        results.append(separator)
+
+        return '\n'.join(results)
+
+    # Regular search (no --commit option)
     # Get base RHEL source directory (detect from kernel version)
     current_dir, current_version = get_current_rhel_dir(kernel_version)
     if not current_dir:
