@@ -15,6 +15,70 @@ def add_plugin_rule(app):
     app.add_url_rule('/api/gitsearch', 'gitsearch', gitsearch, methods=['POST'])
 
 
+def colorize_git_output(text):
+    """
+    Add ANSI color codes to git output (commit messages and diffs).
+
+    Colors:
+    - Commit hashes: Yellow
+    - Author/Date: Cyan
+    - Diff headers (diff --git, +++, ---): Bold white
+    - Added lines (+): Green
+    - Removed lines (-): Red
+    - File paths (@@ ... @@): Magenta
+    """
+    # ANSI color codes
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    MAGENTA = "\033[35m"
+    BOLD_WHITE = "\033[1;37m"
+    BLUE = "\033[34m"
+    RESET = "\033[0m"
+
+    lines = text.split('\n')
+    colored_lines = []
+
+    for line in lines:
+        # Commit hash line (starts with "commit ")
+        if line.startswith('commit '):
+            colored_lines.append(YELLOW + line + RESET)
+
+        # Author and Date lines
+        elif line.startswith('Author:') or line.startswith('Date:'):
+            colored_lines.append(CYAN + line + RESET)
+
+        # Diff header lines (diff --git, index, ---, +++)
+        elif (line.startswith('diff --git') or
+              line.startswith('index ') or
+              line.startswith('new file mode') or
+              line.startswith('deleted file mode')):
+            colored_lines.append(BOLD_WHITE + line + RESET)
+
+        # File markers in diff
+        elif line.startswith('---') or line.startswith('+++'):
+            colored_lines.append(BLUE + line + RESET)
+
+        # Line number markers (@@ ... @@)
+        elif line.startswith('@@'):
+            colored_lines.append(MAGENTA + line + RESET)
+
+        # Added lines (start with +)
+        elif line.startswith('+') and len(line) > 1:
+            colored_lines.append(GREEN + line + RESET)
+
+        # Removed lines (start with -)
+        elif line.startswith('-') and len(line) > 1:
+            colored_lines.append(RED + line + RESET)
+
+        # Regular lines
+        else:
+            colored_lines.append(line)
+
+    return '\n'.join(colored_lines)
+
+
 def get_current_rhel_dir(kernel_version='unknown'):
     """
     Determine the current RHEL source directory based on kernel version from vmcore.
@@ -221,16 +285,22 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
                     commit_detail = '\n'.join(lines[:max_lines])
                     commit_detail += '\n... (output truncated, %d more lines)' % (len(lines) - max_lines)
 
-            results.append(commit_detail)
+            # Apply syntax coloring
+            colored_detail = colorize_git_output(commit_detail)
+
+            results.append(colored_detail)
 
         os.chdir(original_dir)
 
         # Format final output
+        BOLD_WHITE = "\033[1;37m"
+        RESET = "\033[0m"
         separator = "=" * 80
         output = []
 
         for i, result in enumerate(results, 1):
-            output.append("%s\nCommit %d/%d\n%s" % (separator, i, len(results), separator))
+            header = "%s\nCommit %d/%d\n%s" % (separator, i, len(results), separator)
+            output.append(BOLD_WHITE + header + RESET)
             output.append(result)
 
         if truncated:
@@ -284,7 +354,10 @@ def show_commit(repo_path, commit_id):
         if not commit_content:
             return False, "No content found for commit %s" % commit_id
 
-        return True, commit_content
+        # Apply syntax coloring
+        colored_content = colorize_git_output(commit_content)
+
+        return True, colored_content
 
     except Exception as e:
         try:
@@ -315,6 +388,11 @@ def gitsearch():
 
     # Handle --commit option (show specific commit)
     if commit_id:
+        # Color constants
+        BOLD_WHITE = "\033[1;37m"
+        CYAN = "\033[36m"
+        RESET = "\033[0m"
+
         results = []
         separator = "=" * 80
 
@@ -340,12 +418,12 @@ def gitsearch():
             repo_path = current_dir
             version_name = current_version
 
-        # Add header
-        results.append(separator)
-        results.append("Git Commit Details")
-        results.append("Commit ID: %s" % commit_id)
-        results.append("Repository: %s" % version_name)
-        results.append(separator)
+        # Add header with colors
+        results.append(BOLD_WHITE + separator + RESET)
+        results.append(BOLD_WHITE + "Git Commit Details" + RESET)
+        results.append(CYAN + "Commit ID: %s" % commit_id + RESET)
+        results.append(CYAN + "Repository: %s" % version_name + RESET)
+        results.append(BOLD_WHITE + separator + RESET)
         results.append("")
 
         if verbose:
@@ -364,9 +442,9 @@ def gitsearch():
         else:
             results.append(commit_content)  # Error message
 
-        # Add footer
+        # Add footer with colors
         results.append("")
-        results.append(separator)
+        results.append(BOLD_WHITE + separator + RESET)
 
         return '\n'.join(results)
 
@@ -378,24 +456,30 @@ def gitsearch():
                "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
                "Or RHEL_SOURCE_DIR not set" % kernel_version
 
+    # Color constants
+    BOLD_WHITE = "\033[1;37m"
+    CYAN = "\033[36m"
+    YELLOW = "\033[33m"
+    RESET = "\033[0m"
+
     results = []
     separator = "=" * 80
 
     # Determine actual search limit for display
     display_limit = 1000 if maxmatch == 0 else maxmatch
 
-    # Add header
-    results.append(separator)
-    results.append("Git Log Search Results")
-    results.append("Search pattern: %s" % pattern)
-    results.append("Kernel version: %s" % kernel_version)
-    results.append("Max commits (git --max-count): %s" % ('1000' if maxmatch == 0 else maxmatch))
-    results.append("Max lines per commit: %s" % ('all' if lines == 0 else lines))
-    results.append(separator)
+    # Add header with colors
+    results.append(BOLD_WHITE + separator + RESET)
+    results.append(BOLD_WHITE + "Git Log Search Results" + RESET)
+    results.append(CYAN + "Search pattern: %s" % pattern + RESET)
+    results.append(CYAN + "Kernel version: %s" % kernel_version + RESET)
+    results.append(CYAN + "Max commits (git --max-count): %s" % ('1000' if maxmatch == 0 else maxmatch) + RESET)
+    results.append(CYAN + "Max lines per commit: %s" % ('all' if lines == 0 else lines) + RESET)
+    results.append(BOLD_WHITE + separator + RESET)
     results.append("")
 
     # Search in current version
-    results.append("[Searching in %s]" % current_version)
+    results.append(YELLOW + "[Searching in %s]" % current_version + RESET)
 
     if verbose:
         results.append("Checking out latest code...")
@@ -422,12 +506,12 @@ def gitsearch():
             version_path = os.path.join(base_dir, version)
 
             if not os.path.isdir(version_path):
-                results.append("[%s] Directory not found: %s" % (version, version_path))
+                results.append(YELLOW + "[%s] Directory not found: %s" % (version, version_path) + RESET)
                 results.append("")
                 continue
 
-            results.append(separator)
-            results.append("[Searching in %s]" % version)
+            results.append(BOLD_WHITE + separator + RESET)
+            results.append(YELLOW + "[Searching in %s]" % version + RESET)
 
             if verbose:
                 results.append("Checking out latest code...")
@@ -445,9 +529,9 @@ def gitsearch():
             results.append(search_results)
             results.append("")
 
-    # Add footer
-    results.append(separator)
-    results.append("Search complete")
-    results.append(separator)
+    # Add footer with colors
+    results.append(BOLD_WHITE + separator + RESET)
+    results.append(BOLD_WHITE + "Search complete" + RESET)
+    results.append(BOLD_WHITE + separator + RESET)
 
     return '\n'.join(results)
