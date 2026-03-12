@@ -184,7 +184,7 @@
 			"command" : "gitsearch",
 			"desc"    : "Search git log in remote source server",
 			"options" : "-h   - list available options",
-			"help"    : "Search git log for commits matching a pattern\n\n--lines=<n>        - Max lines per commit (default: 20, 0 for all)\n--maxmatch=<n>     - Max commits to search/return (default: 5, 0 for 1000)\n--extraversion=... - Search additional versions (e.g., rhel9,rhel10,rhel7)\n--timeout=<n>      - Request timeout in seconds (default: 3600 = 1 hour)\n--verbose          - Show verbose output\n--context          - Show file context in patches"
+			"help"    : "Search git log for commits matching a pattern\n\n--lines=<n>        - Max lines per commit (default: 20, 0 for all)\n--maxmatch=<n>     - Max commits to search/return (default: 5, 0 for 1000)\n--extraversion=... - Search additional directories (e.g., rhel9,linux,upstream)\n--timeout=<n>      - Request timeout in seconds (default: 3600 = 1 hour)\n--verbose          - Show verbose output\n--context          - Show file context in patches"
 		}
 	]
 }

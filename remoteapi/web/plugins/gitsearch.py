@@ -15,28 +15,47 @@ def add_plugin_rule(app):
     app.add_url_rule('/api/gitsearch', 'gitsearch', gitsearch, methods=['POST'])
 
 
-def get_current_rhel_dir():
+def get_current_rhel_dir(kernel_version='unknown'):
     """
-    Determine the current RHEL source directory based on environment.
+    Determine the current RHEL source directory based on kernel version from vmcore.
+
+    Args:
+        kernel_version: Kernel version string from crash dump
 
     Returns:
         tuple: (rhel_dir, version_name) e.g., ('/path/to/rhel8', 'rhel8')
+                or (None, None) if version cannot be detected
     """
     try:
         base_dir = os.environ['RHEL_SOURCE_DIR']
     except KeyError:
         return None, None
 
-    # Try to detect from current directory if possible
-    # For now, we'll use a heuristic or default
-    # You might want to improve this based on your setup
+    # Detect RHEL version from kernel version string
+    detected_version = None
+    if '.el10' in kernel_version or '.el10_' in kernel_version:
+        detected_version = 'rhel10'
+    elif '.el9' in kernel_version or '.el9_' in kernel_version:
+        detected_version = 'rhel9'
+    elif '.el8' in kernel_version or '.el8_' in kernel_version:
+        detected_version = 'rhel8'
+    elif '.el7' in kernel_version or '.el7_' in kernel_version:
+        detected_version = 'rhel7'
+    elif '.el6' in kernel_version or '.el6_' in kernel_version:
+        detected_version = 'rhel6'
+    elif '.el5' in kernel_version or '.el5_' in kernel_version:
+        detected_version = 'rhel5'
 
-    # Check common RHEL versions in order of preference
-    for version in ['rhel10', 'rhel9', 'rhel8', 'rhel7', 'rhel6']:
-        rhel_path = os.path.join(base_dir, version)
-        if os.path.isdir(rhel_path):
-            return rhel_path, version
+    # MUST have detected version from kernel - don't fallback to guessing
+    if not detected_version:
+        return None, None
 
+    # Check if directory exists
+    rhel_path = os.path.join(base_dir, detected_version)
+    if os.path.isdir(rhel_path):
+        return rhel_path, detected_version
+
+    # Directory doesn't exist for detected version
     return None, None
 
 
@@ -80,24 +99,39 @@ def git_checkout_latest(repo_path):
         if not default_branch:
             default_branch = 'master'  # Ultimate fallback
 
-        # Checkout the latest
-        checkout_cmd = 'git --no-pager checkout %s && git --no-pager pull origin %s' % (default_branch, default_branch)
-        process = subprocess.Popen(
-            checkout_cmd,
+        # Fetch latest changes (doesn't require clean working directory)
+        fetch_cmd = 'git --no-pager fetch origin %s' % default_branch
+        fetch_process = subprocess.Popen(
+            fetch_cmd,
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
-        result = process.wait()
-        out = process.stdout.read().decode('utf-8')
-        err = process.stderr.read().decode('utf-8')
+        fetch_result = fetch_process.wait()
+        fetch_err = fetch_process.stderr.read().decode('utf-8')
+
+        if fetch_result != 0:
+            os.chdir(original_dir)
+            return False, "Failed to fetch: %s" % fetch_err
+
+        # Reset to latest (discards any local changes - safe for read-only source repos)
+        reset_cmd = 'git --no-pager checkout -f %s && git --no-pager reset --hard origin/%s' % (default_branch, default_branch)
+        reset_process = subprocess.Popen(
+            reset_cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        reset_result = reset_process.wait()
+        reset_out = reset_process.stdout.read().decode('utf-8')
+        reset_err = reset_process.stderr.read().decode('utf-8')
 
         os.chdir(original_dir)
 
-        if result != 0:
-            return False, "Failed to checkout latest: %s" % err
+        if reset_result != 0:
+            return False, "Failed to reset to latest: %s" % reset_err
 
-        return True, "Successfully checked out latest on branch %s" % default_branch
+        return True, "Successfully updated to latest on branch %s" % default_branch
 
     except Exception as e:
         try:
@@ -249,10 +283,12 @@ def gitsearch():
     except Exception as e:
         return "Error parsing request parameters: %s" % str(e)
 
-    # Get base RHEL source directory
-    current_dir, current_version = get_current_rhel_dir()
+    # Get base RHEL source directory (detect from kernel version)
+    current_dir, current_version = get_current_rhel_dir(kernel_version)
     if not current_dir:
-        return "Error: RHEL_SOURCE_DIR not set or no RHEL directories found"
+        return "Error: Could not detect RHEL version from kernel version '%s'\n" \
+               "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
+               "Or RHEL_SOURCE_DIR not set" % kernel_version
 
     results = []
     separator = "=" * 80

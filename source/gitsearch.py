@@ -29,7 +29,7 @@ def gitsearch():
 
     op.add_option('-e', '--extraversion', dest='extraversion', default='',
                   action='store', type='string',
-                  help='Additional RHEL versions to search (comma-separated, e.g., rhel9,rhel10,rhel7)')
+                  help='Additional directories to search (comma-separated, e.g., rhel9,rhel10,linux)')
 
     op.add_option('-v', '--verbose', dest='verbose', default=False,
                   action='store_true',
