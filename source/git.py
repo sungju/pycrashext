@@ -17,7 +17,7 @@ import crashcolor
 import crashhelper
 
 
-def rgit():
+def git():
     # Parse command line arguments manually to support git-style options
     args = sys.argv[1:] if __name__ == '__main__' else exec_crash_command("set").split()[1:]
 
@@ -30,8 +30,8 @@ def rgit():
 
     if subcommand not in ['log', 'show']:
         print("Error: Invalid subcommand '%s'" % subcommand)
-        print("Usage: rgit <log|show> [options]")
-        print("Try 'rgit log --help' or 'rgit show --help'")
+        print("Usage: git <log|show> [options]")
+        print("Try 'git log --help' or 'git show --help'")
         return
 
     # Parse options
@@ -113,7 +113,7 @@ def rgit():
     }
 
     # Make API request
-    api_url = server_url + '/api/rgit'
+    api_url = server_url + '/api/git'
 
     try:
         if verbose:
@@ -142,7 +142,7 @@ def rgit():
 
 
 def print_help():
-    print("Usage: rgit <subcommand> [options]")
+    print("Usage: git <subcommand> [options]")
     print("")
     print("Subcommands:")
     print("  log        Search git log (supports git log options, default: --max-count=1)")
@@ -155,15 +155,15 @@ def print_help():
     print("  --help, -h         Show this help")
     print("")
     print("Examples:")
-    print("  rgit log -Sclip_push --max-count=5")
-    print("  rgit show abc123def --stat")
-    print("  rgit log -Sinit_new_ldt --repos=rhel9,upstream")
-    print("  rgit show HEAD~3 --repos=linux")
+    print("  git log -Sclip_push --max-count=5")
+    print("  git show abc123def --stat")
+    print("  git log -Sinit_new_ldt --repos=rhel9,upstream")
+    print("  git show HEAD~3 --repos=linux")
 
 
 def print_help_for_subcommand(subcommand):
     if subcommand == 'log':
-        print("Usage: rgit log [git-log-options]")
+        print("Usage: git log [git-log-options]")
         print("")
         print("Search git log in remote kernel source repositories.")
         print("Supports all standard git log options.")
@@ -177,11 +177,11 @@ def print_help_for_subcommand(subcommand):
         print("  --repos=<repos>    Search additional repositories (e.g., rhel9,linux)")
         print("")
         print("Examples:")
-        print("  rgit log -Sclip_push --max-count=5")
-        print("  rgit log --grep=\"memory leak\" --since=\"2024-01-01\"")
-        print("  rgit log -Sinit_new_ldt --stat --repos=rhel9,upstream")
+        print("  git log -Sclip_push --max-count=5")
+        print("  git log --grep=\"memory leak\" --since=\"2024-01-01\"")
+        print("  git log -Sinit_new_ldt --stat --repos=rhel9,upstream")
     elif subcommand == 'show':
-        print("Usage: rgit show [git-show-options] <commit>")
+        print("Usage: git show [git-show-options] <commit>")
         print("")
         print("Show commit details from remote kernel source repositories.")
         print("Supports all standard git show options.")
@@ -193,10 +193,10 @@ def print_help_for_subcommand(subcommand):
         print("  --repos=<repo>     Specify repository to search (e.g., rhel9, linux)")
         print("")
         print("Examples:")
-        print("  rgit show abc123def")
-        print("  rgit show HEAD~3 --stat")
-        print("  rgit show v5.10..v5.11 --oneline --repos=upstream")
+        print("  git show abc123def")
+        print("  git show HEAD~3 --stat")
+        print("  git show v5.10..v5.11 --oneline --repos=upstream")
 
 
 if __name__ == '__main__':
-    rgit()
+    git()
