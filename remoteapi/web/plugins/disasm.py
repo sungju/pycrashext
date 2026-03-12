@@ -79,11 +79,59 @@ def set_kernel_version(asm_str):
         err = b"".join(process.stderr.readlines())
         if err != None and \
            (err.startswith(b"error:") or err.startswith(b"fatal:")):
-            return 'FAILED to git checkout\n' + err.decode("utf-8").rstrip() +\
-                    kernel_version + " at " + cur_rhel_path + "\n"
+            # Git checkout failed - try fetching from all remotes first
+            print("Initial git checkout failed for %s, attempting to fetch from remotes..." % kernel_version)
 
-        cur_kernel_version = kernel_version
-        cur_release_version = release_version.split("/")[0]
+            # Get list of all remotes
+            remote_process = subprocess.Popen('git remote -v | awk \'{ print $1 }\' | sort | uniq',
+                                            shell=True,
+                                            stdout=subprocess.PIPE,
+                                            stderr=subprocess.PIPE)
+            remote_process.wait()
+            remotes = remote_process.stdout.read().decode("utf-8").strip().split('\n')
+
+            # Fetch from each remote
+            fetch_success = False
+            for remote in remotes:
+                if remote.strip():  # Skip empty lines
+                    print("Fetching from %s..." % remote)
+                    fetch_process = subprocess.Popen('git fetch %s --tags -f' % remote,
+                                                    shell=True,
+                                                    stdout=subprocess.PIPE,
+                                                    stderr=subprocess.PIPE)
+                    fetch_result = fetch_process.wait()
+                    if fetch_result == 0:
+                        fetch_success = True
+
+            # Try git checkout again after fetching
+            if fetch_success:
+                print("Retrying git checkout after fetch...")
+                retry_process = subprocess.Popen('git checkout -f ' + kernel_version,
+                                               shell=True,
+                                               stdout=subprocess.PIPE,
+                                               stderr=subprocess.PIPE)
+                retry_result = retry_process.wait()
+                retry_out = b"".join(retry_process.stdout.readlines())
+                retry_err = b"".join(retry_process.stderr.readlines())
+
+                if retry_err != None and \
+                   (retry_err.startswith(b"error:") or retry_err.startswith(b"fatal:")):
+                    return 'FAILED to git checkout even after fetching\n' + \
+                           retry_err.decode("utf-8").rstrip() + "\n" + \
+                           kernel_version + " at " + cur_rhel_path + "\n"
+
+                # Retry succeeded
+                cur_kernel_version = kernel_version
+                cur_release_version = release_version.split("/")[0]
+                print("Successfully checked out %s after fetch" % kernel_version)
+            else:
+                return 'FAILED to git checkout\n' + err.decode("utf-8").rstrip() + "\n" + \
+                        kernel_version + " at " + cur_rhel_path + "\n" + \
+                        "No remotes available to fetch from\n"
+        else:
+            # Initial checkout succeeded
+            cur_kernel_version = kernel_version
+            cur_release_version = release_version.split("/")[0]
     except Exception as e:
         cur_kernel_version = ""
         cur_release_version = ""
