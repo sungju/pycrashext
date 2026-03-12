@@ -149,7 +149,6 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
 
         # Combine both searches
         combined_cmd = '{ %s; %s; } | sort -u' % (git_cmd, grep_cmd)
-        print(combined_cmd)
 
         process = subprocess.Popen(
             combined_cmd,
@@ -159,7 +158,6 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         )
         process.wait()
         commit_list = process.stdout.read().decode('utf-8').strip()
-        print(commit_list)
 
         if not commit_list:
             os.chdir(original_dir)
