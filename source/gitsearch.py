@@ -60,10 +60,17 @@ def gitsearch():
         print("  export CRASHEXT_SERVER=http://your-server:5000")
         return
 
-    # Get kernel version for context
+    # Get kernel version for context (same approach as edis.py)
+    kernel_ver = "unknown"
     try:
-        kernel_ver = exec_crash_command("sys | grep RELEASE").split()[2]
-    except:
+        sys_output = exec_crash_command("sys")
+        for line in sys_output.splitlines():
+            words = line.split()
+            if len(words) >= 2 and words[0] == "RELEASE:":
+                kernel_ver = words[1]
+                break
+    except Exception as e:
+        print("Warning: Could not detect kernel version: %s" % str(e))
         kernel_ver = "unknown"
 
     # Prepare request data
