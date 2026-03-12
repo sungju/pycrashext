@@ -160,32 +160,17 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
         os.chdir(repo_path)
 
         # Determine search limit using max_commits directly
-        # This limits git log --max-count to prevent searching entire history
         if max_commits == 0:
-            # If user wants all commits, still limit for performance
             search_limit = 1000  # Reasonable limit for "all"
         else:
-            # Use maxmatch value directly for git --max-count
-            # This searches exactly the number of commits requested
             search_limit = max_commits
 
-        # Search in commit messages and diffs
-        # Use -S to search for string in diffs, --all to search all branches
-        # Add --max-count to limit how far back git searches
-        # Use --no-pager to output immediately without buffering
-        git_cmd = 'git --no-pager log --all --oneline --source --decorate --max-count=%d' % search_limit
-
-        # Add pickaxe search for pattern in diffs
-        git_cmd += ' -S"%s"' % pattern
-
-        # Also search in commit messages
-        grep_cmd = 'git --no-pager log --all --oneline --source --decorate --max-count=%d --grep="%s"' % (search_limit, pattern)
-
-        # Combine both searches
-        combined_cmd = '{ %s; %s; } | sort -u' % (git_cmd, grep_cmd)
+        # Simple git log search with --grep and --max-count
+        # Use --format=%H to get just commit hashes, one per line
+        git_cmd = 'git --no-pager log --format=%%H --grep="%s" --max-count=%d' % (pattern, search_limit)
 
         process = subprocess.Popen(
-            combined_cmd,
+            git_cmd,
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
@@ -197,14 +182,12 @@ def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context
             os.chdir(original_dir)
             return True, "No matching commits found"
 
-        # Parse commit hashes
+        # Parse commit hashes (one per line)
         commits = []
         for line in commit_list.split('\n'):
-            if line.strip():
-                # Extract just the commit hash (first field)
-                match = re.match(r'^([a-f0-9]+)', line)
-                if match:
-                    commits.append(match.group(1))
+            line = line.strip()
+            if line:
+                commits.append(line)
 
         # Limit commits if requested
         if max_commits > 0 and len(commits) > max_commits:
