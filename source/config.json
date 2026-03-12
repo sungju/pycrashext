@@ -181,10 +181,10 @@
 			"help"    : "Using AI model to check the command output"
 		},
 		{
-			"command" : "gitsearch",
-			"desc"    : "Search git log in remote source server",
+			"command" : "git",
+			"desc"    : "Execute git log/show on remote source server",
 			"options" : "-h   - list available options",
-			"help"    : "Search git log for commits matching a pattern\n\n--lines=<n>        - Max lines per commit (default: 30, 0 for all)\n--maxmatch=<n>     - Max commits to search/return (default: 1, 0 for 1000)\n--commit=<hash>    - Show full content of a specific commit\n--extraversion=... - Search additional directories (e.g., rhel9,linux,upstream)\n--timeout=<n>      - Request timeout in seconds (default: 3600 = 1 hour)\n--verbose          - Show verbose output\n--context          - Show file context in patches"
+			"help"    : "Execute git log/show commands in remote kernel source repositories\n\nUsage:\n  git <log|show> [git-options]\n\nSubcommands:\n  log              Search git log (supports all git log options, default: --max-count=1)\n  show             Show commit details (supports all git show options)\n\nOptions:\n  --repos=<repos>  Comma-separated list of repos (e.g., rhel9,linux,upstream)\n  --timeout=<n>    Request timeout in seconds (default: 3600)\n  --verbose        Show verbose output\n  -h, --help       Show help\n\nExamples:\n  git log -Sclip_push --max-count=5\n  git show abc123def --stat\n  git log -Sinit_new_ldt --repos=rhel9,upstream"
 		}
 	]
 }
