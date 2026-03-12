@@ -205,7 +205,7 @@ def git_checkout_latest(repo_path):
         return False, "Exception during checkout: %s" % str(e)
 
 
-def search_git_log(repo_path, pattern, max_lines=20, max_commits=5, show_context=False):
+def search_git_log(repo_path, pattern, max_lines=30, max_commits=1, show_context=False):
     """
     Search git log for commits matching a pattern.
 
@@ -376,8 +376,8 @@ def gitsearch():
     # Get parameters from request
     try:
         pattern = request.form.get('pattern', '')
-        lines = int(request.form.get('lines', 20))
-        maxmatch = int(request.form.get('maxmatch', 5))
+        lines = int(request.form.get('lines', 30))
+        maxmatch = int(request.form.get('maxmatch', 1))
         extraversion = request.form.get('extraversion', '')
         verbose = request.form.get('verbose', 'False') == 'True'
         show_context = request.form.get('context', 'False') == 'True'

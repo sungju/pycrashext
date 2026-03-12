@@ -19,13 +19,13 @@ import crashhelper
 
 def gitsearch():
     op = OptionParser()
-    op.add_option('-l', '--lines', dest='lines', default=20,
+    op.add_option('-l', '--lines', dest='lines', default=30,
                   action='store', type='int',
-                  help='Maximum lines to show per commit (default: 20, use 0 for all)')
+                  help='Maximum lines to show per commit (default: 30, use 0 for all)')
 
-    op.add_option('-m', '--maxmatch', dest='maxmatch', default=5,
+    op.add_option('-m', '--maxmatch', dest='maxmatch', default=1,
                   action='store', type='int',
-                  help='Maximum matching commits to show (default: 5, use 0 for all)')
+                  help='Maximum matching commits to show (default: 1, use 0 for all)')
 
     op.add_option('-e', '--extraversion', dest='extraversion', default='',
                   action='store', type='string',
