@@ -39,6 +39,10 @@ def gitsearch():
                   action='store_true',
                   help='Show file context in patches')
 
+    op.add_option('-t', '--timeout', dest='timeout', default=3600,
+                  action='store', type='int',
+                  help='Request timeout in seconds (default: 3600 = 1 hour)')
+
     (o, args) = op.parse_args()
 
     if len(args) == 0:
@@ -80,8 +84,12 @@ def gitsearch():
         if o.verbose:
             print("Searching for: %s" % search_pattern)
             print("Connecting to: %s" % api_url)
+            print("Timeout: %d seconds (%d minutes)" % (o.timeout, o.timeout // 60))
+            print("Note: This may take several minutes for git log searches...")
 
-        response = r.post(api_url, data=data, timeout=300)
+        # Use a long timeout for git log searches which can be slow,
+        # especially when searching multiple RHEL versions and large repositories
+        response = r.post(api_url, data=data, timeout=o.timeout)
 
         if response.status_code == 200:
             print(response.text)
