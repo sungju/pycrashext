@@ -1716,10 +1716,8 @@ def show_tasks_memusage(options):
 
         print("\n" + "=" * 80)
 
-    crashcolor.set_color(crashcolor.BLUE)
-
     if not account_shared:
-    else:
+        crashcolor.set_color(crashcolor.BLUE)
         print("Total memory usage from user-space = %s" %
               (get_size_str(total_rss * 1024)))
 
