@@ -4051,11 +4051,51 @@ def show_oom_meminfo(op, meminfo_dict):
     print("%s" % ('~' * 46))
 
 
-def show_oom_memory_usage(op, oom_dict, total_usage):
+def show_oom_memory_usage(op, oom_dict, total_usage, process_instances=None):
     # Get system's total memory for percentage calculation
     system_meminfo = get_meminfo_dict()
     system_total_mem_kb = system_meminfo.get('MemTotal', 0)
     system_total_mem_bytes = system_total_mem_kb * 1024
+
+    # Calculate shared memory if --shared option is enabled
+    account_shared = getattr(op, 'account_shared', False)
+    shared_memory_total = 0
+
+    if account_shared and process_instances:
+        # Estimate shared memory for processes with multiple instances
+        # Shared memory includes: shared libraries (.so files), executable code sections,
+        # and other memory pages mapped as shared between processes
+        #
+        # Note: We don't modify oom_dict here because:
+        # - When op.all=True, oom_dict keys include PIDs like "chrome (1234)"
+        # - process_instances uses base names like "chrome"
+        # - We want to show individual processes as-is, just report shared memory separately
+        #
+        # The shared memory is subtracted from total_usage so the sum makes sense:
+        #   Individual processes (with shared counted multiple times) + Shared (counted once) = Total
+        for pname, rss_list in process_instances.items():
+            if len(rss_list) > 1:
+                # Multiple instances of this process exist - estimate shared memory
+                # Heuristic: Use minimum RSS as baseline for shared memory per instance
+                # Rationale: The smallest instance likely has minimal private data,
+                # so most of its RSS is shared (code + libraries)
+                min_rss = min(rss_list)
+
+                # Estimate that ~70% of the minimum RSS is shared (code + libraries)
+                # This is a conservative estimate. Actual shared% varies by application:
+                # - Simple apps: 40-60% shared
+                # - Complex apps with many libs: 60-80% shared
+                shared_per_instance = int(min_rss * 0.7)
+
+                # Total shared memory for this process group (counted once, not per instance)
+                # Example: 3 chrome instances, min RSS is 100MB
+                #   - Shared memory = 70MB (counted once in shared_memory_total)
+                #   - This 70MB was counted 3 times in total_usage (once per instance)
+                #   - We subtract 2*70MB from total_usage to correct the over-count
+                shared_memory_total += shared_per_instance
+                # Subtract the over-counted portions (counted N times, should be 1 time)
+                overcounted = shared_per_instance * (len(rss_list) - 1)
+                total_usage -= overcounted
 
     sorted_oom_dict = sorted(oom_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
@@ -4131,12 +4171,31 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
     if print_count < len(sorted_oom_dict) - 1:
         print("\t<...>")
     print("=" * separator_width)
+
+    # Show shared memory if accounting is enabled
+    if account_shared and shared_memory_total > 0:
+        crashcolor.set_color(crashcolor.CYAN)
+        print("Shared memory (estimated)        = %s" % get_size_str(shared_memory_total, True))
+        if show_graph and system_total_mem_bytes > 0:
+            shared_percentage = (shared_memory_total * 100.0 / system_total_mem_bytes)
+            print("\tNotes) %.2f percent from total system memory" % shared_percentage)
+            bar = get_memory_bar(shared_percentage, width=TOTAL_BAR_WIDTH)
+            print("\t       %s" % bar)
+        crashcolor.set_color(crashcolor.RESET)
+
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
     # Show total usage bar graph
     if show_graph and system_total_mem_bytes > 0:
         total_percentage = (total_usage * 100.0 / system_total_mem_bytes)
-        print("\tNotes) %.2f percent from total system memory(%s)" %
-              (total_percentage, get_size_str(system_total_mem_bytes, True)))
+        if account_shared:
+            combined_total = total_usage + shared_memory_total
+            combined_percentage = (combined_total * 100.0 / system_total_mem_bytes)
+            print("\tNotes) %.2f%% from total system memory(%s)" %
+                  (total_percentage, get_size_str(system_total_mem_bytes, True)))
+            print("\t       (%.2f%% including shared memory)" % combined_percentage)
+        else:
+            print("\tNotes) %.2f percent from total system memory(%s)" %
+                  (total_percentage, get_size_str(system_total_mem_bytes, True)))
         bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
         print("\t       %s" % bar)
     crashcolor.set_color(crashcolor.RESET)
@@ -4238,6 +4297,7 @@ def show_oom_events(op):
         meminfo_dict = {}
         cgroup_dict = {}
         total_usage = 0
+        process_instances = {}  # Track process instances for shared memory calculation
         oom_display_counter = 0  # Counter for displayed events
         skip_message_shown = False  # Track if we've shown the skip message
         in_displayed_event = False  # Track if we're in an event that should be displayed
@@ -4395,7 +4455,7 @@ def show_oom_events(op):
                     for key in cgroup_dict:
                         print("  " + cgroup_dict[key])
 
-                show_oom_memory_usage(op, oom_dict, total_usage)
+                show_oom_memory_usage(op, oom_dict, total_usage, process_instances)
                 if op.details:
                     show_oom_meminfo(op, meminfo_dict)
                 oom_invoked = False
@@ -4409,6 +4469,7 @@ def show_oom_events(op):
                 meminfo_dict = {}
                 cgroup_dict = {}
                 total_usage = 0
+                process_instances = {}
                 continue
 
             try:
@@ -4421,6 +4482,12 @@ def show_oom_events(op):
                 rss = int(words[rss_index]) * page_size
                 total_usage = total_usage + rss
                 pname = words[pname_index]
+
+                # Track process instances for shared memory calculation
+                if pname not in process_instances:
+                    process_instances[pname] = []
+                process_instances[pname].append(rss)
+
                 if op.all:
                     pname = pname + (" (%s)" % pid)
                 if pname in oom_dict:
@@ -4790,6 +4857,9 @@ def meminfo():
     op.add_option("-S", "--slabdetail", dest="slabdetail", default="",
                   action="store", type="string",
                   help="Show details of a slab")
+    op.add_option("--shared", dest="account_shared", default=0,
+                  action="store_true",
+                  help="Account for shared memory in OOM analysis to prevent double-counting")
     op.add_option("--corrupt", dest="corrupt", default="",
                   action="store", type="string",
                   help="Check SLAB corruption. Format: <kmem_cache_addr|slab_name>[:<cpu_num>]")
