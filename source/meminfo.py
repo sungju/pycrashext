@@ -1189,94 +1189,157 @@ def get_pss_for_task(task_addr):
     return rss
 
 
+def _resolve_page_struct_address(vaddr):
+    vtop_result = exec_crash_command("vtop %s" % (vaddr))
+    if vtop_result == "":
+        return 0
+
+    vtop_lines = vtop_result.splitlines()
+    if len(vtop_lines) == 0:
+        return 0
+
+    for line in reversed(vtop_lines):
+        words = line.split()
+        if len(words) == 0:
+            continue
+        try:
+            return int(words[0], 16)
+        except:
+            continue
+    return 0
+
+
+def _collect_page_keys_for_vma(vma_addr):
+    page_keys = set()
+    result_str = exec_crash_command("vm -P %s" % (vma_addr))
+    if result_str == "":
+        return page_keys
+
+    result_lines = result_str.splitlines()
+    if len(result_lines) < 5:
+        return page_keys
+
+    for i in range(4, len(result_lines)):
+        page_words = result_lines[i].split()
+        if len(page_words) < 2:
+            continue
+
+        try:
+            physical_addr = int(page_words[1], 16)
+            if physical_addr == 0:
+                continue
+            vaddr = page_words[0]
+        except:
+            continue
+
+        page_addr = _resolve_page_struct_address(vaddr)
+        if page_addr == 0:
+            continue
+
+        page_keys.add(page_addr)
+
+    return page_keys
+
+
+def _collect_shared_page_keys(task_addr, task_name):
+    vma_pages = set()
+    shared_candidate_count = 0
+
+    result_str = exec_crash_command("vm %s" % task_addr)
+    if not result_str:
+        return vma_pages, shared_candidate_count
+
+    result_lines = result_str.splitlines()
+    if len(result_lines) < 4:
+        return vma_pages, shared_candidate_count
+
+    for i in range(4, len(result_lines)):
+        words = result_lines[i].split()
+        if len(words) < 4:
+            continue
+
+        try:
+            vma_start = int(words[1], 16)
+            vma_end = int(words[2], 16)
+            vm_flags = int(words[3], 16)
+            vma_addr = words[0]
+        except:
+            continue
+
+        if vma_end <= vma_start:
+            continue
+
+        filename = ' '.join(words[4:]) if len(words) >= 5 else ""
+
+        is_potentially_shared = False
+        if vm_flags & (VM_SHARED | VM_SHM):
+            is_potentially_shared = True
+        elif filename and not filename.startswith('['):
+            is_potentially_shared = True
+        elif filename.startswith('SYSV'):
+            is_potentially_shared = True
+
+        if not is_potentially_shared:
+            try:
+                vma = readSU("struct vm_area_struct", int(vma_addr, 16))
+                if vma.vm_file != 0:
+                    is_potentially_shared = True
+            except:
+                continue
+
+        if not is_potentially_shared:
+            continue
+
+        page_keys = _collect_page_keys_for_vma(vma_addr)
+        if len(page_keys) > 0:
+            vma_pages.update(page_keys)
+            try:
+                shared_candidate_count = shared_candidate_count + ((vma_end - vma_start) // page_size)
+            except:
+                shared_candidate_count = shared_candidate_count
+
+    return vma_pages, shared_candidate_count
+
+
 def collect_shared_mappings_global(task_list):
     """
-    Collect shared file mappings across all tasks to identify overlaps.
+    Collect shared pages across all tasks to identify overlaps by unique page frame.
 
     Args:
         task_list: List of tuples (pname, task_addr, rss_kb)
 
     Returns:
         dict: {
-            'file_to_size': {filename: size_in_kb},  # Unique shared files and their sizes
-            'file_to_count': {filename: count},      # How many processes map each file
-            'task_shared': {pname: shared_kb},       # Shared memory per task (before dedup)
+            'page_to_task_count': {page_addr: count}, # Task count per unique mapped page frame
+            'task_shared': {pname: shared_kb},        # Shared page footprint per task
+            'scanned_vma_bytes': scanned bytes for shared candidates
         }
     """
     global page_size
 
-    file_to_size = {}      # Track size of each unique shared file
-    file_to_count = {}     # Track how many processes map each file
+    page_to_task_count = {} # Track each unique page and how many tasks reference it
     task_shared = {}       # Track shared memory per task
+    scanned_vma_bytes = 0  # Total bytes processed for shared candidate VMA areas (per-task deduped by unique pages)
 
     total_tasks = len(task_list)
+    total_pages_for_task = 0
 
     for idx, (pname, task_addr, rss_kb) in enumerate(task_list):
         if (idx + 1) % 50 == 0 or idx == 0:
             print("Analyzing shared mappings: %d/%d tasks..." % (idx + 1, total_tasks), end="\r")
 
         try:
-            result_str = exec_crash_command("vm %s" % task_addr)
-            if not result_str:
-                task_shared[pname] = 0
-                continue
+            page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
+            scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
 
-            result_lines = result_str.splitlines()
-            if len(result_lines) < 4:
-                task_shared[pname] = 0
-                continue
-
-            shared_bytes_this_task = 0
-
-            # Analyze each VMA
-            for i in range(4, len(result_lines)):
-                words = result_lines[i].split()
-                if len(words) < 4:
-                    continue
-
-                # Get filename if present
-                filename = ""
-                if len(words) >= 5:
-                    filename = ' '.join(words[4:])
-
-                if not filename:
-                    continue
-
-                # Only track potentially shared files
-                is_potentially_shared = False
-                if filename.endswith('.so') or '.so.' in filename:
-                    is_potentially_shared = True
-                elif filename.startswith('SYSV'):
-                    is_potentially_shared = True
-                elif filename and not filename.startswith('['):
-                    # Regular files (executables, etc.)
-                    is_potentially_shared = True
-
-                if not is_potentially_shared:
-                    continue
-
-                # Calculate VMA size
-                try:
-                    vma_start = int(words[1], 16)
-                    vma_end = int(words[2], 16)
-                    vma_size_bytes = vma_end - vma_start
-                except:
-                    continue
-
-                shared_bytes_this_task += vma_size_bytes
-
-                # Track this file globally
-                if filename not in file_to_size:
-                    file_to_size[filename] = vma_size_bytes
-                    file_to_count[filename] = 1
+            task_shared[pname] = len(page_keys) * page_size // 1024
+            for page_addr in page_keys:
+                if page_addr in page_to_task_count:
+                    page_to_task_count[page_addr] = page_to_task_count[page_addr] + 1
                 else:
-                    # File already seen - increment count
-                    file_to_count[filename] += 1
-                    # Update size if this mapping is larger (different processes may map different portions)
-                    if vma_size_bytes > file_to_size[filename]:
-                        file_to_size[filename] = vma_size_bytes
+                    page_to_task_count[page_addr] = 1
 
-            task_shared[pname] = shared_bytes_this_task // 1024
+            total_pages_for_task = total_pages_for_task + len(page_keys) * page_size // 1024
 
         except Exception as e:
             if debug_mode:
@@ -1285,10 +1348,25 @@ def collect_shared_mappings_global(task_list):
 
     print()  # Clear progress line
 
+    total_shared_bytes = 0
+    total_private_bytes = 0
+    over_counted_bytes = 0
+    for _, count in page_to_task_count.items():
+        if count >= 2:
+            total_shared_bytes += page_size
+            if count > 1:
+                over_counted_bytes += (count - 1) * page_size
+        else:
+            total_private_bytes += page_size
+
     return {
-        'file_to_size': file_to_size,
-        'file_to_count': file_to_count,
-        'task_shared': task_shared
+        'page_to_task_count': page_to_task_count,
+        'task_shared': task_shared,
+        'total_shared_kb': total_shared_bytes // 1024,
+        'total_private_kb': total_private_bytes // 1024,
+        'over_counted_kb': over_counted_bytes // 1024,
+        'scanned_vma_bytes': scanned_vma_bytes,
+        'scanned_pages_kb': total_pages_for_task
     }
 
 
@@ -1360,26 +1438,21 @@ def show_tasks_memusage(options):
     if account_shared and len(task_list) > 0:
         print("\nAnalyzing shared memory mappings...")
         shared_info = collect_shared_mappings_global(task_list)
+        total_shared = shared_info['total_shared_kb']
+        tracked_private = shared_info['total_private_kb']
+        over_counted = shared_info['over_counted_kb']
+        scanned_vma_bytes = shared_info['scanned_vma_bytes']
 
-        # Calculate total unique shared memory (count each file once)
-        total_shared = 0
-        for filename, size_bytes in shared_info['file_to_size'].items():
-            count = shared_info['file_to_count'][filename]
-            if count > 1:  # Only count files mapped by multiple processes
-                total_shared += size_bytes // 1024
+        # Pages not analyzed as shared candidates are conservatively treated as private to one process
+        unscanned_shared_candidate_bytes = 0
+        if total_rss * 1024 > scanned_vma_bytes:
+            unscanned_shared_candidate_bytes = total_rss * 1024 - scanned_vma_bytes
 
-        # Calculate over-counted amount
-        # For each file mapped by N processes, it's counted N times in RSS but should be counted once
-        over_counted = 0
-        for filename, size_bytes in shared_info['file_to_size'].items():
-            count = shared_info['file_to_count'][filename]
-            if count > 1:
-                # This file is counted 'count' times, but should be counted once
-                # So we over-counted it (count - 1) times
-                over_counted += (size_bytes // 1024) * (count - 1)
-
-        # Private memory = Total RSS - over-counted shared
-        total_private = total_rss - over_counted
+        total_private = tracked_private + (unscanned_shared_candidate_bytes // 1024)
+        if debug_mode:
+            print("Tracked shared-candidate footprint = %s, over-counted shared (exact PFN dedupe) = %s" % (
+                get_size_str(scanned_vma_bytes),
+                get_size_str(over_counted * 1024)))
 
         print("Shared memory analysis complete.\n")
 
