@@ -1189,39 +1189,25 @@ def get_pss_for_task(task_addr):
     return rss
 
 
-def get_task_vm_stats(task_addr, account_shared=False):
+def get_task_vm_stats(task_addr):
     """
-    Get VM statistics for a task.
+    Get VM statistics for a task using heuristics from VM flags and file mappings.
+
+    This is much faster than analyzing every page, but still reasonably accurate.
 
     Args:
-        task_addr: Task address (hex string or int)
-        account_shared: If True, analyze page reference counts to distinguish shared memory
+        task_addr: Task address (hex string)
 
     Returns:
         dict: {
             'total_kb': total RSS in KB,
-            'private_kb': private memory in KB (if account_shared=True),
-            'shared_kb': shared memory in KB (if account_shared=True)
+            'private_kb': private memory in KB,
+            'shared_kb': shared memory in KB
         }
     """
     global page_size
 
-    if not account_shared:
-        # Fast path: just return RSS from task structure
-        try:
-            if isinstance(task_addr, str):
-                task_addr = int(task_addr, 16)
-            task = readSU("struct task_struct", task_addr)
-            rss = task.rss if hasattr(task, 'rss') else 0
-            return {
-                'total_kb': rss,
-                'private_kb': 0,
-                'shared_kb': 0
-            }
-        except:
-            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
-
-    # Slow path: analyze VM areas to distinguish private vs shared
+    # Analyze VM areas using heuristics (much faster than page-by-page analysis)
     try:
         if isinstance(task_addr, str):
             result_str = exec_crash_command("vm %s" % task_addr)
@@ -1235,25 +1221,70 @@ def get_task_vm_stats(task_addr, account_shared=False):
         if len(result_lines) < 4:
             return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
 
-        private_pages = 0
-        shared_pages = 0
+        private_bytes = 0
+        shared_bytes = 0
 
-        # Analyze each VMA
+        # Analyze each VMA using heuristics
         for i in range(4, len(result_lines)):
             words = result_lines[i].split()
             if len(words) < 4:
                 continue
 
-            # Get private vs shared page counts for this VMA
-            # This calls vm -P which is slow but accurate
-            vma_addr = words[0]
-            page_stats = analyze_vma_pages(vma_addr)
-            private_pages += page_stats[0]
-            shared_pages += page_stats[1]
+            # Calculate VMA size
+            try:
+                vma_start = int(words[1], 16)
+                vma_end = int(words[2], 16)
+                vma_size = vma_end - vma_start
+            except:
+                continue
 
-        # Convert pages to KB
-        private_kb = (private_pages * page_size) // 1024
-        shared_kb = (shared_pages * page_size) // 1024
+            # Get VM flags
+            try:
+                vm_flags = int(words[3], 16)
+            except:
+                vm_flags = 0
+
+            # Get filename if present (words[4] onwards)
+            filename = ""
+            if len(words) >= 5:
+                filename = ' '.join(words[4:])
+
+            # Heuristic classification:
+            # - File mappings with VM_SHARED flag: shared
+            # - Shared libraries (.so files): shared
+            # - SYSV shared memory: shared
+            # - Anonymous memory without VM_SHARED: private
+            # - Stack, heap: private
+
+            is_shared = False
+
+            # Check if it's a shared library
+            if filename and (filename.endswith('.so') or '.so.' in filename):
+                is_shared = True
+            # Check for SYSV shared memory
+            elif filename and filename.startswith('SYSV'):
+                is_shared = True
+            # Check VM_SHARED flag
+            elif vm_flags & VM_SHARED:
+                is_shared = True
+            # Stack and heap are private
+            elif filename in ['[stack]', '[heap]', '[vdso]', '[vsyscall]']:
+                is_shared = False
+            # Other file mappings: check if they have the shared flag
+            elif filename and vm_flags & VM_SHARED:
+                is_shared = True
+            # Anonymous mappings without shared flag: private
+            else:
+                is_shared = False
+
+            if is_shared:
+                shared_bytes += vma_size
+            else:
+                private_bytes += vma_size
+
+        # Convert to KB
+        private_kb = private_bytes // 1024
+        shared_kb = shared_bytes // 1024
         total_kb = private_kb + shared_kb
 
         return {
@@ -1265,72 +1296,6 @@ def get_task_vm_stats(task_addr, account_shared=False):
         if debug_mode:
             print("Error in get_task_vm_stats: %s" % str(e))
         return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
-
-
-def analyze_vma_pages(vma_addr):
-    """
-    Analyze pages in a VMA to distinguish private vs shared.
-
-    Args:
-        vma_addr: VMA address (hex string)
-
-    Returns:
-        list: [private_page_count, shared_page_count]
-    """
-    private_count = 0
-    shared_count = 0
-
-    result_str = exec_crash_command("vm -P %s" % vma_addr)
-    if not result_str:
-        return [0, 0]
-
-    result_lines = result_str.splitlines()
-    if len(result_lines) < 4:
-        return [0, 0]
-
-    for i in range(4, len(result_lines)):
-        page_words = result_lines[i].split()
-        try:
-            physical_addr = int(page_words[1], 16)
-        except:
-            continue
-
-        if physical_addr == 0:
-            continue
-
-        # Get page struct address
-        vtop_result = exec_crash_command("vtop %s" % page_words[0])
-        if not vtop_result:
-            continue
-
-        vtop_lines = vtop_result.splitlines()
-        if not vtop_lines:
-            continue
-
-        page_addr_str = vtop_lines[-1].split()[0]
-        try:
-            page_addr = int(page_addr_str, 16)
-        except:
-            continue
-
-        if page_addr == 0:
-            continue
-
-        # Read page reference count
-        page_data = readSU("struct page", page_addr)
-        if member_offset("struct page", "_refcount") >= 0:
-            counter = page_data._refcount.counter
-        else:
-            counter = page_data._count.counter
-
-        # counter == 1 means only one process maps this page (private)
-        # counter > 1 means multiple processes map this page (shared)
-        if counter == 1:
-            private_count += 1
-        else:
-            shared_count += 1
-
-    return [private_count, shared_count]
 
 
 def show_tasks_memusage(options):
@@ -1379,14 +1344,14 @@ def show_tasks_memusage(options):
 
         # Get memory usage - either simple RSS or detailed VM stats
         if account_shared:
-            # Show progress
+            # Show progress every 10 tasks
             process_count += 1
-            if process_count % 10 == 0:
-                print("Processed %d tasks..." % process_count)
+            if process_count % 10 == 0 or process_count == 1:
+                print("Processed %d tasks..." % process_count, end="\r")
 
             # Analyze VM to get private vs shared
             task_addr = result_line[3]  # TASK address
-            vm_stats = get_task_vm_stats(task_addr, account_shared=True)
+            vm_stats = get_task_vm_stats(task_addr)
             rss = vm_stats['total_kb']
             total_shared += vm_stats['shared_kb']
             total_private += vm_stats['private_kb']
@@ -1404,6 +1369,10 @@ def show_tasks_memusage(options):
             mem_usage_dict[pname] = rss
 #            print("%s %.2f" % (pname, mem_usage_dict[pname]))
 #            break
+
+    # Clear progress line if it was shown
+    if account_shared and process_count > 0:
+        print()  # Add newline after progress counter
 
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
@@ -1481,13 +1450,19 @@ def show_tasks_memusage(options):
         print("\t<...>")
     print("=" * separator_width)
 
+    # Calculate percentages for shared accounting (even if zero)
+    shared_percentage = 0.0
+    private_percentage = 0.0
+    if account_shared and system_total_mem_kb > 0:
+        shared_percentage = (total_shared * 100.0 / system_total_mem_kb)
+        private_percentage = (total_private * 100.0 / system_total_mem_kb)
+
     # Show shared memory breakdown if --shared was used
     if account_shared and total_shared > 0:
         crashcolor.set_color(crashcolor.CYAN)
         print("Shared memory (mapped by 2+ processes) = %s" %
               (get_size_str(total_shared * 1024)))
         if system_total_mem_kb > 0:
-            shared_percentage = (total_shared * 100.0 / system_total_mem_kb)
             print("\tNotes) %.2f percent from total system memory" % shared_percentage)
             if options.graph:
                 bar = get_memory_bar(shared_percentage, width=TOTAL_BAR_WIDTH)
@@ -1498,7 +1473,6 @@ def show_tasks_memusage(options):
         print("Private memory (single process only)    = %s" %
               (get_size_str(total_private * 1024)))
         if system_total_mem_kb > 0:
-            private_percentage = (total_private * 100.0 / system_total_mem_kb)
             print("\tNotes) %.2f percent from total system memory" % private_percentage)
             if options.graph:
                 bar = get_memory_bar(private_percentage, width=TOTAL_BAR_WIDTH)
