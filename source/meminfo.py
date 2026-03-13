@@ -1189,113 +1189,107 @@ def get_pss_for_task(task_addr):
     return rss
 
 
-def get_task_vm_stats(task_addr):
+def collect_shared_mappings_global(task_list):
     """
-    Get VM statistics for a task using heuristics from VM flags and file mappings.
-
-    This is much faster than analyzing every page, but still reasonably accurate.
+    Collect shared file mappings across all tasks to identify overlaps.
 
     Args:
-        task_addr: Task address (hex string)
+        task_list: List of tuples (pname, task_addr, rss_kb)
 
     Returns:
         dict: {
-            'total_kb': total RSS in KB,
-            'private_kb': private memory in KB,
-            'shared_kb': shared memory in KB
+            'file_to_size': {filename: size_in_kb},  # Unique shared files and their sizes
+            'file_to_count': {filename: count},      # How many processes map each file
+            'task_shared': {pname: shared_kb},       # Shared memory per task (before dedup)
         }
     """
     global page_size
 
-    # Analyze VM areas using heuristics (much faster than page-by-page analysis)
-    try:
-        if isinstance(task_addr, str):
+    file_to_size = {}      # Track size of each unique shared file
+    file_to_count = {}     # Track how many processes map each file
+    task_shared = {}       # Track shared memory per task
+
+    total_tasks = len(task_list)
+
+    for idx, (pname, task_addr, rss_kb) in enumerate(task_list):
+        if (idx + 1) % 50 == 0 or idx == 0:
+            print("Analyzing shared mappings: %d/%d tasks..." % (idx + 1, total_tasks), end="\r")
+
+        try:
             result_str = exec_crash_command("vm %s" % task_addr)
-        else:
-            result_str = exec_crash_command("vm 0x%x" % task_addr)
-
-        if not result_str:
-            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
-
-        result_lines = result_str.splitlines()
-        if len(result_lines) < 4:
-            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
-
-        private_bytes = 0
-        shared_bytes = 0
-
-        # Analyze each VMA using heuristics
-        for i in range(4, len(result_lines)):
-            words = result_lines[i].split()
-            if len(words) < 4:
+            if not result_str:
+                task_shared[pname] = 0
                 continue
 
-            # Calculate VMA size
-            try:
-                vma_start = int(words[1], 16)
-                vma_end = int(words[2], 16)
-                vma_size = vma_end - vma_start
-            except:
+            result_lines = result_str.splitlines()
+            if len(result_lines) < 4:
+                task_shared[pname] = 0
                 continue
 
-            # Get VM flags
-            try:
-                vm_flags = int(words[3], 16)
-            except:
-                vm_flags = 0
+            shared_bytes_this_task = 0
 
-            # Get filename if present (words[4] onwards)
-            filename = ""
-            if len(words) >= 5:
-                filename = ' '.join(words[4:])
+            # Analyze each VMA
+            for i in range(4, len(result_lines)):
+                words = result_lines[i].split()
+                if len(words) < 4:
+                    continue
 
-            # Heuristic classification:
-            # - File mappings with VM_SHARED flag: shared
-            # - Shared libraries (.so files): shared
-            # - SYSV shared memory: shared
-            # - Anonymous memory without VM_SHARED: private
-            # - Stack, heap: private
+                # Get filename if present
+                filename = ""
+                if len(words) >= 5:
+                    filename = ' '.join(words[4:])
 
-            is_shared = False
+                if not filename:
+                    continue
 
-            # Check if it's a shared library
-            if filename and (filename.endswith('.so') or '.so.' in filename):
-                is_shared = True
-            # Check for SYSV shared memory
-            elif filename and filename.startswith('SYSV'):
-                is_shared = True
-            # Check VM_SHARED flag
-            elif vm_flags & VM_SHARED:
-                is_shared = True
-            # Stack and heap are private
-            elif filename in ['[stack]', '[heap]', '[vdso]', '[vsyscall]']:
-                is_shared = False
-            # Other file mappings: check if they have the shared flag
-            elif filename and vm_flags & VM_SHARED:
-                is_shared = True
-            # Anonymous mappings without shared flag: private
-            else:
-                is_shared = False
+                # Only track potentially shared files
+                is_potentially_shared = False
+                if filename.endswith('.so') or '.so.' in filename:
+                    is_potentially_shared = True
+                elif filename.startswith('SYSV'):
+                    is_potentially_shared = True
+                elif filename and not filename.startswith('['):
+                    # Regular files (executables, etc.)
+                    is_potentially_shared = True
 
-            if is_shared:
-                shared_bytes += vma_size
-            else:
-                private_bytes += vma_size
+                if not is_potentially_shared:
+                    continue
 
-        # Convert to KB
-        private_kb = private_bytes // 1024
-        shared_kb = shared_bytes // 1024
-        total_kb = private_kb + shared_kb
+                # Calculate VMA size
+                try:
+                    vma_start = int(words[1], 16)
+                    vma_end = int(words[2], 16)
+                    vma_size_bytes = vma_end - vma_start
+                except:
+                    continue
 
-        return {
-            'total_kb': total_kb,
-            'private_kb': private_kb,
-            'shared_kb': shared_kb
-        }
-    except Exception as e:
-        if debug_mode:
-            print("Error in get_task_vm_stats: %s" % str(e))
-        return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
+                shared_bytes_this_task += vma_size_bytes
+
+                # Track this file globally
+                if filename not in file_to_size:
+                    file_to_size[filename] = vma_size_bytes
+                    file_to_count[filename] = 1
+                else:
+                    # File already seen - increment count
+                    file_to_count[filename] += 1
+                    # Update size if this mapping is larger (different processes may map different portions)
+                    if vma_size_bytes > file_to_size[filename]:
+                        file_to_size[filename] = vma_size_bytes
+
+            task_shared[pname] = shared_bytes_this_task // 1024
+
+        except Exception as e:
+            if debug_mode:
+                print("Error analyzing task %s: %s" % (pname, str(e)))
+            task_shared[pname] = 0
+
+    print()  # Clear progress line
+
+    return {
+        'file_to_size': file_to_size,
+        'file_to_count': file_to_count,
+        'task_shared': task_shared
+    }
 
 
 def show_tasks_memusage(options):
@@ -1326,7 +1320,9 @@ def show_tasks_memusage(options):
     total_rss = 0
     total_shared = 0
     total_private = 0
-    process_count = 0
+
+    # First pass: collect all tasks with RSS
+    task_list = []  # List of (pname, task_addr, rss_kb)
 
     for i in range(1, len(result_lines)):
         if (result_lines[i].find('>') == 0):
@@ -1342,24 +1338,16 @@ def show_tasks_memusage(options):
         else:
             pname = cmd
 
-        # Get memory usage - either simple RSS or detailed VM stats
-        if account_shared:
-            # Show progress every 10 tasks
-            process_count += 1
-            if process_count % 10 == 0 or process_count == 1:
-                print("Processed %d tasks..." % process_count, end="\r")
+        # Get RSS from ps output (this is the correct value)
+        rss = int(result_line[7])
+        if options.memusage_pss:
+            rss = get_pss_for_task(result_line[3])
 
-            # Analyze VM to get private vs shared
-            task_addr = result_line[3]  # TASK address
-            vm_stats = get_task_vm_stats(task_addr)
-            rss = vm_stats['total_kb']
-            total_shared += vm_stats['shared_kb']
-            total_private += vm_stats['private_kb']
-        else:
-            # Fast path: just use RSS
-            rss = int(result_line[7])
-            if options.memusage_pss:
-                rss = get_pss_for_task(result_line[3])
+        task_addr = result_line[3]  # TASK address
+
+        # Store task info for potential shared memory analysis
+        if account_shared:
+            task_list.append((pname, task_addr, rss))
 
         total_rss = total_rss + rss
         if (pname in mem_usage_dict):
@@ -1367,12 +1355,33 @@ def show_tasks_memusage(options):
 
         if rss != 0:
             mem_usage_dict[pname] = rss
-#            print("%s %.2f" % (pname, mem_usage_dict[pname]))
-#            break
 
-    # Clear progress line if it was shown
-    if account_shared and process_count > 0:
-        print()  # Add newline after progress counter
+    # Second pass: analyze shared memory if requested
+    if account_shared and len(task_list) > 0:
+        print("\nAnalyzing shared memory mappings...")
+        shared_info = collect_shared_mappings_global(task_list)
+
+        # Calculate total unique shared memory (count each file once)
+        total_shared = 0
+        for filename, size_bytes in shared_info['file_to_size'].items():
+            count = shared_info['file_to_count'][filename]
+            if count > 1:  # Only count files mapped by multiple processes
+                total_shared += size_bytes // 1024
+
+        # Calculate over-counted amount
+        # For each file mapped by N processes, it's counted N times in RSS but should be counted once
+        over_counted = 0
+        for filename, size_bytes in shared_info['file_to_size'].items():
+            count = shared_info['file_to_count'][filename]
+            if count > 1:
+                # This file is counted 'count' times, but should be counted once
+                # So we over-counted it (count - 1) times
+                over_counted += (size_bytes // 1024) * (count - 1)
+
+        # Private memory = Total RSS - over-counted shared
+        total_private = total_rss - over_counted
+
+        print("Shared memory analysis complete.\n")
 
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
@@ -1480,25 +1489,44 @@ def show_tasks_memusage(options):
         crashcolor.set_color(crashcolor.RESET)
 
     crashcolor.set_color(crashcolor.BLUE)
-    print("Total memory usage from user-space = %s" %
-          (get_size_str(total_rss * 1024)))
 
-    # Show total usage percentage with bar graph
-    if system_total_mem_kb > 0:
-        total_percentage = (total_rss * 100.0 / system_total_mem_kb)
-        system_total_mem_bytes = system_total_mem_kb * 1024
-        if account_shared:
+    if account_shared:
+        # Show actual total (private + shared, no double-counting)
+        actual_total = total_private + total_shared
+        print("Actual total memory usage (no overlap) = %s" %
+              (get_size_str(actual_total * 1024)))
+
+        if system_total_mem_kb > 0:
+            actual_percentage = (actual_total * 100.0 / system_total_mem_kb)
+            system_total_mem_bytes = system_total_mem_kb * 1024
             print("\tNotes) %.2f%% from total system memory(%s)" %
-                  (total_percentage, get_size_str(system_total_mem_bytes)))
+                  (actual_percentage, get_size_str(system_total_mem_bytes)))
             print("\t       (%.2f%% private + %.2f%% shared)" %
                   (private_percentage, shared_percentage))
-        else:
+            if options.graph:
+                bar = get_memory_bar(actual_percentage, width=TOTAL_BAR_WIDTH)
+                print("\t       %s" % bar)
+
+        # Also show raw RSS total for comparison
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\nRaw RSS total (with overlaps counted) = %s" %
+              (get_size_str(total_rss * 1024)))
+        if system_total_mem_kb > 0:
+            rss_percentage = (total_rss * 100.0 / system_total_mem_kb)
+            print("\tNotes) %.2f%% from total system memory (over-counted)" % rss_percentage)
+    else:
+        print("Total memory usage from user-space = %s" %
+              (get_size_str(total_rss * 1024)))
+
+        # Show total usage percentage with bar graph
+        if system_total_mem_kb > 0:
+            total_percentage = (total_rss * 100.0 / system_total_mem_kb)
+            system_total_mem_bytes = system_total_mem_kb * 1024
             print("\tNotes) %.2f percent from total system memory(%s)" %
                   (total_percentage, get_size_str(system_total_mem_bytes)))
-        if options.graph:
-            bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
-            print("\t       %s" % bar)
-            crashcolor.set_color(crashcolor.RESET)
+            if options.graph:
+                bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
+                print("\t       %s" % bar)
 
     crashcolor.set_color(crashcolor.RESET)
 
