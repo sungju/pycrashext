@@ -1209,16 +1209,27 @@ def _resolve_page_struct_address(vaddr):
     return 0
 
 
-def _collect_page_keys_for_vma(vma_addr):
+def _collect_page_keys_for_vma(vma_addr, task_addr):
+    global debug_mode
     page_keys = set()
+    pages_skipped_zero_phys = 0
+    pages_skipped_zero_struct = 0
+    pages_added = 0
 
     try:
+        # CRITICAL: vm -P requires task context to be set first
+        # Set the task context, then run vm -P on the specific VMA
+        exec_crash_command("set %s" % task_addr)
         result_str = exec_crash_command("vm -P %s" % (vma_addr))
         if result_str == "":
+            if debug_mode:
+                print("[DEBUG] vm -P returned empty for VMA %s" % vma_addr)
             return page_keys
 
         result_lines = result_str.splitlines()
         if len(result_lines) < 5:
+            if debug_mode:
+                print("[DEBUG] vm -P returned only %d lines for VMA %s" % (len(result_lines), vma_addr))
             return page_keys
 
         for i in range(4, len(result_lines)):
@@ -1229,6 +1240,7 @@ def _collect_page_keys_for_vma(vma_addr):
             try:
                 physical_addr = int(page_words[1], 16)
                 if physical_addr == 0:
+                    pages_skipped_zero_phys += 1
                     continue
                 vaddr = page_words[0]
             except:
@@ -1237,9 +1249,15 @@ def _collect_page_keys_for_vma(vma_addr):
             # vtop is slow - allow interruption
             page_addr = _resolve_page_struct_address(vaddr)
             if page_addr == 0:
+                pages_skipped_zero_struct += 1
                 continue
 
             page_keys.add(page_addr)
+            pages_added += 1
+
+        if debug_mode and (pages_added > 0 or pages_skipped_zero_phys > 0 or pages_skipped_zero_struct > 0):
+            print("[DEBUG] VMA %s: added=%d, skipped_phys=0:%d, skipped_struct=0:%d" %
+                  (vma_addr, pages_added, pages_skipped_zero_phys, pages_skipped_zero_struct))
 
     except KeyboardInterrupt:
         # Propagate interrupt up
@@ -1249,8 +1267,11 @@ def _collect_page_keys_for_vma(vma_addr):
 
 
 def _collect_shared_page_keys(task_addr, task_name):
+    global debug_mode
     vma_pages = set()
     shared_candidate_count = 0
+    vma_count = 0
+    shared_vma_count = 0
 
     try:
         result_str = exec_crash_command("vm %s" % task_addr)
@@ -1262,6 +1283,7 @@ def _collect_shared_page_keys(task_addr, task_name):
             return vma_pages, shared_candidate_count
 
         for i in range(4, len(result_lines)):
+            vma_count += 1
             words = result_lines[i].split()
             if len(words) < 4:
                 continue
@@ -1299,8 +1321,9 @@ def _collect_shared_page_keys(task_addr, task_name):
                 continue
 
             # This is the slow part - allow interruption
-            page_keys = _collect_page_keys_for_vma(vma_addr)
+            page_keys = _collect_page_keys_for_vma(vma_addr, task_addr)
             if len(page_keys) > 0:
+                shared_vma_count += 1
                 vma_pages.update(page_keys)
                 try:
                     shared_candidate_count = shared_candidate_count + ((vma_end - vma_start) // page_size)
@@ -1310,6 +1333,10 @@ def _collect_shared_page_keys(task_addr, task_name):
     except KeyboardInterrupt:
         # Propagate interrupt up to the caller
         raise
+
+    if debug_mode:
+        print("[DEBUG] Task %s: %d VMAs total, %d potentially shared, %d unique pages collected" %
+              (task_name, vma_count, shared_vma_count, len(vma_pages)))
 
     return vma_pages, shared_candidate_count
 
@@ -1332,6 +1359,7 @@ def collect_shared_mappings_global(task_list):
         }
     """
     global page_size
+    global debug_mode
 
     page_to_task_count = {} # Track each unique page and how many tasks reference it
     task_pages = {}         # Track pages per task
@@ -1349,6 +1377,13 @@ def collect_shared_mappings_global(task_list):
             try:
                 page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
                 scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
+
+                # Debug: Show page collection for first few tasks
+                if debug_mode and idx < 3:
+                    print("\n[DEBUG] Task %d (%s):" % (idx, pname))
+                    print("  task_addr: %s, rss: %d KB" % (task_addr, rss_kb))
+                    print("  Collected %d unique pages from potentially shared VMAs" % len(page_keys))
+                    print("  Scanned VMA bytes: %d" % candidate_bytes)
 
                 task_pages[pname] = page_keys
                 task_rss[pname] = rss_kb
@@ -1379,6 +1414,27 @@ def collect_shared_mappings_global(task_list):
         crashcolor.set_color(crashcolor.RESET)
 
     print()  # Clear progress line
+
+    # Debug: Show analysis summary
+    if debug_mode:
+        print("\n[DEBUG] Shared memory analysis summary:")
+        print("  Total tasks analyzed: %d" % len(task_pages))
+        print("  Total unique pages tracked: %d" % len(page_to_task_count))
+
+        # Count how many pages are shared
+        shared_page_count = sum(1 for count in page_to_task_count.values() if count >= 2)
+        private_page_count = sum(1 for count in page_to_task_count.values() if count == 1)
+        print("  Pages mapped by 2+ tasks: %d" % shared_page_count)
+        print("  Pages mapped by 1 task: %d" % private_page_count)
+
+        # Show some example shared pages
+        if shared_page_count > 0:
+            print("  Sample of shared pages:")
+            count = 0
+            for page_addr, task_count in page_to_task_count.items():
+                if task_count >= 2 and count < 5:
+                    print("    Page 0x%x: mapped by %d tasks" % (page_addr, task_count))
+                    count += 1
 
     # Calculate global totals
     total_shared_bytes = 0
@@ -1498,6 +1554,20 @@ def show_tasks_memusage(options):
     if account_shared and len(task_list) > 0:
         crashcolor.set_color(crashcolor.YELLOW)
         print("\nAnalyzing shared memory mappings (Ctrl-C to stop)...")
+        print("Total tasks to analyze: %d" % len(task_list))
+
+        # Show distribution of tasks by process name
+        if getattr(options, 'debug', False):
+            try:
+                from collections import Counter
+                task_names = [pname for pname, _, _ in task_list]
+                name_counts = Counter(task_names)
+                print("[DEBUG] Process distribution:")
+                for name, count in sorted(name_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
+                    print("  %s: %d instances" % (name, count))
+            except Exception as e:
+                print("[DEBUG] Error showing process distribution: %s" % str(e))
+
         crashcolor.set_color(crashcolor.RESET)
         shared_info = collect_shared_mappings_global(task_list)
 
