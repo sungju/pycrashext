@@ -1189,11 +1189,163 @@ def get_pss_for_task(task_addr):
     return rss
 
 
+def get_task_vm_stats(task_addr, account_shared=False):
+    """
+    Get VM statistics for a task.
+
+    Args:
+        task_addr: Task address (hex string or int)
+        account_shared: If True, analyze page reference counts to distinguish shared memory
+
+    Returns:
+        dict: {
+            'total_kb': total RSS in KB,
+            'private_kb': private memory in KB (if account_shared=True),
+            'shared_kb': shared memory in KB (if account_shared=True)
+        }
+    """
+    global page_size
+
+    if not account_shared:
+        # Fast path: just return RSS from task structure
+        try:
+            if isinstance(task_addr, str):
+                task_addr = int(task_addr, 16)
+            task = readSU("struct task_struct", task_addr)
+            rss = task.rss if hasattr(task, 'rss') else 0
+            return {
+                'total_kb': rss,
+                'private_kb': 0,
+                'shared_kb': 0
+            }
+        except:
+            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
+
+    # Slow path: analyze VM areas to distinguish private vs shared
+    try:
+        if isinstance(task_addr, str):
+            result_str = exec_crash_command("vm %s" % task_addr)
+        else:
+            result_str = exec_crash_command("vm 0x%x" % task_addr)
+
+        if not result_str:
+            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
+
+        result_lines = result_str.splitlines()
+        if len(result_lines) < 4:
+            return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
+
+        private_pages = 0
+        shared_pages = 0
+
+        # Analyze each VMA
+        for i in range(4, len(result_lines)):
+            words = result_lines[i].split()
+            if len(words) < 4:
+                continue
+
+            # Get private vs shared page counts for this VMA
+            # This calls vm -P which is slow but accurate
+            vma_addr = words[0]
+            page_stats = analyze_vma_pages(vma_addr)
+            private_pages += page_stats[0]
+            shared_pages += page_stats[1]
+
+        # Convert pages to KB
+        private_kb = (private_pages * page_size) // 1024
+        shared_kb = (shared_pages * page_size) // 1024
+        total_kb = private_kb + shared_kb
+
+        return {
+            'total_kb': total_kb,
+            'private_kb': private_kb,
+            'shared_kb': shared_kb
+        }
+    except Exception as e:
+        if debug_mode:
+            print("Error in get_task_vm_stats: %s" % str(e))
+        return {'total_kb': 0, 'private_kb': 0, 'shared_kb': 0}
+
+
+def analyze_vma_pages(vma_addr):
+    """
+    Analyze pages in a VMA to distinguish private vs shared.
+
+    Args:
+        vma_addr: VMA address (hex string)
+
+    Returns:
+        list: [private_page_count, shared_page_count]
+    """
+    private_count = 0
+    shared_count = 0
+
+    result_str = exec_crash_command("vm -P %s" % vma_addr)
+    if not result_str:
+        return [0, 0]
+
+    result_lines = result_str.splitlines()
+    if len(result_lines) < 4:
+        return [0, 0]
+
+    for i in range(4, len(result_lines)):
+        page_words = result_lines[i].split()
+        try:
+            physical_addr = int(page_words[1], 16)
+        except:
+            continue
+
+        if physical_addr == 0:
+            continue
+
+        # Get page struct address
+        vtop_result = exec_crash_command("vtop %s" % page_words[0])
+        if not vtop_result:
+            continue
+
+        vtop_lines = vtop_result.splitlines()
+        if not vtop_lines:
+            continue
+
+        page_addr_str = vtop_lines[-1].split()[0]
+        try:
+            page_addr = int(page_addr_str, 16)
+        except:
+            continue
+
+        if page_addr == 0:
+            continue
+
+        # Read page reference count
+        page_data = readSU("struct page", page_addr)
+        if member_offset("struct page", "_refcount") >= 0:
+            counter = page_data._refcount.counter
+        else:
+            counter = page_data._count.counter
+
+        # counter == 1 means only one process maps this page (private)
+        # counter > 1 means multiple processes map this page (shared)
+        if counter == 1:
+            private_count += 1
+        else:
+            shared_count += 1
+
+    return [private_count, shared_count]
+
+
 def show_tasks_memusage(options):
     mem_usage_dict = {}
+    account_shared = getattr(options, 'account_shared', False)
+
     if options.memusage_pss:
         print("Experimental stage for Pss")
         print("It will take quite sometime to gather Pss based memory usage")
+
+    if account_shared:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Analyzing VM details for shared memory accounting...")
+        print("This will take some time as it analyzes page reference counts.\n")
+        crashcolor.set_color(crashcolor.RESET)
 
     # Get system's total memory for percentage calculation
     system_meminfo = get_meminfo_dict()
@@ -1207,6 +1359,10 @@ def show_tasks_memusage(options):
     result = exec_crash_command(crash_command)
     result_lines = result.splitlines(True)
     total_rss = 0
+    total_shared = 0
+    total_private = 0
+    process_count = 0
+
     for i in range(1, len(result_lines)):
         if (result_lines[i].find('>') == 0):
             result_lines[i] = result_lines[i].replace('>', ' ', 1)
@@ -1220,9 +1376,26 @@ def show_tasks_memusage(options):
             pname = "%s (%s)" % (cmd, pid)
         else:
             pname = cmd
-        rss = int(result_line[7])
-        if options.memusage_pss:
-            rss = get_pss_for_task(result_line[3])
+
+        # Get memory usage - either simple RSS or detailed VM stats
+        if account_shared:
+            # Show progress
+            process_count += 1
+            if process_count % 10 == 0:
+                print("Processed %d tasks..." % process_count)
+
+            # Analyze VM to get private vs shared
+            task_addr = result_line[3]  # TASK address
+            vm_stats = get_task_vm_stats(task_addr, account_shared=True)
+            rss = vm_stats['total_kb']
+            total_shared += vm_stats['shared_kb']
+            total_private += vm_stats['private_kb']
+        else:
+            # Fast path: just use RSS
+            rss = int(result_line[7])
+            if options.memusage_pss:
+                rss = get_pss_for_task(result_line[3])
+
         total_rss = total_rss + rss
         if (pname in mem_usage_dict):
             rss = mem_usage_dict[pname] + rss
@@ -1307,6 +1480,31 @@ def show_tasks_memusage(options):
     if print_count < len(sorted_usage) - 1:
         print("\t<...>")
     print("=" * separator_width)
+
+    # Show shared memory breakdown if --shared was used
+    if account_shared and total_shared > 0:
+        crashcolor.set_color(crashcolor.CYAN)
+        print("Shared memory (mapped by 2+ processes) = %s" %
+              (get_size_str(total_shared * 1024)))
+        if system_total_mem_kb > 0:
+            shared_percentage = (total_shared * 100.0 / system_total_mem_kb)
+            print("\tNotes) %.2f percent from total system memory" % shared_percentage)
+            if options.graph:
+                bar = get_memory_bar(shared_percentage, width=TOTAL_BAR_WIDTH)
+                print("\t       %s" % bar)
+        crashcolor.set_color(crashcolor.RESET)
+
+        crashcolor.set_color(crashcolor.GREEN)
+        print("Private memory (single process only)    = %s" %
+              (get_size_str(total_private * 1024)))
+        if system_total_mem_kb > 0:
+            private_percentage = (total_private * 100.0 / system_total_mem_kb)
+            print("\tNotes) %.2f percent from total system memory" % private_percentage)
+            if options.graph:
+                bar = get_memory_bar(private_percentage, width=TOTAL_BAR_WIDTH)
+                print("\t       %s" % bar)
+        crashcolor.set_color(crashcolor.RESET)
+
     crashcolor.set_color(crashcolor.BLUE)
     print("Total memory usage from user-space = %s" %
           (get_size_str(total_rss * 1024)))
@@ -1315,8 +1513,14 @@ def show_tasks_memusage(options):
     if system_total_mem_kb > 0:
         total_percentage = (total_rss * 100.0 / system_total_mem_kb)
         system_total_mem_bytes = system_total_mem_kb * 1024
-        print("\tNotes) %.2f percent from total system memory(%s)" %
-              (total_percentage, get_size_str(system_total_mem_bytes)))
+        if account_shared:
+            print("\tNotes) %.2f%% from total system memory(%s)" %
+                  (total_percentage, get_size_str(system_total_mem_bytes)))
+            print("\t       (%.2f%% private + %.2f%% shared)" %
+                  (private_percentage, shared_percentage))
+        else:
+            print("\tNotes) %.2f percent from total system memory(%s)" %
+                  (total_percentage, get_size_str(system_total_mem_bytes)))
         if options.graph:
             bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
             print("\t       %s" % bar)
@@ -4051,51 +4255,11 @@ def show_oom_meminfo(op, meminfo_dict):
     print("%s" % ('~' * 46))
 
 
-def show_oom_memory_usage(op, oom_dict, total_usage, process_instances=None):
+def show_oom_memory_usage(op, oom_dict, total_usage):
     # Get system's total memory for percentage calculation
     system_meminfo = get_meminfo_dict()
     system_total_mem_kb = system_meminfo.get('MemTotal', 0)
     system_total_mem_bytes = system_total_mem_kb * 1024
-
-    # Calculate shared memory if --shared option is enabled
-    account_shared = getattr(op, 'account_shared', False)
-    shared_memory_total = 0
-
-    if account_shared and process_instances:
-        # Estimate shared memory for processes with multiple instances
-        # Shared memory includes: shared libraries (.so files), executable code sections,
-        # and other memory pages mapped as shared between processes
-        #
-        # Note: We don't modify oom_dict here because:
-        # - When op.all=True, oom_dict keys include PIDs like "chrome (1234)"
-        # - process_instances uses base names like "chrome"
-        # - We want to show individual processes as-is, just report shared memory separately
-        #
-        # The shared memory is subtracted from total_usage so the sum makes sense:
-        #   Individual processes (with shared counted multiple times) + Shared (counted once) = Total
-        for pname, rss_list in process_instances.items():
-            if len(rss_list) > 1:
-                # Multiple instances of this process exist - estimate shared memory
-                # Heuristic: Use minimum RSS as baseline for shared memory per instance
-                # Rationale: The smallest instance likely has minimal private data,
-                # so most of its RSS is shared (code + libraries)
-                min_rss = min(rss_list)
-
-                # Estimate that ~70% of the minimum RSS is shared (code + libraries)
-                # This is a conservative estimate. Actual shared% varies by application:
-                # - Simple apps: 40-60% shared
-                # - Complex apps with many libs: 60-80% shared
-                shared_per_instance = int(min_rss * 0.7)
-
-                # Total shared memory for this process group (counted once, not per instance)
-                # Example: 3 chrome instances, min RSS is 100MB
-                #   - Shared memory = 70MB (counted once in shared_memory_total)
-                #   - This 70MB was counted 3 times in total_usage (once per instance)
-                #   - We subtract 2*70MB from total_usage to correct the over-count
-                shared_memory_total += shared_per_instance
-                # Subtract the over-counted portions (counted N times, should be 1 time)
-                overcounted = shared_per_instance * (len(rss_list) - 1)
-                total_usage -= overcounted
 
     sorted_oom_dict = sorted(oom_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
@@ -4171,31 +4335,12 @@ def show_oom_memory_usage(op, oom_dict, total_usage, process_instances=None):
     if print_count < len(sorted_oom_dict) - 1:
         print("\t<...>")
     print("=" * separator_width)
-
-    # Show shared memory if accounting is enabled
-    if account_shared and shared_memory_total > 0:
-        crashcolor.set_color(crashcolor.CYAN)
-        print("Shared memory (estimated)        = %s" % get_size_str(shared_memory_total, True))
-        if show_graph and system_total_mem_bytes > 0:
-            shared_percentage = (shared_memory_total * 100.0 / system_total_mem_bytes)
-            print("\tNotes) %.2f percent from total system memory" % shared_percentage)
-            bar = get_memory_bar(shared_percentage, width=TOTAL_BAR_WIDTH)
-            print("\t       %s" % bar)
-        crashcolor.set_color(crashcolor.RESET)
-
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
     # Show total usage bar graph
     if show_graph and system_total_mem_bytes > 0:
         total_percentage = (total_usage * 100.0 / system_total_mem_bytes)
-        if account_shared:
-            combined_total = total_usage + shared_memory_total
-            combined_percentage = (combined_total * 100.0 / system_total_mem_bytes)
-            print("\tNotes) %.2f%% from total system memory(%s)" %
-                  (total_percentage, get_size_str(system_total_mem_bytes, True)))
-            print("\t       (%.2f%% including shared memory)" % combined_percentage)
-        else:
-            print("\tNotes) %.2f percent from total system memory(%s)" %
-                  (total_percentage, get_size_str(system_total_mem_bytes, True)))
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_bytes, True)))
         bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
         print("\t       %s" % bar)
     crashcolor.set_color(crashcolor.RESET)
@@ -4297,7 +4442,6 @@ def show_oom_events(op):
         meminfo_dict = {}
         cgroup_dict = {}
         total_usage = 0
-        process_instances = {}  # Track process instances for shared memory calculation
         oom_display_counter = 0  # Counter for displayed events
         skip_message_shown = False  # Track if we've shown the skip message
         in_displayed_event = False  # Track if we're in an event that should be displayed
@@ -4455,7 +4599,7 @@ def show_oom_events(op):
                     for key in cgroup_dict:
                         print("  " + cgroup_dict[key])
 
-                show_oom_memory_usage(op, oom_dict, total_usage, process_instances)
+                show_oom_memory_usage(op, oom_dict, total_usage)
                 if op.details:
                     show_oom_meminfo(op, meminfo_dict)
                 oom_invoked = False
@@ -4469,7 +4613,6 @@ def show_oom_events(op):
                 meminfo_dict = {}
                 cgroup_dict = {}
                 total_usage = 0
-                process_instances = {}
                 continue
 
             try:
@@ -4482,12 +4625,6 @@ def show_oom_events(op):
                 rss = int(words[rss_index]) * page_size
                 total_usage = total_usage + rss
                 pname = words[pname_index]
-
-                # Track process instances for shared memory calculation
-                if pname not in process_instances:
-                    process_instances[pname] = []
-                process_instances[pname].append(rss)
-
                 if op.all:
                     pname = pname + (" (%s)" % pid)
                 if pname in oom_dict:
