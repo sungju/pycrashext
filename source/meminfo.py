@@ -1385,8 +1385,13 @@ def collect_shared_mappings_global(task_list):
                     print("  Collected %d unique pages from potentially shared VMAs" % len(page_keys))
                     print("  Scanned VMA bytes: %d" % candidate_bytes)
 
-                task_pages[pname] = page_keys
-                task_rss[pname] = rss_kb
+                # Accumulate pages and RSS for processes with same name (grouped processes)
+                if pname in task_pages:
+                    task_pages[pname].update(page_keys)  # Add to existing set
+                    task_rss[pname] += rss_kb             # Add to existing RSS
+                else:
+                    task_pages[pname] = page_keys.copy()  # Create new set
+                    task_rss[pname] = rss_kb
 
                 for page_addr in page_keys:
                     if page_addr in page_to_task_count:
@@ -1402,8 +1407,12 @@ def collect_shared_mappings_global(task_list):
             except Exception as e:
                 if debug_mode:
                     print("Error analyzing task %s: %s" % (pname, str(e)))
-                task_pages[pname] = set()
-                task_rss[pname] = rss_kb
+                # Accumulate RSS even if page collection fails
+                if pname in task_rss:
+                    task_rss[pname] += rss_kb
+                else:
+                    task_pages[pname] = set()
+                    task_rss[pname] = rss_kb
 
     except KeyboardInterrupt:
         print("\n")
