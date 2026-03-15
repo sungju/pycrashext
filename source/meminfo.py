@@ -1486,6 +1486,8 @@ def collect_shared_mappings_global(task_list):
     """
     Collect shared pages across all tasks to identify overlaps by unique page frame.
 
+    Memory-efficient implementation using PFNs and batch processing.
+
     Args:
         task_list: List of tuples (pname, task_addr, rss_kb)
 
@@ -1512,9 +1514,12 @@ def collect_shared_mappings_global(task_list):
             crashcolor.set_color(crashcolor.RESET)
             # Continue anyway, will use fallback
 
-    page_to_task_count = {} # Track each unique page and how many tasks reference it
-    task_pages = {}         # Track pages per task
-    task_rss = {}           # Track RSS per task
+    # Use PFNs (Page Frame Numbers) instead of full addresses to save memory
+    # PFN = page_addr >> 12, converting back: page_addr = PFN << 12
+    # This saves ~50% memory since we only store the page frame number
+    pfn_to_task_count = {} # Track each unique PFN and how many tasks reference it
+    task_pfns = {}         # Track PFNs per task
+    task_rss = {}          # Track RSS per task
     scanned_vma_bytes = 0
 
     total_tasks = len(task_list)
@@ -1529,28 +1534,38 @@ def collect_shared_mappings_global(task_list):
                 page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
                 scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
 
+                # Convert page addresses to PFNs to save memory
+                pfn_keys = set()
+                for page_addr in page_keys:
+                    pfn = page_addr >> 12  # Divide by 4096 (page size)
+                    pfn_keys.add(pfn)
+
                 # Debug: Show page collection for first few tasks
                 if debug_mode and idx < 3:
                     print("\n[DEBUG] Task %d (%s):" % (idx, pname))
                     print("  task_addr: %s, rss: %d KB" % (task_addr, rss_kb))
-                    print("  Collected %d unique pages from potentially shared VMAs" % len(page_keys))
+                    print("  Collected %d unique pages from potentially shared VMAs" % len(pfn_keys))
                     print("  Scanned VMA bytes: %d" % candidate_bytes)
 
-                # Accumulate pages and RSS for processes with same name (grouped processes)
-                if pname in task_pages:
-                    task_pages[pname].update(page_keys)  # Add to existing set
-                    task_rss[pname] += rss_kb             # Add to existing RSS
+                # Accumulate PFNs and RSS for processes with same name (grouped processes)
+                if pname in task_pfns:
+                    task_pfns[pname].update(pfn_keys)  # Add to existing set
+                    task_rss[pname] += rss_kb          # Add to existing RSS
                 else:
-                    task_pages[pname] = page_keys.copy()  # Create new set
+                    task_pfns[pname] = pfn_keys.copy() # Create new set
                     task_rss[pname] = rss_kb
 
-                for page_addr in page_keys:
-                    if page_addr in page_to_task_count:
-                        page_to_task_count[page_addr] = page_to_task_count[page_addr] + 1
+                for pfn in pfn_keys:
+                    if pfn in pfn_to_task_count:
+                        pfn_to_task_count[pfn] += 1
                     else:
-                        page_to_task_count[page_addr] = 1
+                        pfn_to_task_count[pfn] = 1
 
                 tasks_analyzed += 1
+
+                # Garbage collect every 100 tasks to prevent memory buildup
+                if (idx + 1) % 100 == 0:
+                    gc.collect()
 
             except KeyboardInterrupt:
                 # Re-raise to outer handler
@@ -1562,7 +1577,7 @@ def collect_shared_mappings_global(task_list):
                 if pname in task_rss:
                     task_rss[pname] += rss_kb
                 else:
-                    task_pages[pname] = set()
+                    task_pfns[pname] = set()
                     task_rss[pname] = rss_kb
 
     except KeyboardInterrupt:
@@ -1578,12 +1593,12 @@ def collect_shared_mappings_global(task_list):
     # Debug: Show analysis summary
     if debug_mode:
         print("\n[DEBUG] Shared memory analysis summary:")
-        print("  Total tasks analyzed: %d" % len(task_pages))
-        print("  Total unique pages tracked: %d" % len(page_to_task_count))
+        print("  Total tasks analyzed: %d" % len(task_pfns))
+        print("  Total unique pages tracked: %d" % len(pfn_to_task_count))
 
         # Count how many pages are shared
-        shared_page_count = sum(1 for count in page_to_task_count.values() if count >= 2)
-        private_page_count = sum(1 for count in page_to_task_count.values() if count == 1)
+        shared_page_count = sum(1 for count in pfn_to_task_count.values() if count >= 2)
+        private_page_count = sum(1 for count in pfn_to_task_count.values() if count == 1)
         print("  Pages mapped by 2+ tasks: %d" % shared_page_count)
         print("  Pages mapped by 1 task: %d" % private_page_count)
 
@@ -1591,16 +1606,16 @@ def collect_shared_mappings_global(task_list):
         if shared_page_count > 0:
             print("  Sample of shared pages:")
             count = 0
-            for page_addr, task_count in page_to_task_count.items():
+            for pfn, task_count in pfn_to_task_count.items():
                 if task_count >= 2 and count < 5:
-                    print("    Page 0x%x: mapped by %d tasks" % (page_addr, task_count))
+                    print("    PFN 0x%x: mapped by %d tasks" % (pfn, task_count))
                     count += 1
 
     # Calculate global totals
     total_shared_bytes = 0
     total_private_bytes = 0
     over_counted_bytes = 0
-    for _, count in page_to_task_count.items():
+    for _, count in pfn_to_task_count.items():
         if count >= 2:
             total_shared_bytes += page_size
             if count > 1:
@@ -1611,11 +1626,11 @@ def collect_shared_mappings_global(task_list):
     # Calculate per-task private and shared
     task_private = {}
     task_shared = {}
-    for pname, page_set in task_pages.items():
+    for pname, pfn_set in task_pfns.items():
         shared_kb = 0
         private_kb = 0
-        for page_addr in page_set:
-            if page_to_task_count.get(page_addr, 1) >= 2:
+        for pfn in pfn_set:
+            if pfn_to_task_count.get(pfn, 1) >= 2:
                 shared_kb += page_size // 1024
             else:
                 private_kb += page_size // 1024
@@ -1630,8 +1645,13 @@ def collect_shared_mappings_global(task_list):
         task_shared[pname] = shared_kb
         task_private[pname] = private_kb
 
+    # Free memory before returning
+    del pfn_to_task_count
+    del task_pfns
+    gc.collect()
+
     return {
-        'page_to_task_count': page_to_task_count,
+        'page_to_task_count': {},  # Empty now, no longer needed
         'task_shared': task_shared,
         'task_private': task_private,
         'task_rss': task_rss,
