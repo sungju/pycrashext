@@ -1679,6 +1679,10 @@ def collect_shared_mappings_global(task_list):
         task_shared[pname] = shared_kb
         task_private[pname] = private_kb
 
+    # Recalculate global totals from per-task values (which include unscanned pages)
+    total_private_bytes = sum(task_private.values()) * 1024
+    total_shared_bytes = sum(task_shared.values()) * 1024
+
     # Free memory before returning
     del pfn_to_task_count
     del task_pfns
