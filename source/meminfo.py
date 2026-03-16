@@ -1531,14 +1531,17 @@ def collect_shared_mappings_global(task_list):
     total_tasks = len(task_list)
     tasks_analyzed = 0
 
+    sys.stdout.write("Analyzing shared mappings:\n")
+    sys.stdout.flush()
+
     try:
         for idx, (pname, task_addr, rss_kb) in enumerate(task_list):
             try:
                 _pid = readSU("task_struct", int(task_addr, 16)).pid
-                _task_label = "%.15s (PID %d)" % (pname, _pid)
+                _task_label = "%.12s (PID %d)" % (pname, _pid)
             except:
-                _task_label = "%.15s" % pname
-            _progress_msg = "Analyzing shared mappings: %d/%d tasks | Current: %-25s (Ctrl-C to stop)..." % (
+                _task_label = "%.12s" % pname
+            _progress_msg = "  %d/%d tasks | Current: %-28s (Ctrl-C)" % (
                 idx + 1, total_tasks, _task_label)
             sys.stdout.write("\r" + _progress_msg)
             sys.stdout.flush()
@@ -1618,7 +1621,7 @@ def collect_shared_mappings_global(task_list):
         print("Showing partial results based on analyzed tasks...\n")
         crashcolor.set_color(crashcolor.RESET)
 
-    sys.stdout.write("\r" + " " * 80 + "\r")  # Clear progress line
+    sys.stdout.write("\r" + " " * 79 + "\r")  # Clear progress line
     sys.stdout.flush()
 
     # Debug: Show analysis summary
