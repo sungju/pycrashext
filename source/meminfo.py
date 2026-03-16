@@ -1449,6 +1449,11 @@ def _collect_shared_page_keys(task_addr, task_name):
                 is_potentially_shared = True
             elif filename.startswith('SYSV'):
                 is_potentially_shared = True
+            elif not filename or filename.startswith('['):
+                # Anonymous VMAs (heap, stack, [anon:...]) are shared between
+                # threads of the same process. Include them so thread-level page
+                # duplication is reflected in over_counted_bytes.
+                is_potentially_shared = True
 
             if not is_potentially_shared:
                 try:
@@ -1520,6 +1525,7 @@ def collect_shared_mappings_global(task_list):
     pfn_to_task_count = {} # Track each unique PFN and how many tasks reference it
     task_pfns = {}         # Track PFNs per task
     task_rss = {}          # Track RSS per task
+    seen_mm_for_rss = {}   # Track unique mm_struct addresses per pname to avoid thread double-counting
     scanned_vma_bytes = 0
 
     total_tasks = len(task_list)
@@ -1547,13 +1553,30 @@ def collect_shared_mappings_global(task_list):
                     print("  Collected %d unique pages from potentially shared VMAs" % len(pfn_keys))
                     print("  Scanned VMA bytes: %d" % candidate_bytes)
 
+                # Deduplicate threads by mm_struct: only accumulate RSS once per unique
+                # mm_struct address. Threads share mm_struct, so counting all would
+                # inflate task_rss and corrupt the unscanned-page fallback calculation.
+                count_rss = True
+                try:
+                    task_struct = readSU("task_struct", int(task_addr, 16))
+                    mm_addr = task_struct.mm
+                    if mm_addr == 0:
+                        count_rss = False  # Kernel thread
+                    elif mm_addr in seen_mm_for_rss.get(pname, set()):
+                        count_rss = False
+                    else:
+                        seen_mm_for_rss.setdefault(pname, set()).add(mm_addr)
+                except:
+                    pass  # If unreadable, count conservatively
+
                 # Accumulate PFNs and RSS for processes with same name (grouped processes)
                 if pname in task_pfns:
                     task_pfns[pname].update(pfn_keys)  # Add to existing set
-                    task_rss[pname] += rss_kb          # Add to existing RSS
+                    if count_rss:
+                        task_rss[pname] += rss_kb      # Add to existing RSS only for unique mm
                 else:
                     task_pfns[pname] = pfn_keys.copy() # Create new set
-                    task_rss[pname] = rss_kb
+                    task_rss[pname] = rss_kb if count_rss else 0
 
                 for pfn in pfn_keys:
                     if pfn in pfn_to_task_count:
@@ -1694,6 +1717,7 @@ def show_tasks_memusage(options):
 
     # First pass: collect all tasks with RSS
     task_list = []  # List of (pname, task_addr, rss_kb)
+    seen_mm_structs = set()  # Track unique mm_struct addresses to avoid counting threads twice
 
     for i in range(1, len(result_lines)):
         if (result_lines[i].find('>') == 0):
@@ -1720,7 +1744,24 @@ def show_tasks_memusage(options):
         if account_shared:
             task_list.append((pname, task_addr, rss))
 
-        total_rss = total_rss + rss
+        # Deduplicate threads: only count RSS for unique mm_struct addresses.
+        # Threads in the same process share mm_struct, so counting all threads
+        # would inflate total_rss by the thread count per process.
+        is_unique_process = True
+        try:
+            task_struct = readSU("task_struct", int(task_addr, 16))
+            mm_addr = task_struct.mm
+            if mm_addr == 0:
+                is_unique_process = False  # Kernel thread, no user memory
+            elif mm_addr in seen_mm_structs:
+                is_unique_process = False
+            else:
+                seen_mm_structs.add(mm_addr)
+        except:
+            pass  # If mm_struct unreadable, count conservatively
+
+        if is_unique_process:
+            total_rss = total_rss + rss
         if (pname in mem_usage_dict):
             rss = mem_usage_dict[pname] + rss
 
