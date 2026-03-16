@@ -1533,8 +1533,15 @@ def collect_shared_mappings_global(task_list):
 
     try:
         for idx, (pname, task_addr, rss_kb) in enumerate(task_list):
-            if (idx + 1) % 50 == 0 or idx == 0:
-                print("Analyzing shared mappings: %d/%d tasks (Ctrl-C to stop)..." % (idx + 1, total_tasks), end="\r")
+            try:
+                _pid = readSU("task_struct", int(task_addr, 16)).pid
+                _task_label = "%.15s (PID %d)" % (pname, _pid)
+            except:
+                _task_label = "%.15s" % pname
+            _progress_msg = "Analyzing shared mappings: %d/%d tasks | Current: %-25s (Ctrl-C to stop)..." % (
+                idx + 1, total_tasks, _task_label)
+            sys.stdout.write("\r" + _progress_msg)
+            sys.stdout.flush()
 
             try:
                 page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
@@ -1611,7 +1618,8 @@ def collect_shared_mappings_global(task_list):
         print("Showing partial results based on analyzed tasks...\n")
         crashcolor.set_color(crashcolor.RESET)
 
-    print()  # Clear progress line
+    sys.stdout.write("\r" + " " * 80 + "\r")  # Clear progress line
+    sys.stdout.flush()
 
     # Debug: Show analysis summary
     if debug_mode:
