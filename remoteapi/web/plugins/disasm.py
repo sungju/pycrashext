@@ -248,10 +248,18 @@ def read_source_line(source_line, has_header):
     if source_file == "":
         return ""
 
+    # Reject absolute paths and path components that could escape the source dir
+    if os.path.isabs(source_file) or '..' in source_file.split(os.sep):
+        return ""
+
     file_lines = []
     try:
         os.chdir(cur_rhel_path)
-        f = open(source_file, 'r')
+        full_path = os.path.realpath(os.path.join(cur_rhel_path, source_file))
+        allowed_root = os.path.realpath(cur_rhel_path)
+        if not full_path.startswith(allowed_root + os.sep):
+            return ""
+        f = open(full_path, 'r')
         file_lines = f.readlines()
         f.close()
     except:
@@ -390,10 +398,18 @@ def read_a_function(asm_str):
         return first_line + "\n" + "Source code is not available"
 
 
+    # Reject absolute paths and path components that could escape the source dir
+    if os.path.isabs(source_file) or '..' in source_file.split(os.sep):
+        return first_line + "\n" + "Invalid source file path"
+
     file_lines = []
     try:
         os.chdir(cur_rhel_path)
-        f = open(source_file, 'r')
+        full_path = os.path.realpath(os.path.join(cur_rhel_path, source_file))
+        allowed_root = os.path.realpath(cur_rhel_path)
+        if not full_path.startswith(allowed_root + os.sep):
+            return first_line + "\n" + "Path traversal attempt rejected"
+        f = open(full_path, 'r')
         file_lines = f.readlines()
         f.close()
     except:

@@ -11,6 +11,7 @@ import sys
 
 from flask import Flask
 from flask import jsonify
+from flask import request
 
 from load_plugins import load_plugins
 from werkzeug.serving import run_simple
@@ -20,6 +21,15 @@ to_reload = False
 def get_app():
     app = Flask(__name__)
 
+    @app.before_request
+    def require_api_key():
+        api_key = os.environ.get('PYCRASHEXT_API_KEY', '')
+        if not api_key:
+            # No API key configured — auth enforcement is disabled
+            return None
+        provided = request.headers.get('X-API-Key', '')
+        if not provided or provided != api_key:
+            return jsonify({'error': 'Unauthorized'}), 401
 
     @app.route('/')
     def app_main():
@@ -81,8 +91,9 @@ def start_app():
     else:
         run_port = 5000
 
+    debug_mode = os.environ.get('PYCRASHEXT_DEBUG', '').lower() in ('1', 'true', 'yes')
     run_simple('0.0.0.0', run_port, application,
-               use_reloader=True, use_debugger=True, use_evalex=True)
+               use_reloader=debug_mode, use_debugger=False, use_evalex=False)
 
 
 if __name__ == '__main__':
