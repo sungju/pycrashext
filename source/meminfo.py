@@ -1815,11 +1815,13 @@ def show_tasks_memusage(options):
         task_shared_dict = shared_info['task_shared']
 
         # Calculate private memory correctly:
-        # total_rss includes each shared page counted once per process that maps it
-        # Subtract the over-counted amount to get actual memory usage
-        # Then subtract total_shared to get just private
-        actual_total_kb = total_rss - over_counted
-        total_private = actual_total_kb - total_shared
+        # Use total_private_kb from page-level scan (already excludes shared pages).
+        # Do NOT derive from total_rss - over_counted: total_rss is the raw sum of
+        # all per-process RSS and far exceeds physical RAM on busy systems, while
+        # over_counted only covers scanned VMA pages — the difference inflates
+        # total_private by orders of magnitude (causing >2000% percentages).
+        total_private = shared_info['total_private_kb']
+        actual_total_kb = total_private + total_shared
 
         # Sanity check: ensure no negative values
         if total_private < 0:
