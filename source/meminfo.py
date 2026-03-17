@@ -1546,6 +1546,23 @@ def collect_shared_mappings_global(task_list):
             sys.stdout.write("\r" + _progress_msg)
             sys.stdout.flush()
 
+            # Deduplicate threads by mm_struct: only accumulate RSS once per unique
+            # mm_struct address. Threads share mm_struct, so counting all would
+            # inflate task_rss and corrupt the unscanned-page fallback calculation.
+            # This must run BEFORE the try block so the exception handler can use it.
+            count_rss = True
+            try:
+                task_struct = readSU("task_struct", int(task_addr, 16))
+                mm_addr = task_struct.mm
+                if mm_addr == 0:
+                    count_rss = False  # Kernel thread
+                elif mm_addr in seen_mm_for_rss.get(pname, set()):
+                    count_rss = False
+                else:
+                    seen_mm_for_rss.setdefault(pname, set()).add(mm_addr)
+            except:
+                pass  # If unreadable, count conservatively
+
             try:
                 page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
                 scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
@@ -1562,22 +1579,6 @@ def collect_shared_mappings_global(task_list):
                     print("  task_addr: %s, rss: %d KB" % (task_addr, rss_kb))
                     print("  Collected %d unique pages from potentially shared VMAs" % len(pfn_keys))
                     print("  Scanned VMA bytes: %d" % candidate_bytes)
-
-                # Deduplicate threads by mm_struct: only accumulate RSS once per unique
-                # mm_struct address. Threads share mm_struct, so counting all would
-                # inflate task_rss and corrupt the unscanned-page fallback calculation.
-                count_rss = True
-                try:
-                    task_struct = readSU("task_struct", int(task_addr, 16))
-                    mm_addr = task_struct.mm
-                    if mm_addr == 0:
-                        count_rss = False  # Kernel thread
-                    elif mm_addr in seen_mm_for_rss.get(pname, set()):
-                        count_rss = False
-                    else:
-                        seen_mm_for_rss.setdefault(pname, set()).add(mm_addr)
-                except:
-                    pass  # If unreadable, count conservatively
 
                 # Accumulate PFNs and RSS for processes with same name (grouped processes)
                 if pname in task_pfns:
@@ -1606,12 +1607,13 @@ def collect_shared_mappings_global(task_list):
             except Exception as e:
                 if debug_mode:
                     print("Error analyzing task %s: %s" % (pname, str(e)))
-                # Accumulate RSS even if page collection fails
+                # Accumulate RSS even if page collection fails, respecting mm_struct dedup
                 if pname in task_rss:
-                    task_rss[pname] += rss_kb
+                    if count_rss:
+                        task_rss[pname] += rss_kb
                 else:
                     task_pfns[pname] = set()
-                    task_rss[pname] = rss_kb
+                    task_rss[pname] = rss_kb if count_rss else 0
 
     except KeyboardInterrupt:
         print("\n")
