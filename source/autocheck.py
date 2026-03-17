@@ -115,7 +115,9 @@ def print_result(result_list):
             print("No message given")
         print("-" * 75)
 
+        crashcolor.set_color(crashcolor.GREEN)
         print("KCS:")
+        crashcolor.set_color(crashcolor.RESET)
         if "KCS_TITLE" in result_dict:
             print("\t%s" % result_dict["KCS_TITLE"])
         else:
@@ -127,6 +129,7 @@ def print_result(result_list):
             print("\tNo URL for KCS")
         crashcolor.set_color(crashcolor.RESET)
 
+        crashcolor.set_color(crashcolor.GREEN)
         print("Resolution:")
         crashcolor.set_color(crashcolor.RED)
         if "RESOLUTION" in result_dict:
@@ -135,7 +138,11 @@ def print_result(result_list):
             print("\tNo resolution given")
         crashcolor.set_color(crashcolor.RESET)
 
-        print("Current kernel: %s" % sysinfo["RELEASE"])
+        crashcolor.set_color(crashcolor.GREEN)
+        print("Current kernel:")
+        crashcolor.set_color(crashcolor.RESET)
+        print("\t%s" % sysinfo["RELEASE"])
+        crashcolor.set_color(crashcolor.GREEN)
         print("Fixed kernel version:")
         crashcolor.set_color(crashcolor.CYAN)
         if "KERNELS" in result_dict:
