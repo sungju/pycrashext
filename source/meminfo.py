@@ -2547,16 +2547,6 @@ def check_slab_corruption(options):
     # Get number of CPUs
     num_cpus = sys_info.CPUS
 
-    # Function to check if address is canonical (valid kernel address)
-    def is_canonical_kernel_addr(addr):
-        """Check if address is a valid canonical kernel address on x86_64"""
-        if addr == 0:
-            return True  # NULL is valid
-        # On x86_64, kernel addresses should have bits 63-48 either all 0 or all 1
-        # Kernel space typically has all 1s (0xffff...)
-        high_bits = (addr >> 48) & 0xffff
-        return high_bits == 0xffff or high_bits == 0x0
-
     # Check specified CPU or all CPUs
     cpus_to_check = [target_cpu] if target_cpu is not None else range(num_cpus)
     corruption_found = False
@@ -2578,7 +2568,14 @@ def check_slab_corruption(options):
             # Check freelist pointer
             freelist = kmem_cache_cpu.freelist
             tid = kmem_cache_cpu.tid
-            page = kmem_cache_cpu.page
+            # kernel 5.17+ renamed 'page' to 'slab' in struct kmem_cache_cpu
+            try:
+                page = kmem_cache_cpu.page
+            except:
+                try:
+                    page = kmem_cache_cpu.slab
+                except:
+                    page = 0
 
             # Skip CPUs with no active slab - freelist is irrelevant (may be
             # an obfuscated NULL from SLAB freelist hardening or stale data)
@@ -2587,28 +2584,32 @@ def check_slab_corruption(options):
                     print("CPU %d: No active slab (page=NULL), skipping" % cpu_num)
                 continue
 
-            # Validate freelist
-            if not is_canonical_kernel_addr(freelist):
+            # Validate freelist by testing actual memory readability
+            # This works with KASLR, 5-level paging, and any address layout
+            freelist_is_valid = False
+            if freelist == 0:
+                freelist_is_valid = True  # NULL is valid
+            else:
+                try:
+                    # Try to read 8 bytes from freelist address
+                    test_read = readULong(freelist)
+                    freelist_is_valid = True
+                except:
+                    # Cannot read - this is corruption
+                    freelist_is_valid = False
+
+            if not freelist_is_valid:
                 corruption_found = True
                 crashcolor.set_color(crashcolor.RED)
                 print("\n[CORRUPTION DETECTED] CPU %d:" % cpu_num)
                 crashcolor.set_color(crashcolor.CYAN)
                 print("crash> kmem_cache_cpu 0x%x" % cpu_slab_vaddr)
                 print("struct kmem_cache_cpu {")
-                print("  freelist = 0x%x, (INVALID - non-canonical address)" % freelist)
+                print("  freelist = 0x%x, (INVALID - memory not accessible)" % freelist)
                 print("  tid = 0x%x," % tid)
                 print("  page = 0x%x," % page)
                 print("  ...")
                 print("}")
-                crashcolor.set_color(crashcolor.UNDERLINE | crashcolor.YELLOW)
-
-
-                # Try to read freelist to confirm it's inaccessible
-                try:
-                    test_read = readULong(freelist)
-                    print("Warning: Corrupted freelist is readable (0x%x)" % test_read)
-                except:
-                    print("Confirmed: Corrupted freelist is NOT accessible")
                 crashcolor.set_color(crashcolor.RESET)
             else:
                 # Only print if checking specific CPU or in verbose mode
@@ -4136,42 +4137,66 @@ def entries_len(entries, size):
     return size  # All entries are within range
 
 
-import ctypes
-
 def make_handle_union(bits_slab, bits_offset, bits_valid, bits_extra):
     # sanity check
     total = bits_slab + bits_offset + bits_valid + bits_extra
     if total > 32:
         raise ValueError(f"Too many bits ({total}), must be <= 32")
 
-    class HandleBits(ctypes.LittleEndianStructure):
-        _fields_ = [
-            ("slabindex", ctypes.c_uint32, bits_slab),
-            ("offset",    ctypes.c_uint32, bits_offset),
-        ]
-        if bits_valid > 0:
-            _fields_.append(("valid",     ctypes.c_uint32, bits_valid))
-        if bits_extra > 0:
-            _fields_.append(("extra",     ctypes.c_uint32, bits_extra))
+    # Bit shifts and masks for each field (little-endian bit layout)
+    shift_slab   = 0
+    shift_offset = bits_slab
+    shift_valid  = bits_slab + bits_offset
+    shift_extra  = bits_slab + bits_offset + bits_valid
 
-    class HandleUnion(ctypes.Union):
-        _fields_ = [
-            ("handle", ctypes.c_uint32),
-            ("parts",  HandleBits),
-        ]
-        _anonymous_ = ("parts",)
+    mask_slab   = (1 << bits_slab)   - 1 if bits_slab   > 0 else 0
+    mask_offset = (1 << bits_offset) - 1 if bits_offset > 0 else 0
+    mask_valid  = (1 << bits_valid)  - 1 if bits_valid  > 0 else 0
+    mask_extra  = (1 << bits_extra)  - 1 if bits_extra  > 0 else 0
 
+    class HandleUnion:
         def __init__(self, *, slabindex=0, offset=0, valid=0, extra=0, handle=None):
-            super().__init__()
             if handle is not None:
-                # create from raw 32-bit handle
-                self.handle = handle
+                self.handle = handle & 0xFFFFFFFF
             else:
-                # create from fields
-                self.slabindex = slabindex
-                self.offset = offset
-                self.valid = valid
-                self.extra = extra
+                self.handle = (
+                    ((slabindex & mask_slab)   << shift_slab)   |
+                    ((offset    & mask_offset) << shift_offset) |
+                    ((valid     & mask_valid)  << shift_valid)  |
+                    ((extra     & mask_extra)  << shift_extra)
+                ) & 0xFFFFFFFF
+
+        @property
+        def slabindex(self):
+            return (self.handle >> shift_slab) & mask_slab
+
+        @slabindex.setter
+        def slabindex(self, value):
+            self.handle = (self.handle & ~(mask_slab << shift_slab)) | ((value & mask_slab) << shift_slab)
+
+        @property
+        def offset(self):
+            return (self.handle >> shift_offset) & mask_offset
+
+        @offset.setter
+        def offset(self, value):
+            self.handle = (self.handle & ~(mask_offset << shift_offset)) | ((value & mask_offset) << shift_offset)
+
+        @property
+        def valid(self):
+            return (self.handle >> shift_valid) & mask_valid
+
+        @valid.setter
+        def valid(self, value):
+            self.handle = (self.handle & ~(mask_valid << shift_valid)) | ((value & mask_valid) << shift_valid)
+
+        @property
+        def extra(self):
+            return (self.handle >> shift_extra) & mask_extra
+
+        @extra.setter
+        def extra(self, value):
+            self.handle = (self.handle & ~(mask_extra << shift_extra)) | ((value & mask_extra) << shift_extra)
 
     # nice name for debugging
     HandleUnion.__name__ = f"HandleUnion_{bits_slab}_{bits_offset}_{bits_valid}_{bits_extra}"
