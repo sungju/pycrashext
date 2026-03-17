@@ -1681,9 +1681,11 @@ def collect_shared_mappings_global(task_list):
         task_shared[pname] = shared_kb
         task_private[pname] = private_kb
 
-    # Recalculate global totals from per-task values (which include unscanned pages)
+    # Recalculate total_private to include unscanned pages (from per-task values)
+    # but keep total_shared_bytes as-is (unique count from line 1656)
+    # Note: sum(task_shared) would count shared pages N times, not once!
     total_private_bytes = sum(task_private.values()) * 1024
-    total_shared_bytes = sum(task_shared.values()) * 1024
+    # total_shared_bytes already correctly counts unique shared pages once
 
     # Free memory before returning
     del pfn_to_task_count
