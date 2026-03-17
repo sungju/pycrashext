@@ -2580,6 +2580,13 @@ def check_slab_corruption(options):
             tid = kmem_cache_cpu.tid
             page = kmem_cache_cpu.page
 
+            # Skip CPUs with no active slab - freelist is irrelevant (may be
+            # an obfuscated NULL from SLAB freelist hardening or stale data)
+            if page == 0:
+                if target_cpu is not None or debug_mode:
+                    print("CPU %d: No active slab (page=NULL), skipping" % cpu_num)
+                continue
+
             # Validate freelist
             if not is_canonical_kernel_addr(freelist):
                 corruption_found = True
