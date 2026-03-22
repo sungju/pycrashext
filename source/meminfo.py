@@ -1377,23 +1377,10 @@ def _collect_page_keys_for_vma(vma_addr, task_addr):
             except:
                 continue
 
-            # Use optimized page conversion (or fallback to vtop if needed)
-            try:
-                if page_conversion_initialized:
-                    page_addr = _physical_to_page_struct(physical_addr)
-                else:
-                    page_addr = _resolve_page_struct_address(vaddr)
-            except Exception as e:
-                # Fallback to vtop on any error
-                if debug_mode:
-                    print("[WARNING] Page conversion failed, using vtop: %s" % str(e))
-                page_addr = _resolve_page_struct_address(vaddr)
-
-            if page_addr == 0:
-                pages_skipped_zero_struct += 1
-                continue
-
-            page_keys.add(page_addr)
+            # Convert to PFN immediately to save memory
+            # PFN = physical_address / page_size (4096 bytes)
+            pfn = physical_addr >> 12
+            page_keys.add(pfn)
             pages_added += 1
 
         if debug_mode and (pages_added > 0 or pages_skipped_zero_phys > 0 or pages_skipped_zero_struct > 0):
@@ -1442,26 +1429,30 @@ def _collect_shared_page_keys(task_addr, task_name):
 
             filename = ' '.join(words[4:]) if len(words) >= 5 else ""
 
+            # Only scan VMAs that can be genuinely shared between processes:
+            # 1. VMAs with VM_SHARED flag (explicitly shared mappings)
+            # 2. File-backed VMAs (shared libraries, executables)
+            # 3. SYSV shared memory segments
+            #
+            # EXCLUDE private anonymous VMAs (heap, stack, private mmap):
+            # - After fork(), child processes have COW (copy-on-write) references
+            #   to parent's anonymous pages, so they map to the same PFNs initially
+            # - These are PRIVATE pages that will become physically separate on write
+            # - Including them would incorrectly count them as "shared"
+            #
+            # Note: Threads sharing mm_struct are already deduplicated via count_rss check
             is_potentially_shared = False
+
+            # Check 1: Explicitly shared mappings (VM_SHARED or SHM segments)
             if vm_flags & (VM_SHARED | VM_SHM):
                 is_potentially_shared = True
+            # Check 2: File-backed VMAs (libraries, executables, mapped files)
+            # But NOT anonymous regions like [heap], [stack], [anon:...]
             elif filename and not filename.startswith('['):
                 is_potentially_shared = True
-            elif filename.startswith('SYSV'):
-                is_potentially_shared = True
-            elif not filename or filename.startswith('['):
-                # Anonymous VMAs (heap, stack, [anon:...]) are shared between
-                # threads of the same process. Include them so thread-level page
-                # duplication is reflected in over_counted_bytes.
-                is_potentially_shared = True
 
-            if not is_potentially_shared:
-                try:
-                    vma = readSU("struct vm_area_struct", int(vma_addr, 16))
-                    if vma.vm_file != 0:
-                        is_potentially_shared = True
-                except:
-                    continue
+            # Dead code path removed: filename.startswith('SYSV') already caught above
+            # Dead code path removed: anonymous VMAs without VM_SHARED should NOT be scanned
 
             if not is_potentially_shared:
                 continue
@@ -1563,15 +1554,16 @@ def collect_shared_mappings_global(task_list):
             except:
                 pass  # If unreadable, count conservatively
 
+            # Skip PFN scan for duplicate mm_struct (threads share page tables)
+            if not count_rss:
+                continue
+
             try:
                 page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
                 scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
 
-                # Convert page addresses to PFNs to save memory
-                pfn_keys = set()
-                for page_addr in page_keys:
-                    pfn = page_addr >> 12  # Divide by 4096 (page size)
-                    pfn_keys.add(pfn)
+                # page_keys already contains PFNs (converted in _collect_page_keys_for_vma)
+                pfn_keys = page_keys
 
                 # Debug: Show page collection for first few tasks
                 if debug_mode and idx < 3:
@@ -1681,11 +1673,11 @@ def collect_shared_mappings_global(task_list):
         task_shared[pname] = shared_kb
         task_private[pname] = private_kb
 
-    # Recalculate total_private to include unscanned pages (from per-task values)
-    # but keep total_shared_bytes as-is (unique count from line 1656)
-    # Note: sum(task_shared) would count shared pages N times, not once!
-    total_private_bytes = sum(task_private.values()) * 1024
-    # total_shared_bytes already correctly counts unique shared pages once
+    # Keep total_private_bytes and total_shared_bytes from page-level scan (lines 1654-1660)
+    # Do NOT recalculate from per-task sums, as they include unscanned RSS portions
+    # which would inflate totals far beyond physical RAM (see bug causing 2311% overflow)
+    # Per-task values can show unscanned RSS for display, but global totals must
+    # be based on actual scanned page frames only.
 
     # Free memory before returning
     del pfn_to_task_count
@@ -1823,12 +1815,11 @@ def show_tasks_memusage(options):
         task_shared_dict = shared_info['task_shared']
 
         # Calculate private memory correctly:
-        # Use total_private_kb from page-level scan (already excludes shared pages).
-        # Do NOT derive from total_rss - over_counted: total_rss is the raw sum of
-        # all per-process RSS and far exceeds physical RAM on busy systems, while
-        # over_counted only covers scanned VMA pages — the difference inflates
-        # total_private by orders of magnitude (causing >2000% percentages).
-        total_private = shared_info['total_private_kb']
+        # total_rss includes all memory (private + shared counted multiple times)
+        # total_shared is the unique count of shared pages
+        # over_counted is how many times shared pages were over-counted (N-1 for each)
+        # Therefore: total_private = total_rss - total_shared - over_counted
+        total_private = total_rss - total_shared - over_counted
         actual_total_kb = total_private + total_shared
 
         # Sanity check: ensure no negative values
