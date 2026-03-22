@@ -64,18 +64,27 @@ def run_rule(basic_data):
             if start_pos < 0:
                 start_pos = pos_gpf_memcg
 
-        # Find where this panic/oops block ends (next kernel message starts with '\n[')
-        end_pos = log_string.find('\n[', start_pos + 1)
+        # Find where this panic/oops block ends - look for end trace marker first
+        end_trace_pos = log_string.find('---[ end trace', start_pos)
+        if end_trace_pos >= 0:
+            # Found end trace marker, include the entire line
+            end_pos = log_string.find('\n', end_trace_pos)
+            if end_pos >= 0:
+                end_pos += 1  # Include the newline
+            else:
+                end_pos = len(log_string)
+        else:
+            # No end trace marker, look for next kernel message
+            end_pos = log_string.find('\n[', start_pos + 1)
+            if end_pos >= 0:
+                end_pos += 1  # Include the newline
+            else:
+                end_pos = len(log_string)
 
         result_dict = {}
         result_dict["TITLE"] = "refcount_t overflow bug detected by %s" % \
                                 ntpath.basename(__file__)
-        if end_pos >= 0:
-            # Found next message - show up to and including the newline, but not the next '['
-            result_dict["MSG"] = log_string[start_pos:end_pos + 1]
-        else:
-            # No next message - this is the last entry, show to end
-            result_dict["MSG"] = log_string[start_pos:]
+        result_dict["MSG"] = log_string[start_pos:end_pos]
         result_dict["KCS_TITLE"] = "RHEL 8: kernel crashed due to refcount_t overflow " \
                                    "in mem_cgroup_id_get_online"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7014133"
