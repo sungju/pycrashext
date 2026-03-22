@@ -64,18 +64,25 @@ def run_rule(basic_data):
             if start_pos < 0:
                 start_pos = pos_gpf_memcg
 
+        # Find the end of the first occurrence (next timestamp or reasonable limit)
+        end_pos = log_string.find('\n[', start_pos + 1)
+        if end_pos < 0:
+            # No next timestamp found, limit to 3000 chars to avoid showing entire log
+            end_pos = min(start_pos + 3000, len(log_string))
+
         result_dict = {}
         result_dict["TITLE"] = "refcount_t overflow bug detected by %s" % \
                                 ntpath.basename(__file__)
-        result_dict["MSG"] = log_string[start_pos:]
+        result_dict["MSG"] = log_string[start_pos:end_pos]
         result_dict["KCS_TITLE"] = "RHEL 8: kernel crashed due to refcount_t overflow " \
                                    "in mem_cgroup_id_get_online"
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/7014133"
         result_dict["RESOLUTION"] = "Please upgrade kernel as specified in the KCS"
         result_dict["KERNELS"] = {
-            "kernel-4.18.0-425.3.1.el8",
-            "kernel-4.18.0-372.26.1.el8_6",
-            "kernel-4.18.0-305.62.1.el8_4",
+            "kernel-4.18.0-305.103.1.el8_4",
+            "kernel-4.18.0-372.70.1.el8_6",
+            "kernel-4.18.0-477.27.1.el8_8",
+            "kernel-4.18.0-513.5.1.el8_9",
         }
 
         return [result_dict]
