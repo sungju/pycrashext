@@ -99,3 +99,7 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# remoteapi
+remoteapi/web/bin/*
+remoteapi/web/pyvenv.cfg

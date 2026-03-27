@@ -273,6 +273,144 @@ def show_cstate(options):
         print("Cannot tell you")
 
 
+def get_cpumask_bits(mask_symbol):
+    """Return a set of CPU numbers that are set in the given cpumask symbol."""
+    cpu_set = set()
+    try:
+        cpumask = readSymbol(mask_symbol)
+        bits = cpumask.bits
+        total = sys_info.CPUS
+        bits_per_long = 64 if sys_info.pointersize == 8 else 32
+        for cpu in range(total):
+            word_idx = cpu // bits_per_long
+            bit_idx = cpu % bits_per_long
+            if (bits[word_idx] >> bit_idx) & 1:
+                cpu_set.add(cpu)
+    except Exception as e:
+        pass
+    return cpu_set
+
+
+def show_online_cpus(options):
+    total = sys_info.CPUS
+
+    # Print raw data section
+    crashcolor.set_color(crashcolor.YELLOW)
+    print("=" * 76)
+    print("RAW DATA (for manual verification)")
+    print("=" * 76)
+    crashcolor.set_color(crashcolor.RESET)
+
+    print("sys_info.CPUS: %d" % total)
+    print("sys_info.pointersize: %d" % sys_info.pointersize)
+    bits_per_long = 64 if sys_info.pointersize == 8 else 32
+    print("bits_per_long: %d" % bits_per_long)
+
+    # Show possible mask raw data
+    possible_sym = None
+    for sym in ("__cpu_possible_mask", "cpu_possible_map"):
+        if symbol_exists(sym):
+            possible_sym = sym
+            break
+
+    if possible_sym:
+        print("\nPossible CPUs symbol: %s" % possible_sym)
+        try:
+            cpumask = readSymbol(possible_sym)
+            print("  cpumask address: 0x%x" % cpumask)
+            # Find the last non-zero element
+            bits_list = list(cpumask.bits)
+            last_nonzero = -1
+            for i in range(len(bits_list) - 1, -1, -1):
+                if bits_list[i] != 0:
+                    last_nonzero = i
+                    break
+            # Show bits array in hex, truncated
+            if last_nonzero >= 0:
+                truncated_bits = ["0x%x" % b for b in bits_list[:last_nonzero + 1]]
+                if last_nonzero + 1 < len(bits_list):
+                    truncated_bits.append("...")
+                print("  cpumask.bits: [%s]" % ", ".join(truncated_bits))
+            else:
+                print("  cpumask.bits: [0x0, ...]")
+            # Show non-zero entries
+            for i, val in enumerate(cpumask.bits):
+                if val != 0:
+                    print("    bits[%d] = 0x%x" % (i, val))
+        except Exception as e:
+            print("  Error reading: %s" % str(e))
+
+    # Show online mask raw data
+    online_sym = None
+    for sym in ("__cpu_online_mask", "cpu_online_map"):
+        if symbol_exists(sym):
+            online_sym = sym
+            break
+
+    if online_sym:
+        print("\nOnline CPUs symbol: %s" % online_sym)
+        try:
+            cpumask = readSymbol(online_sym)
+            print("  cpumask address: 0x%x" % cpumask)
+            # Find the last non-zero element
+            bits_list = list(cpumask.bits)
+            last_nonzero = -1
+            for i in range(len(bits_list) - 1, -1, -1):
+                if bits_list[i] != 0:
+                    last_nonzero = i
+                    break
+            # Show bits array in hex, truncated
+            if last_nonzero >= 0:
+                truncated_bits = ["0x%x" % b for b in bits_list[:last_nonzero + 1]]
+                if last_nonzero + 1 < len(bits_list):
+                    truncated_bits.append("...")
+                print("  cpumask.bits: [%s]" % ", ".join(truncated_bits))
+            else:
+                print("  cpumask.bits: [0x0, ...]")
+            # Show non-zero entries
+            for i, val in enumerate(cpumask.bits):
+                if val != 0:
+                    print("    bits[%d] = 0x%x" % (i, val))
+        except Exception as e:
+            print("  Error reading: %s" % str(e))
+
+    crashcolor.set_color(crashcolor.YELLOW)
+    print("\n" + "=" * 76)
+    print("FORMATTED OUTPUT")
+    print("=" * 76)
+    crashcolor.set_color(crashcolor.RESET)
+
+    # Determine possible CPUs
+    possible_cpus = set(range(total))
+    for sym in ("__cpu_possible_mask", "cpu_possible_map"):
+        if symbol_exists(sym):
+            possible_cpus = get_cpumask_bits(sym)
+            break
+
+    # Determine online CPUs
+    online_cpus = set()
+    for sym in ("__cpu_online_mask", "cpu_online_map"):
+        if symbol_exists(sym):
+            online_cpus = get_cpumask_bits(sym)
+            break
+
+    offline_cpus = possible_cpus - online_cpus
+
+    crashcolor.set_color(crashcolor.LIGHTGREEN)
+    print("Online  CPUs (%d): %s" % (
+        len(online_cpus),
+        ", ".join(str(c) for c in sorted(online_cpus)) if online_cpus else "(none)"))
+    crashcolor.set_color(crashcolor.RESET)
+
+    crashcolor.set_color(crashcolor.RED)
+    print("Offline CPUs (%d): %s" % (
+        len(offline_cpus),
+        ", ".join(str(c) for c in sorted(offline_cpus)) if offline_cpus else "(none)"))
+    crashcolor.set_color(crashcolor.RESET)
+
+    print("\nTotal possible CPUs: %d" % len(possible_cpus))
+
+
 def cpuinfo():
     op = OptionParser()
     op.add_option("-c", "--capability", dest="capability", default=0,
@@ -287,6 +425,9 @@ def cpuinfo():
     op.add_option("-i", "--cpuid", dest="cpuid", default=0,
                   action="store_true",
                   help="Show CPU's physical and core ID")
+    op.add_option("-o", "--online", dest="online", default=0,
+                  action="store_true",
+                  help="Show online/offline CPUs")
     op.add_option("-s", "--cstate", dest="cstate", default=0,
                   action="store_true",
                   help="Show CPU c-state")
@@ -298,6 +439,10 @@ def cpuinfo():
                   help="Show more information")
 
     (o, args) = op.parse_args()
+
+    if (o.online):
+        show_online_cpus(o)
+        sys.exit(0)
 
     if (o.cpufreq):
         show_cpufreq()
