@@ -600,6 +600,77 @@ def parse_git_options(git_options_str):
     return True, validated_args
 
 
+def count_commits(repo_path, git_args):
+    """
+    Count commits matching the given git log arguments using git rev-list --count.
+
+    Strips display-only options (--oneline, --stat, --format, etc.) that are
+    not valid for rev-list, so counting works regardless of output format.
+
+    Args:
+        repo_path: Path to git repository
+        git_args: List of validated git log arguments
+
+    Returns:
+        int: Commit count, or 0 on error
+    """
+    # Options that control display only — not valid for rev-list
+    display_opts = {
+        '--oneline', '--stat', '--name-only', '--name-status',
+        '--abbrev-commit', '--graph', '--decorate', '--color', '--no-color',
+        '-p', '-u', '--patch', '--no-patch',
+    }
+    # Prefixes of display options that take a value via '='
+    display_prefixes = ('--format=', '--pretty=', '--date=', '--color=', '--decorate=')
+
+    import datetime
+    debug_print("[DEBUG %s] count_commits() STARTED" % datetime.datetime.now().strftime("%H:%M:%S"))
+    debug_print("[DEBUG]   repo_path: %s" % repo_path)
+    debug_print("[DEBUG]   git_args: %s" % git_args)
+
+    filtered = []
+    for arg in git_args:
+        if arg in display_opts:
+            continue
+        if any(arg.startswith(p) for p in display_prefixes):
+            continue
+        filtered.append(arg)
+
+    debug_print("[DEBUG]   filtered args (after stripping display opts): %s" % filtered)
+
+    try:
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+        # Use git log --format=%H instead of git rev-list --count because
+        # rev-list does not support -S (pickaxe) or other git-log-only options.
+        cmd = ['git', '--no-pager', 'log', '--format=%H'] + filtered
+        debug_print("[DEBUG]   Full log command: %s" % ' '.join(cmd))
+        process = subprocess.Popen(
+            cmd,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout_data, stderr_data = process.communicate()
+        os.chdir(original_dir)
+        debug_print("[DEBUG]   return code: %s" % process.returncode)
+        debug_print("[DEBUG]   stdout: %r" % stdout_data)
+        debug_print("[DEBUG]   stderr: %r" % stderr_data)
+        if process.returncode == 0:
+            lines = [l for l in stdout_data.decode('utf-8').strip().split('\n') if l.strip()]
+            result = len(lines)
+            debug_print("[DEBUG]   count_commits() returning: %d" % result)
+            return result
+    except Exception as e:
+        debug_print("[DEBUG]   count_commits() EXCEPTION: %s" % str(e))
+        try:
+            os.chdir(original_dir)
+        except Exception:
+            pass
+    debug_print("[DEBUG]   count_commits() returning: 0 (error/non-zero exit)")
+    return 0
+
+
 def execute_git_command(repo_path, subcommand, git_args):
     """
     Execute a git command in the specified repository.
@@ -755,7 +826,7 @@ def git_command():
         debug_print("[DEBUG] ERROR: RHEL_SOURCE_DIR not set")
         return "Error: RHEL_SOURCE_DIR environment variable not set"
 
-    # Always start with the current RHEL repo
+    # Determine which repos to include based on subcommand and repos_str
     debug_print("[DEBUG] Getting current RHEL repo for kernel version: %s" % kernel_version)
     rhel_path, rhel_name = get_current_rhel_dir(kernel_version)
     if rhel_path is None:
@@ -763,12 +834,20 @@ def git_command():
         return "Error: Could not detect RHEL version from kernel version '%s'\n" \
                "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
                "Or RHEL_SOURCE_DIR not set" % kernel_version
-    # Current repo: apply version filter unless --all is set
-    repos_to_search.append((rhel_name, rhel_path, not all_versions))
-    debug_print("[DEBUG] Added current repo: %s -> %s (version_filter=%s)" % (rhel_name, rhel_path, not all_versions))
+
+    # For 'show' with explicit repos: use ONLY the specified repos (skip current).
+    # For 'show' without repos: use current repo only.
+    # For 'log': always include current repo (with version filter), plus any extra repos.
+    if subcommand == 'show' and repos_str:
+        debug_print("[DEBUG] show + repos_str: skipping current repo, using only specified repos")
+    else:
+        # Current repo: apply version filter for 'log' unless --all is set; no filter for 'show'
+        apply_filter = (subcommand == 'log') and (not all_versions)
+        repos_to_search.append((rhel_name, rhel_path, apply_filter))
+        debug_print("[DEBUG] Added current repo: %s -> %s (version_filter=%s)" % (rhel_name, rhel_path, apply_filter))
 
     if repos_str:
-        debug_print("[DEBUG] User specified additional repos: %s" % repos_str)
+        debug_print("[DEBUG] User specified repos: %s" % repos_str)
         repo_names = [r.strip() for r in repos_str.split(',')]
 
         for repo_name in repo_names:
@@ -788,25 +867,32 @@ def git_command():
             if not os.path.isdir(repo_path):
                 return "Error: Repository directory not found: %s" % repo_path
 
-            # Additional repos: never apply version filter
+            # Specified repos: never apply version filter
             repos_to_search.append((repo_name, repo_path, False))
-            debug_print("[DEBUG] Added extra repo to search list: %s -> %s (version_filter=False)" % (repo_name, repo_path))
+            debug_print("[DEBUG] Added repo to search list: %s -> %s (version_filter=False)" % (repo_name, repo_path))
 
     # Add header
     results.append(BOLD_WHITE + separator + RESET)
     results.append(BOLD_WHITE + "Git %s Results" % subcommand.title() + RESET)
     results.append(CYAN + "Command: git %s %s" % (subcommand, ' '.join(git_args)) + RESET)
     results.append(CYAN + "Kernel version: %s" % kernel_version + RESET)
-    if all_versions:
-        results.append(CYAN + "Mode: All commits (version filter disabled)" + RESET)
+    if subcommand == 'show':
+        if repos_str:
+            results.append(CYAN + "Mode: Searching specified repos only: %s" % repos_str + RESET)
+        else:
+            results.append(CYAN + "Mode: Searching current repo (%s) only" % rhel_name + RESET)
     else:
-        results.append(CYAN + "Mode: Commits >= current kernel version for current repo (use --all to show all versions)" + RESET)
-    if repos_str:
-        results.append(CYAN + "Additional repos (fully searched): %s" % repos_str + RESET)
+        if all_versions:
+            results.append(CYAN + "Mode: All commits (version filter disabled)" + RESET)
+        else:
+            results.append(CYAN + "Mode: Commits >= current kernel version for current repo (use --all to show all versions)" + RESET)
+        if repos_str:
+            results.append(CYAN + "Additional repos (fully searched): %s" % repos_str + RESET)
     results.append(BOLD_WHITE + separator + RESET)
     results.append("")
 
     # Execute git command in each repository
+    commit_counts = {}
     debug_print("[DEBUG] Total repositories to search: %d" % len(repos_to_search))
     for idx, (repo_name, repo_path, apply_version_filter) in enumerate(repos_to_search, 1):
         debug_print("[DEBUG] Processing repository %d/%d: %s" % (idx, len(repos_to_search), repo_name))
@@ -845,6 +931,8 @@ def git_command():
         if success:
             debug_print("[DEBUG] Output length: %d chars" % len(output))
             results.append(output)
+            if subcommand == 'log':
+                commit_counts[repo_name] = count_commits(repo_path, repo_git_args)
         else:
             debug_print("[DEBUG] Error: %s" % output)
             results.append("Error: %s" % output)
@@ -856,6 +944,13 @@ def git_command():
     # Add footer
     results.append(BOLD_WHITE + separator + RESET)
     results.append(BOLD_WHITE + "Complete" + RESET)
+
+    if subcommand == 'log' and commit_counts:
+        results.append("")
+        results.append(BOLD_WHITE + "Commit counts:" + RESET)
+        for repo_name, count in commit_counts.items():
+            results.append(CYAN + "  %s: %d commit%s" % (repo_name, count, "s" if count != 1 else "") + RESET)
+
     results.append(BOLD_WHITE + separator + RESET)
 
     response = '\n'.join(results)
