@@ -38,6 +38,7 @@ def git():
     repos = ''
     timeout = 3600
     verbose = False
+    all_versions = False
     git_options = []
     remaining_args = args[1:]
 
@@ -45,7 +46,11 @@ def git():
     while i < len(remaining_args):
         arg = remaining_args[i]
 
-        if arg == '--repos':
+        if arg == '--all':
+            all_versions = True
+            i += 1
+            continue
+        elif arg == '--repos':
             if i + 1 < len(remaining_args):
                 repos = remaining_args[i + 1]
                 i += 2
@@ -109,7 +114,8 @@ def git():
         'git_options': ' '.join(git_options),
         'repos': repos,
         'verbose': str(verbose),
-        'kernel_version': kernel_ver
+        'kernel_version': kernel_ver,
+        'all_versions': str(all_versions)
     }
 
     # Make API request
@@ -152,6 +158,7 @@ def print_help():
     print("  --repos=<repos>    Comma-separated list of repos to search (e.g., rhel9,linux,upstream)")
     print("  --timeout=<secs>   Request timeout in seconds (default: 3600)")
     print("  --verbose          Show verbose output")
+    print("  --all              Search all kernel versions (default: only higher kernel versions)")
     print("  --help, -h         Show this help")
     print("")
     print("Examples:")
@@ -175,6 +182,7 @@ def print_help_for_subcommand(subcommand):
         print("  --stat             Show diffstat")
         print("  --oneline          Show compact one-line format")
         print("  --repos=<repos>    Search additional repositories (e.g., rhel9,linux)")
+        print("  --all              Search all kernel versions (default: only higher kernel versions)")
         print("")
         print("Examples:")
         print("  git log -Sclip_push --max-count=5")
@@ -191,6 +199,7 @@ def print_help_for_subcommand(subcommand):
         print("  --name-only        Show only names of changed files")
         print("  --pretty=<format>  Format output (oneline, short, medium, full)")
         print("  --repos=<repo>     Specify repository to search (e.g., rhel9, linux)")
+        print("  --all              Search all kernel versions (default: only higher kernel versions)")
         print("")
         print("Examples:")
         print("  git show abc123def")

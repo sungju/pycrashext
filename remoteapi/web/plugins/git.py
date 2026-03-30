@@ -9,6 +9,17 @@ import os
 import subprocess
 import re
 import shlex
+import sys
+
+# Import kernel version utilities from pycrashext source directory
+try:
+    _src_dir = os.path.normpath(
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'source'))
+    if _src_dir not in sys.path:
+        sys.path.insert(0, _src_dir)
+    from kernel_version import get_rhel_version
+except ImportError:
+    get_rhel_version = None
 
 
 def debug_print(msg):
@@ -128,6 +139,40 @@ def get_current_rhel_dir(kernel_version='unknown'):
 
     # Directory doesn't exist for detected version
     return None, None
+
+
+def get_rhel_dirs_ge_version(base_dir, kernel_version):
+    """
+    Get all rhel source directories with RHEL version >= the version in kernel_version.
+
+    Args:
+        base_dir: Base directory containing rhel5, rhel6, ... subdirectories
+        kernel_version: Kernel version string from crash dump
+
+    Returns:
+        tuple: (repos_list, error_message)
+               repos_list is list of (name, path) tuples sorted by version, or None on error
+    """
+    if get_rhel_version is None:
+        return None, "kernel_version utility not available"
+
+    current_rhel_ver = get_rhel_version(kernel_version)
+    if current_rhel_ver is None:
+        return None, "Could not detect RHEL version from kernel version '%s'" % kernel_version
+
+    repos = []
+    try:
+        for entry in sorted(os.listdir(base_dir)):
+            full_path = os.path.join(base_dir, entry)
+            m = re.match(r'^rhel(\d+)$', entry)
+            if m and os.path.isdir(full_path):
+                dir_rhel_ver = int(m.group(1))
+                if dir_rhel_ver >= current_rhel_ver:
+                    repos.append((entry, full_path))
+    except OSError as e:
+        return None, "Cannot list RHEL_SOURCE_DIR: %s" % str(e)
+
+    return repos, None
 
 
 def git_checkout_latest(repo_path):
@@ -576,6 +621,7 @@ def git_command():
         repos_str = request.form.get('repos', '')
         verbose = request.form.get('verbose', 'False') == 'True'
         kernel_version = request.form.get('kernel_version', 'unknown')
+        all_versions = request.form.get('all_versions', 'False') == 'True'
 
         debug_print("[DEBUG] Request parameters:")
         print("  - subcommand: %s" % subcommand)
@@ -583,6 +629,7 @@ def git_command():
         print("  - repos_str: %s" % repos_str)
         print("  - verbose: %s" % verbose)
         print("  - kernel_version: %s" % kernel_version)
+        print("  - all_versions: %s" % all_versions)
     except Exception as e:
         debug_print("[DEBUG] ERROR parsing request parameters: %s" % str(e))
         return "Error parsing request parameters: %s" % str(e)
@@ -647,23 +694,42 @@ def git_command():
             repos_to_search.append((repo_name, repo_path))
             debug_print("[DEBUG] Added repo to search list: %s -> %s" % (repo_name, repo_path))
     else:
-        debug_print("[DEBUG] Detecting RHEL version from kernel_version: %s" % kernel_version)
-        # Use current RHEL version from kernel
-        current_dir, current_version = get_current_rhel_dir(kernel_version)
-        if not current_dir:
-            debug_print("[DEBUG] ERROR: Could not detect RHEL version")
-            return "Error: Could not detect RHEL version from kernel version '%s'\n" \
-                   "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
-                   "Or RHEL_SOURCE_DIR not set" % kernel_version
-
-        debug_print("[DEBUG] Detected version: %s -> %s" % (current_version, current_dir))
-        repos_to_search.append((current_version, current_dir))
+        if all_versions:
+            debug_print("[DEBUG] --all specified: searching all rhel directories")
+            try:
+                for entry in sorted(os.listdir(base_dir)):
+                    full_path = os.path.join(base_dir, entry)
+                    if re.match(r'^rhel\d+$', entry) and os.path.isdir(full_path):
+                        repos_to_search.append((entry, full_path))
+                        debug_print("[DEBUG] Added repo: %s -> %s" % (entry, full_path))
+            except OSError as e:
+                return "Error: Cannot list repositories in RHEL_SOURCE_DIR: %s" % str(e)
+            if not repos_to_search:
+                return "Error: No rhel repositories found in RHEL_SOURCE_DIR"
+        else:
+            debug_print("[DEBUG] Filtering repos by kernel version >= %s" % kernel_version)
+            repos, err = get_rhel_dirs_ge_version(base_dir, kernel_version)
+            if err:
+                debug_print("[DEBUG] ERROR: %s" % err)
+                return "Error: %s\n" \
+                       "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
+                       "Or RHEL_SOURCE_DIR not set" % err
+            repos_to_search = repos
+            if not repos_to_search:
+                return "Error: No rhel repositories found with RHEL version >= kernel version '%s'" % kernel_version
+            for name, path in repos_to_search:
+                debug_print("[DEBUG] Added repo: %s -> %s" % (name, path))
 
     # Add header
     results.append(BOLD_WHITE + separator + RESET)
     results.append(BOLD_WHITE + "Git %s Results" % subcommand.title() + RESET)
     results.append(CYAN + "Command: git %s %s" % (subcommand, ' '.join(git_args)) + RESET)
     results.append(CYAN + "Kernel version: %s" % kernel_version + RESET)
+    if not repos_str:
+        if all_versions:
+            results.append(CYAN + "Mode: All kernel versions" + RESET)
+        else:
+            results.append(CYAN + "Mode: Kernel version >= current (use --all to search all)" + RESET)
     results.append(BOLD_WHITE + separator + RESET)
     results.append("")
 
