@@ -17,9 +17,10 @@ try:
         os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'source'))
     if _src_dir not in sys.path:
         sys.path.insert(0, _src_dir)
-    from kernel_version import get_rhel_version
+    from kernel_version import get_rhel_version, parse_kernel_version
 except ImportError:
     get_rhel_version = None
+    parse_kernel_version = None
 
 
 def debug_print(msg):
@@ -173,6 +174,91 @@ def get_rhel_dirs_ge_version(base_dir, kernel_version):
         return None, "Cannot list RHEL_SOURCE_DIR: %s" % str(e)
 
     return repos, None
+
+
+def get_version_range_for_repo(repo_path, kernel_version):
+    """
+    Get a git revision range to limit git log to commits where kernel version
+    >= kernel_version (i.e. commits in the current version and newer).
+
+    Finds the latest git tag with version strictly less than kernel_version,
+    then returns '<that_tag>..' so git log shows commits from that point on.
+
+    Args:
+        repo_path: Path to git repository
+        kernel_version: Current kernel version string (e.g. "5.14.0-100.el9.x86_64")
+
+    Returns:
+        Revision range string like "kernel-5.14.0-99.el9_0.." or None if the
+        range cannot be determined (caller should proceed without filtering).
+    """
+    if parse_kernel_version is None:
+        return None
+
+    current_parsed = parse_kernel_version(kernel_version)
+    if current_parsed is None:
+        return None
+
+    try:
+        original_dir = os.getcwd()
+        os.chdir(repo_path)
+
+        process = subprocess.Popen(
+            ['git', '--no-pager', 'tag', '--list'],
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout_data, _ = process.communicate()
+        os.chdir(original_dir)
+
+        if process.returncode != 0:
+            return None
+
+        # Parse all tags as kernel versions, stripping common prefixes
+        tag_versions = []
+        for tag in stdout_data.decode('utf-8').strip().split('\n'):
+            tag = tag.strip()
+            if not tag:
+                continue
+            # Validate tag name is safe (no shell injection)
+            if not re.match(r'^[\w.\-/]+$', tag):
+                continue
+            ver_str = tag
+            for prefix in ('kernel-', 'v'):
+                if tag.startswith(prefix):
+                    ver_str = tag[len(prefix):]
+                    break
+            parsed = parse_kernel_version(ver_str)
+            if parsed is not None:
+                tag_versions.append((parsed, tag))
+
+        if not tag_versions:
+            return None
+
+        # Sort ascending by version tuple
+        tag_versions.sort(key=lambda x: x[0])
+
+        # Find the latest tag strictly less than current version
+        prev_tag = None
+        for parsed, tag in tag_versions:
+            if parsed < current_parsed:
+                prev_tag = tag
+            else:
+                break  # list is sorted; first tag >= current means we're done
+
+        if prev_tag is None:
+            return None
+
+        # Range: commits after prev_tag includes current version and newer
+        return prev_tag + '..'
+
+    except Exception:
+        try:
+            os.chdir(original_dir)
+        except Exception:
+            pass
+        return None
 
 
 def git_checkout_latest(repo_path):
@@ -669,9 +755,20 @@ def git_command():
         debug_print("[DEBUG] ERROR: RHEL_SOURCE_DIR not set")
         return "Error: RHEL_SOURCE_DIR environment variable not set"
 
+    # Always start with the current RHEL repo
+    debug_print("[DEBUG] Getting current RHEL repo for kernel version: %s" % kernel_version)
+    rhel_path, rhel_name = get_current_rhel_dir(kernel_version)
+    if rhel_path is None:
+        debug_print("[DEBUG] ERROR: Could not detect RHEL version from kernel version '%s'" % kernel_version)
+        return "Error: Could not detect RHEL version from kernel version '%s'\n" \
+               "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
+               "Or RHEL_SOURCE_DIR not set" % kernel_version
+    # Current repo: apply version filter unless --all is set
+    repos_to_search.append((rhel_name, rhel_path, not all_versions))
+    debug_print("[DEBUG] Added current repo: %s -> %s (version_filter=%s)" % (rhel_name, rhel_path, not all_versions))
+
     if repos_str:
-        debug_print("[DEBUG] User specified repos: %s" % repos_str)
-        # User specified repos explicitly
+        debug_print("[DEBUG] User specified additional repos: %s" % repos_str)
         repo_names = [r.strip() for r in repos_str.split(',')]
 
         for repo_name in repo_names:
@@ -691,51 +788,27 @@ def git_command():
             if not os.path.isdir(repo_path):
                 return "Error: Repository directory not found: %s" % repo_path
 
-            repos_to_search.append((repo_name, repo_path))
-            debug_print("[DEBUG] Added repo to search list: %s -> %s" % (repo_name, repo_path))
-    else:
-        if all_versions:
-            debug_print("[DEBUG] --all specified: searching all rhel directories")
-            try:
-                for entry in sorted(os.listdir(base_dir)):
-                    full_path = os.path.join(base_dir, entry)
-                    if re.match(r'^rhel\d+$', entry) and os.path.isdir(full_path):
-                        repos_to_search.append((entry, full_path))
-                        debug_print("[DEBUG] Added repo: %s -> %s" % (entry, full_path))
-            except OSError as e:
-                return "Error: Cannot list repositories in RHEL_SOURCE_DIR: %s" % str(e)
-            if not repos_to_search:
-                return "Error: No rhel repositories found in RHEL_SOURCE_DIR"
-        else:
-            debug_print("[DEBUG] Filtering repos by kernel version >= %s" % kernel_version)
-            repos, err = get_rhel_dirs_ge_version(base_dir, kernel_version)
-            if err:
-                debug_print("[DEBUG] ERROR: %s" % err)
-                return "Error: %s\n" \
-                       "Kernel version must contain .el5, .el6, .el7, .el8, .el9, or .el10\n" \
-                       "Or RHEL_SOURCE_DIR not set" % err
-            repos_to_search = repos
-            if not repos_to_search:
-                return "Error: No rhel repositories found with RHEL version >= kernel version '%s'" % kernel_version
-            for name, path in repos_to_search:
-                debug_print("[DEBUG] Added repo: %s -> %s" % (name, path))
+            # Additional repos: never apply version filter
+            repos_to_search.append((repo_name, repo_path, False))
+            debug_print("[DEBUG] Added extra repo to search list: %s -> %s (version_filter=False)" % (repo_name, repo_path))
 
     # Add header
     results.append(BOLD_WHITE + separator + RESET)
     results.append(BOLD_WHITE + "Git %s Results" % subcommand.title() + RESET)
     results.append(CYAN + "Command: git %s %s" % (subcommand, ' '.join(git_args)) + RESET)
     results.append(CYAN + "Kernel version: %s" % kernel_version + RESET)
-    if not repos_str:
-        if all_versions:
-            results.append(CYAN + "Mode: All kernel versions" + RESET)
-        else:
-            results.append(CYAN + "Mode: Kernel version >= current (use --all to search all)" + RESET)
+    if all_versions:
+        results.append(CYAN + "Mode: All commits (version filter disabled)" + RESET)
+    else:
+        results.append(CYAN + "Mode: Commits >= current kernel version for current repo (use --all to show all versions)" + RESET)
+    if repos_str:
+        results.append(CYAN + "Additional repos (fully searched): %s" % repos_str + RESET)
     results.append(BOLD_WHITE + separator + RESET)
     results.append("")
 
     # Execute git command in each repository
     debug_print("[DEBUG] Total repositories to search: %d" % len(repos_to_search))
-    for idx, (repo_name, repo_path) in enumerate(repos_to_search, 1):
+    for idx, (repo_name, repo_path, apply_version_filter) in enumerate(repos_to_search, 1):
         debug_print("[DEBUG] Processing repository %d/%d: %s" % (idx, len(repos_to_search), repo_name))
         debug_print("[DEBUG] Repository path: %s" % repo_path)
         results.append(YELLOW + "[Repository: %s]" % repo_name + RESET)
@@ -756,9 +829,18 @@ def git_command():
             results.append("Executing: git %s %s" % (subcommand, ' '.join(git_args)))
 
         debug_print("[DEBUG] Calling execute_git_command()...")
-        debug_print("[DEBUG] Command: git %s %s" % (subcommand, ' '.join(git_args)))
+        # Apply version range filter for git log based on per-repo flag
+        repo_git_args = list(git_args)
+        if subcommand == 'log' and apply_version_filter:
+            version_range = get_version_range_for_repo(repo_path, kernel_version)
+            if version_range:
+                repo_git_args.append(version_range)
+                debug_print("[DEBUG] Applied version range filter: %s" % version_range)
+            else:
+                debug_print("[DEBUG] No version range filter available for this repo")
+        debug_print("[DEBUG] Command: git %s %s" % (subcommand, ' '.join(repo_git_args)))
         # Execute git command
-        success, output = execute_git_command(repo_path, subcommand, git_args)
+        success, output = execute_git_command(repo_path, subcommand, repo_git_args)
         debug_print("[DEBUG] execute_git_command() returned: success=%s" % success)
         if success:
             debug_print("[DEBUG] Output length: %d chars" % len(output))
