@@ -27,6 +27,11 @@ except Exception as e:
     print('Error: ' + str(e))
     crashcolor.set_color(crashcolor.RESET)
 
+# Add the source directory to Python path so command modules can be imported
+source_dir = os.path.dirname(os.path.abspath(__file__))
+if source_dir not in sys.path:
+    sys.path.insert(0, source_dir)
+
 
 def validate_command_entry(cmd_entry):
     """
