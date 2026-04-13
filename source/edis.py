@@ -164,9 +164,13 @@ class StackHandler(object):
         register_dict[REG_FRAME_POINTER] = address_list
 
     def copy_sp_to_fp(self):
-        """Copy stack pointer addresses to frame pointer (frame setup)."""
+        """Copy stack pointer addresses to frame pointer (frame setup).
+        Adjusts for pushes tracked via cur_count that don't update register_dict."""
         if self.has_stack_pointer():
-            register_dict[REG_FRAME_POINTER] = list(register_dict[REG_STACK_POINTER])
+            register_dict[REG_FRAME_POINTER] = [
+                addr - stack_offset - (cur_count * stack_unit)
+                for addr in register_dict[REG_STACK_POINTER]
+            ]
 
     def copy_fp_to_sp(self):
         """Copy frame pointer addresses to stack pointer (frame teardown)."""
@@ -212,6 +216,34 @@ class StackHandler(object):
         """Add debug message if debugging enabled."""
         if stack_debug_enabled:
             add_stack_debug(msg)
+
+    # ========================================================================
+    # Register alias tracking - for mov %rsp,%reg patterns
+    # ========================================================================
+
+    def set_register_alias(self, reg_name, source_addresses):
+        """Create alias: register holds a snapshot of current SP value.
+        Adjusts for pushes tracked via cur_count that don't update register_dict."""
+        register_aliases[reg_name] = True
+        register_dict[reg_name] = [
+            addr - stack_offset - (cur_count * stack_unit)
+            for addr in source_addresses
+        ]
+
+    def invalidate_register_alias(self, reg_name):
+        """Remove alias when register gets a new value."""
+        if reg_name in register_aliases:
+            del register_aliases[reg_name]
+        if reg_name in register_dict and reg_name not in (REG_STACK_POINTER, REG_FRAME_POINTER):
+            del register_dict[reg_name]
+
+    def is_aliased_register(self, reg_name):
+        """Check if a register is currently aliased to SP."""
+        return reg_name in register_aliases
+
+    def get_aliased_addresses(self, reg_name):
+        """Get tracked addresses for an aliased register."""
+        return register_dict.get(reg_name, [])
 
 
 # ============================================================================
@@ -377,6 +409,9 @@ class X86StackHandler(StackHandler):
         opcode = words[2]
         operands = words[3] if len(words) > 3 else ""
 
+        # Pre-dispatch: invalidate aliases when register gets a new value
+        self._check_alias_invalidation(words)
+
         # Dispatch to specific handlers
         handlers = [
             lambda: self._handle_frame_setup(words, result_str),
@@ -387,6 +422,7 @@ class X86StackHandler(StackHandler):
             lambda: self._handle_leave(words, result_str),
             lambda: self._handle_frame_access(words, result_str),
             lambda: self._handle_sp_access(words, result_str),
+            lambda: self._handle_alias_access(words, result_str),
         ]
 
         for handler in handlers:
@@ -399,12 +435,98 @@ class X86StackHandler(StackHandler):
 
         return result_str
 
+    def _check_alias_invalidation(self, words):
+        """Invalidate register aliases when the register gets a new non-SP value."""
+        if not register_aliases or len(words) < 4:
+            return
+
+        opcode = words[2]
+        operands = words[3]
+
+        if opcode in ("mov", "movq", "movl", "movabs"):
+            parts = operands.split(",")
+            if len(parts) == 2:
+                src = parts[0].strip()
+                dst = parts[1].strip()
+                if src not in self.sp_patterns and dst in register_aliases:
+                    self.invalidate_register_alias(dst)
+                    self.add_debug("Alias invalidated: %s (overwritten by %s)" % (dst, src))
+
+        elif opcode == "xor":
+            parts = operands.split(",")
+            if len(parts) == 2 and parts[0].strip() == parts[1].strip():
+                dst = parts[1].strip()
+                if dst in register_aliases:
+                    self.invalidate_register_alias(dst)
+                    self.add_debug("Alias invalidated: %s (xor zeroed)" % dst)
+
+        elif opcode in ("pop", "popq"):
+            reg = operands.strip()
+            if reg in register_aliases:
+                self.invalidate_register_alias(reg)
+                self.add_debug("Alias invalidated: %s (pop)" % reg)
+
+        elif opcode == "lea":
+            parts = operands.split(",")
+            if len(parts) == 2:
+                dst = parts[1].strip()
+                if dst in register_aliases:
+                    self.invalidate_register_alias(dst)
+                    self.add_debug("Alias invalidated: %s (lea)" % dst)
+
+        elif opcode in ("add", "sub", "addq", "subq"):
+            parts = operands.split(",")
+            if len(parts) == 2:
+                dst = parts[1].strip()
+                if dst in register_aliases:
+                    self.invalidate_register_alias(dst)
+                    self.add_debug("Alias invalidated: %s (arithmetic)" % dst)
+
     def _handle_frame_setup(self, words, result_str):
-        """Handle x86 frame pointer setup: mov %rsp,%rbp"""
-        if words[2] == "mov" and words[3] == "%rsp,%rbp":
+        """Handle SP alias setup: mov %rsp,%rbp or mov %rsp,%r13 etc."""
+        if words[2] not in ("mov", "movq"):
+            return result_str, False
+
+        parts = words[3].split(",")
+        if len(parts) != 2:
+            return result_str, False
+
+        src = parts[0].strip()
+        dst = parts[1].strip()
+
+        if src not in self.sp_patterns:
+            return result_str, False
+
+        # If destination is frame pointer, use existing FP mechanism
+        if dst in self.fp_patterns:
             self.copy_sp_to_fp()
             self.add_debug("FP setup: rbp = rsp")
-            return result_str, True
+
+        # Create alias for any destination register
+        if self.has_stack_pointer():
+            self.set_register_alias(dst, self.get_sp_addresses())
+            self.add_debug("Alias: %s = rsp" % dst)
+
+        return result_str, True
+
+    def _handle_alias_access(self, words, result_str):
+        """Handle memory access via aliased register: mov -0x38(%r13),%rax"""
+        if len(words) < 4 or not register_aliases:
+            return result_str, False
+
+        operands = words[3]
+        for reg_name in list(register_aliases.keys()):
+            pattern = "(%s)" % reg_name
+            if pattern in operands:
+                parts = operands.split(",")
+                for part in parts:
+                    if pattern in part:
+                        offset_str = part.split("(")[0]
+                        offset = parse_offset(offset_str)
+                        addr_list = register_dict.get(reg_name, [])
+                        if addr_list:
+                            result_str += format_stack_data(addr_list, offset, stack_unit)
+                        return result_str, True
         return result_str, False
 
     def _handle_stack_alloc(self, words, result_str):
@@ -1542,6 +1664,7 @@ cur_count = 0
 stack_unit = 0
 stack_offset = 0
 register_dict = {}  # Fixed: was [], should be dict
+register_aliases = {}  # Tracks registers that hold SP snapshots (e.g., mov %rsp,%r13)
 stack_debug_enabled = False
 stack_debug_lines = []
 
@@ -1549,7 +1672,7 @@ stack_debug_lines = []
 def reset_stack_state():
     """Reset all stack analysis state - call before analyzing new function"""
     global stackaddr_list, funcname, stack_op_dict, cur_count
-    global stack_unit, stack_offset, register_dict
+    global stack_unit, stack_offset, register_dict, register_aliases
     global stack_debug_lines
 
     stackaddr_list = []
@@ -1559,6 +1682,7 @@ def reset_stack_state():
     stack_unit = 0
     stack_offset = 0
     register_dict = {}
+    register_aliases = {}
     stack_debug_lines = []
 
 
