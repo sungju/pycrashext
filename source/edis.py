@@ -567,7 +567,14 @@ class X86StackHandler(StackHandler):
                         offset = parse_offset(offset_str)
                         addr_list = register_dict.get(reg_name, [])
                         if addr_list:
-                            result_str += format_stack_data(addr_list, offset, stack_unit)
+                            if words[2] != "lea":  # lea doesn't dereference
+                                result_str += format_stack_data(addr_list, offset, stack_unit)
+                            else:
+                                # For lea, show the address itself (not the value at that address)
+                                addr_parts = []
+                                for base_addr in addr_list:
+                                    addr_parts.append("0x%x" % (base_addr + offset))
+                                result_str += "    ; " + ", ".join(addr_parts)
                         return result_str, True
         return result_str, False
 
@@ -653,12 +660,20 @@ class X86StackHandler(StackHandler):
                         ",".join("0x%x" % a for a in fp_addrs) if fp_addrs else "EMPTY",
                         self.has_frame_pointer(),
                         ",".join("0x%x" % (a + offset) for a in fp_addrs) if fp_addrs else "N/A"))
-                    # FP is already computed correctly by copy_sp_to_fp,
-                    # matching the real RBP value - use offset directly
-                    fp_result = self.format_fp_data(offset, stack_unit)
-                    if not fp_result and stack_debug_enabled:
-                        self.add_debug("frame_access: NO VALUE - fp_data returned empty")
-                    result_str = result_str + fp_result
+
+                    if words[2] != "lea":  # lea doesn't dereference
+                        # FP is already computed correctly by copy_sp_to_fp,
+                        # matching the real RBP value - use offset directly
+                        fp_result = self.format_fp_data(offset, stack_unit)
+                        if not fp_result and stack_debug_enabled:
+                            self.add_debug("frame_access: NO VALUE - fp_data returned empty")
+                        result_str = result_str + fp_result
+                    else:
+                        # For lea, show the address itself (not the value at that address)
+                        addr_parts = []
+                        for fp_addr in fp_addrs:
+                            addr_parts.append("0x%x" % (fp_addr + offset))
+                        result_str += "    ; " + ", ".join(addr_parts)
                     return result_str, True
         return result_str, False
 
@@ -670,7 +685,15 @@ class X86StackHandler(StackHandler):
                 if "(%rsp)" in part or "(%esp)" in part:
                     offset_str = part.split("(")[0]
                     offset = parse_offset(offset_str)
-                    result_str = result_str + self.format_sp_data(offset, stack_unit)
+
+                    if words[2] != "lea":  # lea doesn't dereference
+                        result_str = result_str + self.format_sp_data(offset, stack_unit)
+                    else:
+                        # For lea, show the address itself (not the value at that address)
+                        addr_parts = []
+                        for sp_addr in self.get_sp_addresses():
+                            addr_parts.append("0x%x" % (sp_addr + offset))
+                        result_str += "    ; " + ", ".join(addr_parts)
                     return result_str, True
         return result_str, False
 
