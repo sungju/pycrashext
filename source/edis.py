@@ -11,6 +11,7 @@ import operator
 import os
 from os.path import expanduser
 import time
+import re
 
 import crashcolor
 import crashhelper
@@ -31,6 +32,10 @@ REG_RETURN_ADDR = "%rra"      # Return address register
 DATA_SIZE_BYTE = 1
 DATA_SIZE_WORD = 2
 DATA_SIZE_DWORD = 4
+
+# Compiled regex patterns for register detection (avoids recompilation on hot path)
+_RE_PAREN_CONTENT = re.compile(r'\([^)]*\)')
+_RE_REGISTER = re.compile(r'%[a-z0-9]+')
 DATA_SIZE_QWORD = 8
 
 # Instruction to data size mappings per architecture
@@ -567,16 +572,11 @@ class X86StackHandler(StackHandler):
                         offset = parse_offset(offset_str)
                         addr_list = register_dict.get(reg_name, [])
                         if addr_list:
-                            if words[2] != "lea":  # lea doesn't dereference
-                                # Detect data size from register operands (4 bytes for %eax, 8 bytes for %rax, etc.)
+                            if words[2] != "lea":
                                 data_size = get_x86_operand_data_size(words, stack_unit)
                                 result_str += format_stack_data(addr_list, offset, data_size)
                             else:
-                                # For lea, show the address itself (not the value at that address)
-                                addr_parts = []
-                                for base_addr in addr_list:
-                                    addr_parts.append("0x%x" % (base_addr + offset))
-                                result_str += "    ; " + ", ".join(addr_parts)
+                                result_str += format_lea_addresses(addr_list, offset)
                         return result_str, True
         return result_str, False
 
@@ -663,21 +663,14 @@ class X86StackHandler(StackHandler):
                         self.has_frame_pointer(),
                         ",".join("0x%x" % (a + offset) for a in fp_addrs) if fp_addrs else "N/A"))
 
-                    if words[2] != "lea":  # lea doesn't dereference
-                        # FP is already computed correctly by copy_sp_to_fp,
-                        # matching the real RBP value - use offset directly
-                        # Detect data size from register operands (4 bytes for %eax, 8 bytes for %rax, etc.)
+                    if words[2] != "lea":
                         data_size = get_x86_operand_data_size(words, stack_unit)
                         fp_result = self.format_fp_data(offset, data_size)
                         if not fp_result and stack_debug_enabled:
                             self.add_debug("frame_access: NO VALUE - fp_data returned empty")
                         result_str = result_str + fp_result
                     else:
-                        # For lea, show the address itself (not the value at that address)
-                        addr_parts = []
-                        for fp_addr in fp_addrs:
-                            addr_parts.append("0x%x" % (fp_addr + offset))
-                        result_str += "    ; " + ", ".join(addr_parts)
+                        result_str += format_lea_addresses(fp_addrs, offset)
                     return result_str, True
         return result_str, False
 
@@ -690,16 +683,11 @@ class X86StackHandler(StackHandler):
                     offset_str = part.split("(")[0]
                     offset = parse_offset(offset_str)
 
-                    if words[2] != "lea":  # lea doesn't dereference
-                        # Detect data size from register operands (4 bytes for %eax, 8 bytes for %rax, etc.)
+                    if words[2] != "lea":
                         data_size = get_x86_operand_data_size(words, stack_unit)
                         result_str = result_str + self.format_sp_data(offset, data_size)
                     else:
-                        # For lea, show the address itself (not the value at that address)
-                        addr_parts = []
-                        for sp_addr in self.get_sp_addresses():
-                            addr_parts.append("0x%x" % (sp_addr + offset))
-                        result_str += "    ; " + ", ".join(addr_parts)
+                        result_str += format_lea_addresses(self.get_sp_addresses(), offset)
                     return result_str, True
         return result_str, False
 
@@ -2610,6 +2598,58 @@ def get_stack_offset(stack_word):
         return 0
 
 
+def format_lea_addresses(addr_list, offset, prefix="    ; "):
+    """Format address list for lea instruction display (shows addresses, not values)"""
+    return prefix + ", ".join("0x%x" % (addr + offset) for addr in addr_list)
+
+
+def _get_register_size(reg):
+    """Determine size of a single x86 register"""
+    reg_lower = reg.lower()
+
+    # 64-bit registers (8 bytes)
+    if (reg_lower.startswith('%r') and len(reg_lower) >= 3 and
+        reg_lower[2] in '0123456789' and not reg_lower.endswith('d') and
+        not reg_lower.endswith('w') and not reg_lower.endswith('b')):
+        return 8  # %r8, %r9, ... %r15
+    elif reg_lower in ('%rax', '%rbx', '%rcx', '%rdx', '%rsi', '%rdi',
+                       '%rsp', '%rbp', '%rip'):
+        return 8
+
+    # 32-bit registers (4 bytes)
+    elif (reg_lower.startswith('%r') and reg_lower.endswith('d')):
+        return 4  # %r8d, %r9d, ... %r15d
+    elif reg_lower in ('%eax', '%ebx', '%ecx', '%edx', '%esi', '%edi',
+                       '%esp', '%ebp', '%eip'):
+        return 4
+
+    # 16-bit registers (2 bytes)
+    elif (reg_lower.startswith('%r') and reg_lower.endswith('w')):
+        return 2  # %r8w, %r9w, ... %r15w
+    elif reg_lower in ('%ax', '%bx', '%cx', '%dx', '%si', '%di',
+                       '%sp', '%bp', '%ip'):
+        return 2
+
+    # 8-bit registers (1 byte)
+    elif (reg_lower.startswith('%r') and reg_lower.endswith('b')):
+        return 1  # %r8b, %r9b, ... %r15b
+    elif reg_lower in ('%al', '%bl', '%cl', '%dl', '%ah', '%bh', '%ch', '%dh',
+                       '%sil', '%dil', '%spl', '%bpl'):
+        return 1
+
+    return None
+
+
+def _extract_data_registers(operand_str):
+    """Extract data registers (not addressing registers in parentheses)"""
+    # Remove addressing registers: anything inside parentheses
+    # e.g., "-0x60(%rbp)" -> "-0x60()"
+    cleaned = _RE_PAREN_CONTENT.sub('()', operand_str)
+
+    # Now extract registers from the cleaned string
+    return _RE_REGISTER.findall(cleaned)
+
+
 def get_x86_operand_data_size(words, default_size=None):
     """
     Detect data size from x86 instruction operands by examining register names.
@@ -2632,76 +2672,24 @@ def get_x86_operand_data_size(words, default_size=None):
     opcode = words[2]
     operands = words[3] if len(words) > 3 else ""
 
-    import re
-
-    def get_register_size(reg):
-        """Helper to determine size of a single register"""
-        reg_lower = reg.lower()
-
-        # 64-bit registers (8 bytes)
-        if (reg_lower.startswith('%r') and len(reg_lower) >= 3 and
-            reg_lower[2] in '0123456789' and not reg_lower.endswith('d') and
-            not reg_lower.endswith('w') and not reg_lower.endswith('b')):
-            # %r8, %r9, ... %r15
-            return 8
-        elif reg_lower in ('%rax', '%rbx', '%rcx', '%rdx', '%rsi', '%rdi',
-                           '%rsp', '%rbp', '%rip'):
-            return 8
-
-        # 32-bit registers (4 bytes)
-        elif (reg_lower.startswith('%r') and reg_lower.endswith('d')):
-            # %r8d, %r9d, ... %r15d
-            return 4
-        elif reg_lower in ('%eax', '%ebx', '%ecx', '%edx', '%esi', '%edi',
-                           '%esp', '%ebp', '%eip'):
-            return 4
-
-        # 16-bit registers (2 bytes)
-        elif (reg_lower.startswith('%r') and reg_lower.endswith('w')):
-            # %r8w, %r9w, ... %r15w
-            return 2
-        elif reg_lower in ('%ax', '%bx', '%cx', '%dx', '%si', '%di',
-                           '%sp', '%bp', '%ip'):
-            return 2
-
-        # 8-bit registers (1 byte)
-        elif (reg_lower.startswith('%r') and reg_lower.endswith('b')):
-            # %r8b, %r9b, ... %r15b
-            return 1
-        elif reg_lower in ('%al', '%bl', '%cl', '%dl', '%ah', '%bh', '%ch', '%dh',
-                           '%sil', '%dil', '%spl', '%bpl'):
-            return 1
-
-        return None
-
-    def extract_data_registers(operand_str):
-        """Extract data registers (not addressing registers in parentheses)"""
-        # Remove addressing registers: anything inside parentheses
-        # e.g., "-0x60(%rbp)" -> "-0x60()"
-        cleaned = re.sub(r'\([^)]*\)', '()', operand_str)
-
-        # Now extract registers from the cleaned string
-        reg_pattern = r'%[a-z0-9]+'
-        return re.findall(reg_pattern, cleaned)
-
     # Split operands into source and destination (AT&T syntax: source, destination)
     operand_parts = operands.split(',')
 
     # Check destination operand first (second operand in AT&T syntax)
     if len(operand_parts) >= 2:
         dest_operand = operand_parts[1].strip()
-        dest_regs = extract_data_registers(dest_operand)
+        dest_regs = _extract_data_registers(dest_operand)
         for reg in dest_regs:
-            size = get_register_size(reg)
+            size = _get_register_size(reg)
             if size is not None:
                 return size
 
     # Fall back to source operand (first operand)
     if len(operand_parts) >= 1:
         src_operand = operand_parts[0].strip()
-        src_regs = extract_data_registers(src_operand)
+        src_regs = _extract_data_registers(src_operand)
         for reg in src_regs:
-            size = get_register_size(reg)
+            size = _get_register_size(reg)
             if size is not None:
                 return size
 
