@@ -156,26 +156,37 @@ class StackHandler(object):
         return update_register_tracking(REG_FRAME_POINTER, offset, debug_msg)
 
     def set_sp(self, address_list):
-        """Set stack pointer to specific address list."""
-        register_dict[REG_STACK_POINTER] = address_list
+        """Set stack pointer to specific address list (creates independent copy)."""
+        register_dict[REG_STACK_POINTER] = list(address_list)
 
     def set_fp(self, address_list):
-        """Set frame pointer to specific address list."""
-        register_dict[REG_FRAME_POINTER] = address_list
+        """Set frame pointer to specific address list (creates independent copy)."""
+        register_dict[REG_FRAME_POINTER] = list(address_list)
 
     def copy_sp_to_fp(self):
-        """Copy stack pointer addresses to frame pointer (frame setup).
-        Adjusts for pushes tracked via cur_count that don't update register_dict."""
+        """Snapshot stack pointer to frame pointer (frame setup).
+        Creates a TRUE INDEPENDENT COPY - FP value is frozen and does NOT
+        change when SP is later modified via sub/add/push/pop.
+        SP contains entry_rsp from set_stack_data; FP = entry_rsp - (cur_count * stack_unit)."""
         if self.has_stack_pointer():
+            sp_addrs = list(register_dict[REG_STACK_POINTER])
             register_dict[REG_FRAME_POINTER] = [
-                addr - stack_offset - (cur_count * stack_unit)
-                for addr in register_dict[REG_STACK_POINTER]
+                addr - (cur_count * stack_unit)
+                for addr in sp_addrs
             ]
+            if stack_debug_enabled:
+                add_stack_debug("copy_sp_to_fp: entry_rsp=%s cur_count=%d => fp=%s" % (
+                    ",".join("0x%x" % a for a in sp_addrs),
+                    cur_count,
+                    ",".join("0x%x" % a for a in register_dict[REG_FRAME_POINTER])))
 
     def copy_fp_to_sp(self):
-        """Copy frame pointer addresses to stack pointer (frame teardown)."""
+        """Copy frame pointer addresses to stack pointer (frame teardown).
+        Creates independent copy so FP snapshot is not affected."""
         if self.has_frame_pointer():
-            register_dict[REG_STACK_POINTER] = list(register_dict[REG_FRAME_POINTER])
+            register_dict[REG_STACK_POINTER] = [
+                addr for addr in register_dict[REG_FRAME_POINTER]
+            ]
 
     def format_sp_data(self, offset, data_size, prefix="    ; "):
         """
@@ -197,7 +208,13 @@ class StackHandler(object):
         """Format stack data at FP + offset."""
         if not self.has_frame_pointer():
             return ""
-        return format_stack_data(self.get_fp_addresses(), offset, data_size, prefix)
+        fp_addrs = self.get_fp_addresses()
+        if stack_debug_enabled and fp_addrs:
+            for a in fp_addrs:
+                read_addr = a + offset
+                add_stack_debug("format_fp_data: FP=0x%x offset=%d read_addr=0x%x size=%d" %
+                                (a, offset, read_addr, data_size))
+        return format_stack_data(fp_addrs, offset, data_size, prefix)
 
     def get_instruction_size(self, opcode, default_size=None):
         """
@@ -222,12 +239,13 @@ class StackHandler(object):
     # ========================================================================
 
     def set_register_alias(self, reg_name, source_addresses):
-        """Create alias: register holds a snapshot of current SP value.
-        Adjusts for pushes tracked via cur_count that don't update register_dict."""
+        """Create register snapshot: register holds a frozen copy of current SP value.
+        The snapshot is an independent copy that does NOT change when SP changes.
+        Adjusts for pushes tracked via cur_count."""
         register_aliases[reg_name] = True
         register_dict[reg_name] = [
-            addr - stack_offset - (cur_count * stack_unit)
-            for addr in source_addresses
+            addr - (cur_count * stack_unit)
+            for addr in list(source_addresses)
         ]
 
     def invalidate_register_alias(self, reg_name):
@@ -409,29 +427,50 @@ class X86StackHandler(StackHandler):
         opcode = words[2]
         operands = words[3] if len(words) > 3 else ""
 
+        # Debug: capture FP state BEFORE any processing
+        fp_before = list(register_dict.get(REG_FRAME_POINTER, []))
+        has_fp_before = REG_FRAME_POINTER in register_dict
+
         # Pre-dispatch: invalidate aliases when register gets a new value
         self._check_alias_invalidation(words)
 
+        # Debug: check if alias invalidation changed FP
+        if stack_debug_enabled and has_fp_before and REG_FRAME_POINTER not in register_dict:
+            self.add_debug("BUG TRACE at %s (%s %s): FP CLEARED by _check_alias_invalidation! was=%s" % (
+                words[0], opcode, operands,
+                ",".join("0x%x" % a for a in fp_before)))
+
         # Dispatch to specific handlers
-        handlers = [
-            lambda: self._handle_frame_setup(words, result_str),
-            lambda: self._handle_stack_alloc(words, result_str),
-            lambda: self._handle_stack_cleanup(words, result_str),
-            lambda: self._handle_pop(words, result_str),
-            lambda: self._handle_enter(words, result_str),
-            lambda: self._handle_leave(words, result_str),
-            lambda: self._handle_frame_access(words, result_str),
-            lambda: self._handle_sp_access(words, result_str),
-            lambda: self._handle_alias_access(words, result_str),
+        handler_names = [
+            ("_handle_frame_setup", lambda: self._handle_frame_setup(words, result_str)),
+            ("_handle_stack_alloc", lambda: self._handle_stack_alloc(words, result_str)),
+            ("_handle_stack_cleanup", lambda: self._handle_stack_cleanup(words, result_str)),
+            ("_handle_pop", lambda: self._handle_pop(words, result_str)),
+            ("_handle_enter", lambda: self._handle_enter(words, result_str)),
+            ("_handle_leave", lambda: self._handle_leave(words, result_str)),
+            ("_handle_frame_access", lambda: self._handle_frame_access(words, result_str)),
+            ("_handle_sp_access", lambda: self._handle_sp_access(words, result_str)),
+            ("_handle_alias_access", lambda: self._handle_alias_access(words, result_str)),
         ]
 
-        for handler in handlers:
+        for handler_name, handler in handler_names:
             result_str, handled = handler()
             if handled:
+                # Debug: check if this handler changed FP
+                if stack_debug_enabled and has_fp_before and REG_FRAME_POINTER not in register_dict:
+                    self.add_debug("BUG TRACE at %s (%s %s): FP CLEARED by %s! was=%s" % (
+                        words[0], opcode, operands, handler_name,
+                        ",".join("0x%x" % a for a in fp_before)))
                 return result_str
 
         # If not handled by specific handlers, show generic equation for mov with memory
         self._show_generic_mov_equation(words, opcode, operands)
+
+        # Debug: check if unhandled instruction cleared FP
+        if stack_debug_enabled and has_fp_before and REG_FRAME_POINTER not in register_dict:
+            self.add_debug("BUG TRACE at %s (%s %s): FP CLEARED by unhandled path! was=%s" % (
+                words[0], opcode, operands,
+                ",".join("0x%x" % a for a in fp_before)))
 
         return result_str
 
@@ -483,7 +522,9 @@ class X86StackHandler(StackHandler):
                     self.add_debug("Alias invalidated: %s (arithmetic)" % dst)
 
     def _handle_frame_setup(self, words, result_str):
-        """Handle SP alias setup: mov %rsp,%rbp or mov %rsp,%r13 etc."""
+        """Handle SP snapshot: mov %rsp,%rbp or mov %rsp,%r13 etc.
+        Creates an independent snapshot - destination register value is frozen
+        at the time of the mov and does NOT change when %rsp changes later."""
         if words[2] not in ("mov", "movq"):
             return result_str, False
 
@@ -497,15 +538,16 @@ class X86StackHandler(StackHandler):
         if src not in self.sp_patterns:
             return result_str, False
 
-        # If destination is frame pointer, use existing FP mechanism
         if dst in self.fp_patterns:
+            # Frame pointer: use dedicated FP snapshot mechanism.
+            # Do NOT add to register_aliases - FP is handled independently
+            # by _handle_frame_access and must remain a frozen snapshot.
             self.copy_sp_to_fp()
-            self.add_debug("FP setup: rbp = rsp")
-
-        # Create alias for any destination register
-        if self.has_stack_pointer():
+            self.add_debug("FP snapshot: rbp = rsp (frozen, independent)")
+        elif self.has_stack_pointer():
+            # Non-FP register (e.g., %r13): create independent register snapshot
             self.set_register_alias(dst, self.get_sp_addresses())
-            self.add_debug("Alias: %s = rsp" % dst)
+            self.add_debug("Register snapshot: %s = rsp (frozen)" % dst)
 
         return result_str, True
 
@@ -554,8 +596,12 @@ class X86StackHandler(StackHandler):
     def _handle_pop(self, words, result_str):
         """Handle pop instruction: pop %rbx"""
         if words[2] == "pop":
-            result_str = result_str + self.format_sp_data(0, stack_unit)
             self.update_sp(stack_unit, "Pop: rsp += %d" % stack_unit)
+            if stack_debug_enabled and len(words) > 3:
+                popped_reg = words[3].strip()
+                if popped_reg in ("%rbp", "%ebp"):
+                    self.add_debug("Pop %s at %s: has_fp=%s (pop does NOT clear FP tracking)" % (
+                        popped_reg, words[0], self.has_frame_pointer()))
             return result_str, True
         return result_str, False
 
@@ -581,9 +627,15 @@ class X86StackHandler(StackHandler):
         """Handle leave instruction: leave"""
         if words[2] == "leave":
             # leave = mov rbp, rsp; pop rbp
+            old_sp = list(self.get_sp_addresses()) if self.has_stack_pointer() else []
             self.copy_fp_to_sp()
             self.update_sp(stack_unit)
-            self.add_debug("Leave: restore frame")
+            new_sp = list(self.get_sp_addresses()) if self.has_stack_pointer() else []
+            self.add_debug("Leave at %s: rsp %s => %s (fp unchanged: %s)" % (
+                words[0],
+                ",".join("0x%x" % a for a in old_sp) if old_sp else "NONE",
+                ",".join("0x%x" % a for a in new_sp) if new_sp else "NONE",
+                ",".join("0x%x" % a for a in self.get_fp_addresses()) if self.has_frame_pointer() else "NONE"))
             return result_str, True
         return result_str, False
 
@@ -595,7 +647,18 @@ class X86StackHandler(StackHandler):
                 if "(%rbp)" in part or "(%ebp)" in part:
                     offset_str = part.split("(")[0]
                     offset = parse_offset(offset_str)
-                    result_str = result_str + self.format_fp_data(offset, stack_unit)
+                    fp_addrs = self.get_fp_addresses()
+                    self.add_debug("frame_access at %s: offset=%d fp_addrs=%s has_fp=%s read_addr=%s" % (
+                        words[0], offset,
+                        ",".join("0x%x" % a for a in fp_addrs) if fp_addrs else "EMPTY",
+                        self.has_frame_pointer(),
+                        ",".join("0x%x" % (a + offset) for a in fp_addrs) if fp_addrs else "N/A"))
+                    # FP is already computed correctly by copy_sp_to_fp,
+                    # matching the real RBP value - use offset directly
+                    fp_result = self.format_fp_data(offset, stack_unit)
+                    if not fp_result and stack_debug_enabled:
+                        self.add_debug("frame_access: NO VALUE - fp_data returned empty")
+                    result_str = result_str + fp_result
                     return result_str, True
         return result_str, False
 
@@ -2083,6 +2146,11 @@ def interpret_one_line(one_line):
 
     if len(register_dict) == 0:
         register_dict= { "%rsp" : stackaddr_list, }
+        if stack_debug_enabled:
+            add_stack_debug("INIT: register_dict[rsp] = stackaddr_list = %s" %
+                          (",".join("0x%x" % a for a in stackaddr_list) if stackaddr_list else "EMPTY"))
+    elif stack_debug_enabled and "%rsp" not in register_dict:
+        add_stack_debug("WARN: register_dict non-empty but missing %%rsp — stale state? keys=%s" % list(register_dict.keys()))
 
     result_str = one_line
     words = one_line.split()
@@ -2093,6 +2161,10 @@ def interpret_one_line(one_line):
     explain = get_operand_explanation(one_line)
     if explain != "":
         add_stack_debug("hint=%s" % explain)
+
+    # Debug: capture FP state at entry to interpret_one_line
+    fp_at_entry = list(register_dict.get("%rbp", []))
+    had_fp_at_entry = "%rbp" in register_dict
 
     for op in stack_op_dict:
         if words[2].startswith(op):
@@ -2113,10 +2185,24 @@ def interpret_one_line(one_line):
                     vsp.append(a - stack_offset - (cur_count * stack_unit))
                 add_stack_debug("sp update: push -> virtual rsp=%s" %
                                 (",".join(["0x%x" % a for a in vsp])))
+            # Debug: check if stack_op_dict loop cleared FP
+            if stack_debug_enabled and had_fp_at_entry and "%rbp" not in register_dict:
+                add_stack_debug("BUG TRACE at %s: FP CLEARED by stack_op_dict loop (push handler)! was=%s" % (
+                    words[0], ",".join("0x%x" % a for a in fp_at_entry)))
             break
 
     if result_str == one_line and len(words) > 3: # Nothing happened in the above loop
         result_str = stack_reg_op(words, result_str)
+        # Debug: check if stack_reg_op cleared FP
+        if stack_debug_enabled and had_fp_at_entry and "%rbp" not in register_dict:
+            add_stack_debug("BUG TRACE at %s (%s): FP CLEARED by stack_reg_op! was=%s" % (
+                words[0], words[2], ",".join("0x%x" % a for a in fp_at_entry)))
+
+    # Debug: trace ret/leave instructions that may affect register tracking
+    if stack_debug_enabled and len(words) >= 3 and words[2] in ("ret", "retq"):
+        fp_state = ",".join("0x%x" % a for a in register_dict.get("%rbp", [])) if "%rbp" in register_dict else "NONE"
+        sp_state = ",".join("0x%x" % a for a in register_dict.get("%rsp", [])) if "%rsp" in register_dict else "NONE"
+        add_stack_debug("RET at %s: rbp=%s rsp=%s cur_count=%d" % (words[0], fp_state, sp_state, cur_count))
 
     return result_str
 
@@ -2530,7 +2616,9 @@ def format_stack_data(stackaddr_list, offset, unit, prefix="    ; ", reg=None):
             else:
                 parts.append("0x%s" % data_str)
         except Exception as e:
-            # Skip this entry if there's an error
+            if stack_debug_enabled:
+                add_stack_debug("read FAILED base=0x%x offset=%d addr=0x%x size=%d err=%s" %
+                                (stackaddr, offset, stackaddr + offset, unit, str(e)))
             continue
 
     if not parts:
@@ -3133,10 +3221,7 @@ def _x86_handle_pop(words, result_str):
     if words[2] not in ("pop", "popq"):
         return result_str, False
 
-    # Display current stack value
-    result_str += format_stack_data(register_dict[REG_STACK_POINTER], 0, stack_unit)
-
-    # Update stack pointer
+    # Update stack pointer (no value annotation displayed for pop operations)
     update_register_tracking(REG_STACK_POINTER, stack_unit,
                             "sp update: pop -> rsp += %d" % stack_unit)
     return result_str, True
@@ -3291,13 +3376,24 @@ def set_stack_data(disasm_str, disaddr_str):
     global cur_count
     global stack_unit
     global stack_offset
+    global stack_debug_enabled
+    global register_dict
+    global register_aliases
+
+    if stack_debug_enabled and (register_dict or register_aliases):
+        add_stack_debug("set_stack_data: STALE STATE detected register_dict keys=%s register_aliases keys=%s — resetting" % (
+            list(register_dict.keys()), list(register_aliases.keys())))
 
     stackaddr_list = []
     cur_count = 0
+    register_dict = {}
+    register_aliases = {}
 
     try:
         bt_str = exec_crash_command("bt")
     except:
+        if stack_debug_enabled:
+            add_stack_debug("set_stack_data: bt command failed")
         return # In case stack has corrupted
 
     funcname = ""
@@ -3308,7 +3404,12 @@ def set_stack_data(disasm_str, disaddr_str):
         funcname = words[1][1:-2]
         break
 
+    if stack_debug_enabled:
+        add_stack_debug("set_stack_data: funcname='%s' disaddr_str='%s'" % (funcname, disaddr_str))
+
     if funcname == "":  # Not matching with any
+        if stack_debug_enabled:
+            add_stack_debug("set_stack_data: funcname is empty, returning")
         return
 
     arch = sys_info.machine
@@ -3332,10 +3433,16 @@ def set_stack_data(disasm_str, disaddr_str):
                 continue
             if words[0].startswith("#") and stackfound == 1:
                 stackaddr_list.append(int(words[1][1:-1], 16))
-                stackfound = 0
+                if stack_debug_enabled:
+                    add_stack_debug("set_stack_data: caller_sp=0x%x" % int(words[1][1:-1], 16))
+                break
 
-            if words[2] == funcname and words[4] == disaddr_str:
+            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+                # Mark that we found the target frame - extract SP from NEXT frame (caller)
                 stackfound = 1
+                if stack_debug_enabled:
+                    add_stack_debug("set_stack_data: matched funcname='%s' at %s, will extract from caller frame" % (funcname, disaddr_str))
+                continue
 
     elif (arch.startswith("arm") or (arch in ("aarch64"))):
         stack_op_dict = {
@@ -3361,7 +3468,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackfound = 0
                 continue
 
-            if words[0].startswith("#") and words[2] == funcname and words[4] == disaddr_str:
+            if words[0].startswith("#") and words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
                 # For AArch64, bt frame address is often x29. Convert to runtime SP.
                 frame_addr = int(words[1][1:-1], 16)
                 runtime_sp = estimate_aarch64_runtime_sp(frame_addr, disasm_str)
@@ -3383,7 +3490,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and words[4] == disaddr_str:
+            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
                 stackfound = 1
 
     elif (arch.startswith("s390") or arch in ("s390x")):
@@ -3406,7 +3513,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and words[4] == disaddr_str:
+            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
                 stackfound = 1
 
     elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
@@ -3432,7 +3539,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and words[4] == disaddr_str:
+            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
                 stackfound = 1
 
 
@@ -4019,7 +4126,8 @@ def edis():
         sys.exit(0)
 
     if len(args) != 0:
-        disasm(args[0], o, args, os.environ["PYKDUMPPATH"])
+        pykdump_path = os.environ.get("PYKDUMPPATH", "/home/sel/dkwon/pycrashext/source")
+        disasm(args[0], o, args, pykdump_path)
     else:
         print("ERROR> edis needs an address or a symbol\n",
               "\ti.e) edis 0xffffffff81c76fca or edis hugetlb_init")
