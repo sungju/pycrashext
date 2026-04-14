@@ -2613,6 +2613,8 @@ def get_stack_offset(stack_word):
 def get_x86_operand_data_size(words, default_size=None):
     """
     Detect data size from x86 instruction operands by examining register names.
+    Prioritizes destination register (second operand in AT&T syntax) and filters
+    out addressing registers (those inside parentheses).
 
     Args:
         words: Instruction words list (e.g., ['0xaddr', '<func+off>:', 'mov', '%eax,%ebx'])
@@ -2630,14 +2632,10 @@ def get_x86_operand_data_size(words, default_size=None):
     opcode = words[2]
     operands = words[3] if len(words) > 3 else ""
 
-    # Extract all register names from operands
-    # Register patterns: %rax, %eax, %ax, %al, %r8d, etc.
     import re
-    reg_pattern = r'%[a-z0-9]+'
-    registers = re.findall(reg_pattern, operands)
 
-    # Check registers for size indicators
-    for reg in registers:
+    def get_register_size(reg):
+        """Helper to determine size of a single register"""
         reg_lower = reg.lower()
 
         # 64-bit registers (8 bytes)
@@ -2673,6 +2671,39 @@ def get_x86_operand_data_size(words, default_size=None):
         elif reg_lower in ('%al', '%bl', '%cl', '%dl', '%ah', '%bh', '%ch', '%dh',
                            '%sil', '%dil', '%spl', '%bpl'):
             return 1
+
+        return None
+
+    def extract_data_registers(operand_str):
+        """Extract data registers (not addressing registers in parentheses)"""
+        # Remove addressing registers: anything inside parentheses
+        # e.g., "-0x60(%rbp)" -> "-0x60()"
+        cleaned = re.sub(r'\([^)]*\)', '()', operand_str)
+
+        # Now extract registers from the cleaned string
+        reg_pattern = r'%[a-z0-9]+'
+        return re.findall(reg_pattern, cleaned)
+
+    # Split operands into source and destination (AT&T syntax: source, destination)
+    operand_parts = operands.split(',')
+
+    # Check destination operand first (second operand in AT&T syntax)
+    if len(operand_parts) >= 2:
+        dest_operand = operand_parts[1].strip()
+        dest_regs = extract_data_registers(dest_operand)
+        for reg in dest_regs:
+            size = get_register_size(reg)
+            if size is not None:
+                return size
+
+    # Fall back to source operand (first operand)
+    if len(operand_parts) >= 1:
+        src_operand = operand_parts[0].strip()
+        src_regs = extract_data_registers(src_operand)
+        for reg in src_regs:
+            size = get_register_size(reg)
+            if size is not None:
+                return size
 
     # Fall back to opcode suffix if no register size detected
     if opcode.endswith('q'):
