@@ -1,14 +1,16 @@
 
 import sys
 import base64
-import requests as r
+import urllib.request
+import urllib.parse
+import urllib.error
 import os
 from optparse import OptionParser
 
 
 def disasm():
-    orig_asm = "".join(sys.stdin.readlines()).encode()
-    encoded_asm = base64.b64encode(orig_asm)
+    orig_asm = "".join(sys.stdin.readlines())
+    encoded_asm = base64.b64encode(orig_asm.encode()).decode('ascii')
 
     try:
         encode_url = os.environ['CRASHEXT_SERVER'] + '/api/disasm'
@@ -51,13 +53,16 @@ def disasm():
     data = {"asm_str" : encoded_asm, "full_source" : full_source,
             "source_only" : source_only}
     try:
-        res = r.post(encode_url, data = data).text
-    except r.exceptions.RequestException as e:
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(encode_url, data=encoded_data, method='POST')
+        response = urllib.request.urlopen(req)
+        res = response.read().decode('utf-8')
+    except (urllib.error.URLError, urllib.error.HTTPError) as e:
         res = "\tServer is not reachable.\n" + \
               "\tServer address is <" + encode_url + ">" + \
               "\n" + orig_asm
     except:
-        res = "\tUnexpected error:" + sys.exc_info()[0] + \
+        res = "\tUnexpected error:" + str(sys.exc_info()[0]) + \
               "\n" + orig_asm
 
     # Print the result

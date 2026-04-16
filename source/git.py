@@ -11,7 +11,9 @@ import sys
 import os
 from os.path import expanduser
 import base64
-import requests as r
+import urllib.request
+import urllib.parse
+import urllib.error
 
 import crashcolor
 import crashhelper
@@ -127,18 +129,18 @@ def git():
             print("Connecting to: %s" % api_url)
             print("Timeout: %d seconds (%d minutes)" % (timeout, timeout // 60))
 
-        response = r.post(api_url, data=data, timeout=timeout)
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(api_url, data=encoded_data, method='POST')
+        response = urllib.request.urlopen(req, timeout=timeout)
+        print(response.read().decode('utf-8'))
 
-        if response.status_code == 200:
-            print(response.text)
-        else:
-            print("Error: Server returned status code %d" % response.status_code)
-            print(response.text)
-
-    except r.exceptions.RequestException as e:
+    except urllib.error.HTTPError as e:
+        print("Error: Server returned status code %d" % e.code)
+        print(e.read().decode('utf-8'))
+    except urllib.error.URLError as e:
         print("\nServer is not reachable.")
         print("Server address is <%s>" % api_url)
-        print("\nError: %s" % str(e))
+        print("\nError: %s" % str(e.reason))
         print("\nMake sure:")
         print("  1. CRASHEXT_SERVER is set correctly")
         print("  2. The remote server is running")

@@ -1,8 +1,10 @@
 import json
 import sys
 import base64
-import requests as r
-from requests.exceptions import RequestException, Timeout
+import urllib.request
+import urllib.parse
+import urllib.error
+import socket
 import os
 from optparse import OptionParser
 
@@ -102,17 +104,25 @@ def ai_send():
     parsed = None
     try:
         timeout_seconds = int(os.environ.get('AI_REQUEST_TIMEOUT', '30'))
-        response = r.post(encode_url, data=data, timeout=timeout_seconds)
-        res = response.text
-        response.raise_for_status()
-        parsed = response.json()
-    except Timeout:
+        encoded_data = urllib.parse.urlencode(data).encode('utf-8')
+        req = urllib.request.Request(encode_url, data=encoded_data, method='POST')
+        response = urllib.request.urlopen(req, timeout=timeout_seconds)
+        res = response.read().decode('utf-8')
+        parsed = json.loads(res)
+    except socket.timeout:
         res = "\tServer is not reachable.\n" + \
               "\tServer address is <" + encode_url + ">" + \
               "\n" + orig_query
-    except RequestException as e:
-        res = "\tServer request failed: " + str(e) + \
-              "\n" + orig_query
+    except urllib.error.HTTPError as e:
+        res = e.read().decode('utf-8')
+    except urllib.error.URLError as e:
+        if isinstance(e.reason, socket.timeout):
+            res = "\tServer is not reachable.\n" + \
+                  "\tServer address is <" + encode_url + ">" + \
+                  "\n" + orig_query
+        else:
+            res = "\tServer request failed: " + str(e.reason) + \
+                  "\n" + orig_query
     except ValueError:
         res = "\tServer is not reachable.\n" + \
               "\tServer address is <" + encode_url + ">" + \
