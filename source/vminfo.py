@@ -4,7 +4,6 @@
 
 from pykdump.API import *
 
-import sys
 import crashcolor
 
 
@@ -26,28 +25,30 @@ def vmw_mem(options, balloon, balloon_stats=False):
             print("Warning: %s symbol address is invalid (0x0), skipping detailed structure display" % symbol_name)
 
     crashcolor.set_color(crashcolor.LIGHTRED)
-    alloc_size = 0
-    target_size = 0
-    if balloon_stats:
-        alloc_size = balloon.current_pages
-        target_size = balloon.target_pages
-    else:
-        try:
-            alloc_size = balloon.size.counter
-        except:
-            alloc_size = balloon.size
+    try:
+        alloc_size = 0
+        target_size = 0
+        if balloon_stats:
+            alloc_size = balloon.current_pages
+            target_size = balloon.target_pages
+        else:
+            try:
+                alloc_size = balloon.size.counter
+            except (TypeError, AttributeError):
+                alloc_size = balloon.size
 
-        target_size = balloon.target
+            target_size = balloon.target
 
-    print ("allocated size (pages)     = %d" % alloc_size)
-    print ("allocated size (bytes)     = %d, (%.2fGB)" %
-           (alloc_size * crash.PAGESIZE,
-           ((alloc_size * crash.PAGESIZE)/1024/1024/1024)))
-    print ("required target (pages)    = %d" % target_size)
-    print ("required target (bytes)    = %d, (%.2fGB)" %
-           (target_size * crash.PAGESIZE,
-           ((target_size * crash.PAGESIZE)/1024/1024/1024)))
-    crashcolor.set_color(crashcolor.RESET)
+        print ("allocated size (pages)     = %d" % alloc_size)
+        print ("allocated size (bytes)     = %d, (%.2fGB)" %
+               (alloc_size * crash.PAGESIZE,
+               ((alloc_size * crash.PAGESIZE)/1024/1024/1024)))
+        print ("required target (pages)    = %d" % target_size)
+        print ("required target (bytes)    = %d, (%.2fGB)" %
+               (target_size * crash.PAGESIZE,
+               ((target_size * crash.PAGESIZE)/1024/1024/1024)))
+    finally:
+        crashcolor.set_color(crashcolor.RESET)
 
     print ("")
 
@@ -70,7 +71,7 @@ def vmw_mem(options, balloon, balloon_stats=False):
         print ("")
 
     if (member_offset(balloon, "n_refused_pages") > -1):
-        print ("refuesed pages             = %d" %
+        print ("refused pages              = %d" %
                balloon.n_refused_pages)
 
     if (member_offset(balloon, "rate_alloc") > -1):
@@ -111,6 +112,8 @@ def get_system_info(options):
     print("------------------")
     for line in results:
         words = line.split()
+        if not words:
+            continue
         if words[0] == 'DMI_PRODUCT_NAME:':
             print(line)
         elif words[0] == 'DMI_BIOS_DATE:':
@@ -130,7 +133,7 @@ def balloon_info(options):
     hv_context = 0
     try:
         hv_context = readSymbol("hv_context")
-    except:
+    except Exception:
         pass
 
     if hv_context != 0:
@@ -146,7 +149,7 @@ def balloon_info(options):
         elif symbol_exists('balloon_stats'):
             balloon = readSymbol('balloon_stats')
             balloon_stats = True
-    except:
+    except Exception:
         pass
 
     if balloon != 0:
@@ -167,7 +170,7 @@ def show_vmci_handle_arr(vmci_handle_arr, name):
             vmci_handle = vmci_handle_arr.entries[i]
             print("\t\t\tentries[%d] : context = %d, resource = %d" %
                   (i, vmci_handle.context, vmci_handle.resource))
-    except:
+    except (TypeError, AttributeError, IndexError):
         pass
 
 
@@ -199,7 +202,7 @@ def show_vm_context(options):
         qp_guest_endpoints = readSymbol("qp_guest_endpoints")
         show_vmci_qp_guest_endpoints(options, qp_guest_endpoints)
         return
-    except:
+    except Exception:
         pass
 
 
@@ -216,7 +219,7 @@ def vminfo():
 
     if o.show_context:
         show_vm_context(o)
-        sys.exit(0)
+        return
 
     balloon_info(o)
 
