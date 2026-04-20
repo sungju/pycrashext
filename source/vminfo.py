@@ -44,6 +44,24 @@ def vmw_mem(options, balloon, balloon_stats=False):
 
     print ("")
 
+    if balloon_stats and (member_offset(balloon, "target_unpopulated") > -1):
+        print ("target_unpopulated         = %d" % balloon.target_unpopulated)
+        if (member_offset(balloon, "balloon_low") > -1):
+            print ("balloon_low                = %d" % balloon.balloon_low)
+        if (member_offset(balloon, "balloon_high") > -1):
+            print ("balloon_high               = %d" % balloon.balloon_high)
+        if (member_offset(balloon, "total_pages") > -1):
+            print ("total_pages                = %d" % balloon.total_pages)
+        if (member_offset(balloon, "schedule_delay") > -1):
+            print ("schedule_delay             = %d" % balloon.schedule_delay)
+        if (member_offset(balloon, "max_schedule_delay") > -1):
+            print ("max_schedule_delay         = %d" % balloon.max_schedule_delay)
+        if (member_offset(balloon, "retry_count") > -1):
+            print ("retry_count                = %d" % balloon.retry_count)
+        if (member_offset(balloon, "max_retry_count") > -1):
+            print ("max_retry_count            = %d" % balloon.max_retry_count)
+        print ("")
+
     if (member_offset(balloon, "n_refused_pages") > -1):
         print ("refuesed pages             = %d" %
                balloon.n_refused_pages)
