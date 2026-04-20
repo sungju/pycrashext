@@ -17,7 +17,10 @@ def vmw_mem(options, balloon, balloon_stats=False):
         symbol_name = 'balloon_stats' if balloon_stats else 'balloon'
         baddr = sym2addr(symbol_name)
         if baddr != 0:
-            balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x -d' % (baddr))
+            if balloon_stats:
+                balloon_result = exec_crash_command('struct balloon_stats 0x%x -d' % (baddr))
+            else:
+                balloon_result = exec_crash_command('struct vmballoon.size,target,stats 0x%x -d' % (baddr))
             print ('%s' % (balloon_result))
         else:
             print("Warning: %s symbol address is invalid (0x0), skipping detailed structure display" % symbol_name)
