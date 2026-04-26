@@ -60,31 +60,73 @@ def run_rule(basic_data):
             return None
 
         # Find the beginning of the panic message
+        # Search backward for the start of a kernel message (newline + '[')
+        # to ensure we capture the complete panic context from the beginning
         if pos_null_deref >= 0:
-            start_pos = log_string.rfind('[', 0, pos_null_deref)
+            start_pos = log_string.rfind('\n[', 0, pos_null_deref)
         elif pos_cr2_null >= 0:
-            start_pos = log_string.rfind('[', 0, pos_cr2_null)
+            start_pos = log_string.rfind('\n[', 0, pos_cr2_null)
         else:
-            start_pos = log_string.rfind('[', 0, pos_cifs_debug)
+            start_pos = log_string.rfind('\n[', 0, pos_cifs_debug)
 
         if start_pos < 0:
             start_pos = 0
+        else:
+            start_pos += 1  # Skip the newline to start at '['
 
         # Find end of panic trace
+        # The kernel panic trace ends with '---[ end trace' marker
+        # We need to capture everything including:
+        # - Initial BUG/NULL pointer dereference message
+        # - Register dump (RAX, RBX, RCX, RDX, RSI, RDI, RBP, RSP, R8-R15)
+        # - RIP information (exception RIP)
+        # - Complete Call Trace with all stack frames
+        # - Modules linked in section
+        # - CR2 register value
+        # - End trace marker
         end_trace_pos = log_string.find('---[ end trace', start_pos)
         if end_trace_pos >= 0:
+            # Find the end of the line containing the end marker
             end_pos = log_string.find('\n', end_trace_pos)
             if end_pos >= 0:
-                end_pos += 1
+                end_pos += 1  # Include the newline
+
+                # Capture any additional panic-related context after the end marker
+                # (sometimes CR2 or other info appears after the end trace line)
+                for _ in range(10):  # Check up to 10 lines ahead
+                    next_line_end = log_string.find('\n', end_pos)
+                    if next_line_end < 0:
+                        break
+                    next_line = log_string[end_pos:next_line_end]
+                    # Include lines that are still part of the panic context
+                    if (next_line.strip() and
+                        (next_line.lstrip().startswith('[') and
+                         ('CR2:' in next_line or 'Kernel panic' in next_line or
+                          'RIP:' in next_line or 'RSP:' in next_line))):
+                        end_pos = next_line_end + 1
+                    else:
+                        break
             else:
                 end_pos = len(log_string)
         else:
-            # Look for next kernel message
-            end_pos = log_string.find('\n[', start_pos + 1)
-            if end_pos >= 0:
-                end_pos += 1
+            # No end trace marker found - capture a large chunk to ensure
+            # we get all the diagnostic context (Call Trace, registers, modules)
+            # Look for the next unrelated kernel message or capture up to 10000 chars
+            next_msg_pos = log_string.find('\n[', start_pos + 1)
+            if next_msg_pos >= 0:
+                # Check if the next message is far enough away to likely be unrelated
+                # If it's close, it might still be part of the panic trace
+                if next_msg_pos - start_pos > 500:
+                    end_pos = next_msg_pos + 1
+                else:
+                    # Keep searching for a more distant message
+                    temp_pos = next_msg_pos
+                    while temp_pos >= 0 and temp_pos - start_pos < 5000:
+                        temp_pos = log_string.find('\n[', temp_pos + 1)
+                    end_pos = temp_pos + 1 if temp_pos >= 0 else min(len(log_string), start_pos + 10000)
             else:
-                end_pos = len(log_string)
+                # No next message found - capture up to 10000 chars to ensure complete context
+                end_pos = min(len(log_string), start_pos + 10000)
 
         result_dict = {}
         result_dict["TITLE"] = "CIFS cifs_debug_dirs_proc_show NULL pointer dereference detected by %s" % \
