@@ -7,9 +7,44 @@ from pykdump.API import *
 import crashcolor
 
 
+def show_memory_usage():
+    print("[ Memory Usage ]")
+    try:
+        kmem_out = exec_crash_command("kmem -i")
+        total_pages = 0
+        free_pages = 0
+        for line in kmem_out.splitlines():
+            words = line.split()
+            if not words:
+                continue
+            if words[0] == "TOTAL":
+                try:
+                    total_pages = int(words[2])
+                except (IndexError, ValueError):
+                    pass
+            elif words[0] == "FREE":
+                try:
+                    free_pages = int(words[2])
+                except (IndexError, ValueError):
+                    pass
+        if total_pages > 0:
+            used_pages = total_pages - free_pages
+            page_size = crash.PAGESIZE
+            total_gb = total_pages * page_size / 1024 / 1024 / 1024
+            used_gb = used_pages * page_size / 1024 / 1024 / 1024
+            free_gb = free_pages * page_size / 1024 / 1024 / 1024
+            print("%22s = %d pages (%.2f GB)" % ("total", total_pages, total_gb))
+            print("%22s = %d pages (%.2f GB)" % ("used", used_pages, used_gb))
+            print("%22s = %d pages (%.2f GB)" % ("free", free_pages, free_gb))
+    except Exception as e:
+        print("Unable to retrieve memory usage: %s" % e)
+    print("")
+
+
 def vmw_mem(options, balloon, balloon_stats=False):
     print("VMware virtual machine")
     print("----------------------\n")
+    show_memory_usage()
     print("[ Memory ballooning ]")
     if options.show_details:
         print(balloon)
@@ -98,6 +133,7 @@ def hv_mem(options, hv_context):
 
     print("Hyper-V virtual machine")
     print("-----------------------\n")
+    show_memory_usage()
     print("%22s = %d" % ("num_pages_ballooned", dm_device.num_pages_ballooned))
     print("%22s = %d" % ("num_pages_onlined", dm_device.num_pages_onlined))
     print("%22s = %d" % ("num_pages_added", dm_device.num_pages_added))
