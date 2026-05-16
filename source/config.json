@@ -40,7 +40,7 @@
 			"command" : "pstree",
 			"desc"    : "Print process list in tree format",
 			"options" : "-h   - list available options",
-			"help"    : "Print process list in tree format.\n\n -p          - Print process ID\n-g          - Print number of threads\n-s          - Print task state\n-t          - Print a specific task and its children"
+			"help"    : "Print process list in tree format.\n\n -p          - Print process ID\n -u          - Print User ID\n -g          - Print number of threads\n -s          - Print task state\n -t          - Print a specific task and its children\n -A          - Use ASCII characters for tree (default: Unicode)\n -l          - Print state color legend"
 		},
 		{
 			"command" : "modinfo",

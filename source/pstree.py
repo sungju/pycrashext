@@ -34,7 +34,9 @@ class LineType(object):
     LINE_VERT = 4
 
 
-line_type = ["    ", "-+- ", " |- ", " `- ", " |  "]
+ascii_line_type   = ["    ", "-+- ", " |- ", " `- ", " |  "]
+unicode_line_type = ["    ", "─┬─ ", "├── ", "└── ", "│   "]
+line_type = unicode_line_type  # default to Unicode
 pid_cnt = 0
 branch_bar = []
 branch_locations = []
@@ -50,8 +52,11 @@ def findTaskByPid(task_id):
             return task
 
 def print_pstree(options):
-    global pid_cnt
+    global pid_cnt, line_type, branch_bar, branch_locations
     pid_cnt = 0
+    branch_bar = []
+    branch_locations = []
+    line_type = ascii_line_type if options.ascii_mode else unicode_line_type
     init_task = readSymbol("init_task")
     if (options.task_id > 0):
         tt = TaskTable()
@@ -65,6 +70,8 @@ def print_pstree(options):
     print_children(init_task, 0, options)
 
     print ("\n\nTotal %s tasks printed" % (pid_cnt))
+    if (options.print_legend):
+        print_state_legend()
 
 TASK_RUNNING = 0
 TASK_INTERRUPTIBLE = 1
@@ -140,8 +147,11 @@ def print_branch(depth, first):
     global branch_locations
     global branch_bar
 
+    color_on = crashcolor.get_color(crashcolor.DARKGRAY)
+    color_off = crashcolor.get_color(crashcolor.RESET)
+
     if (first and depth > 0):
-        print ("%s" % (line_type[1]), end='')
+        print ("%s%s%s" % (color_on, line_type[1], color_off), end='')
         return
 
     for i in range(0, depth):
@@ -152,7 +162,7 @@ def print_branch(depth, first):
         if (type(k) == tuple):
             k = k[0]
 #        print ("b = %d, k = %d" % (branch_locations[i], k), end='')
-        print("%s" % (line_type[k]), end='')
+        print("%s%s%s" % (color_on, line_type[k], color_off), end='')
 
 def get_thread_count(task):
     thread_list = readSUListFromHead(task.thread_group,
@@ -262,6 +272,23 @@ def print_children(task, depth, options):
             if (printed > 0):
                 print()
 
+def print_state_legend():
+    print("\nState colors:")
+    states = [
+        (crashcolor.BLUE,     "RU", "Running"),
+        (crashcolor.RESET,    "IN", "Interruptible sleep"),
+        (crashcolor.RED,      "UN", "Uninterruptible sleep"),
+        (crashcolor.CYAN,     "ST", "Stopped"),
+        (crashcolor.MAGENTA,  "TR", "Traced"),
+        (crashcolor.YELLOW,   "ZO", "Zombie"),
+        (crashcolor.LIGHTRED, "DE", "Dead"),
+    ]
+    for color, code, label in states:
+        crashcolor.set_color(color)
+        print("  [%s] %s" % (code, label), end='')
+        crashcolor.set_color(crashcolor.RESET)
+        print()
+
 def pstree():
     op = OptionParser()
     op.add_option("-p", dest="print_pid", default=0,
@@ -279,6 +306,12 @@ def pstree():
     op.add_option("-t", dest="task_id", default=0,
                   type="int", action="store",
                   help="Print specific task and its children")
+    op.add_option("-A", dest="ascii_mode", default=False,
+                  action="store_true",
+                  help="Use ASCII characters for tree (default: Unicode)")
+    op.add_option("-l", dest="print_legend", default=False,
+                  action="store_true",
+                  help="Print state color legend")
 
     (o, args) = op.parse_args()
 
