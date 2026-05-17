@@ -69,9 +69,6 @@ def print_pstree(options):
 
     print_task(init_task, 0, True, options)
     print_children(init_task, 0, options)
-    if getattr(options, 'show_threads', False):
-        print()
-        print_threads(init_task, 0, options)
 
     print ("\n\nTotal %s tasks printed" % (pid_cnt))
     if (options.print_legend):
@@ -339,6 +336,16 @@ def task_has_children(task):
         return False
 
 
+def task_has_threads(task):
+    # An empty thread_group list_head has next == &self (only the task itself).
+    try:
+        if task.tgid != task.pid:
+            return False
+        return task.thread_group.next != Addr(task.thread_group)
+    except:
+        return False
+
+
 def get_compact_groups(child_list, options):
     if not getattr(options, 'compact_mode', True) or not child_list:
         return [(1, c) for c in child_list]
@@ -378,52 +385,96 @@ def print_children(task, depth, options):
                                     'sibling',
                                     'struct task_struct',
                                     maxel=1000000)
-
     groups = get_compact_groups(child_list, options)
-    first = 2 if len(groups) == 1 else True
-    for idx, (count, child) in enumerate(groups):
-        if idx == len(groups) - 1:
+
+    # Build unified item list: task's own threads first, then child processes.
+    # Threads appear as {name} siblings before child processes.
+    all_items = []
+    if getattr(options, 'show_threads', False) and task.tgid == task.pid:
+        try:
+            thread_list = readSUListFromHead(task.thread_group,
+                                             'thread_group',
+                                             'struct task_struct',
+                                             maxel=1000000)
+            for t in thread_list:
+                if t.pid != task.pid:
+                    all_items.append(('thread', 1, t))
+        except:
+            pass
+    for count, child in groups:
+        all_items.append(('proc', count, child))
+
+    if not all_items:
+        return
+
+    first = 2 if len(all_items) == 1 else True
+    for idx, item in enumerate(all_items):
+        if idx == len(all_items) - 1:
             branch_bar[depth - 1] = LineType.LINE_LAST
         else:
             branch_bar[depth - 1] = LineType.LINE_BRANCH
 
-        if count > 1:
+        kind = item[0]
+        count = item[1]
+        obj = item[2]
+
+        if kind == 'thread':
+            pid_cnt += 1
             print_branch(depth, first)
             first = False
-            cstate = get_task_state(child)
-            ccolor = task_state_color(cstate)
-            if ccolor != crashcolor.RESET:
-                crashcolor.set_color(ccolor)
-            ccomm = child.comm if child.comm != 0 else ""
-            if is_kernel_thread(child):
-                ccomm = "[%s]" % ccomm
-            compact_str = "%d*[%s] " % (count, ccomm)
-            print(compact_str, end='')
-            if ccolor != crashcolor.RESET:
+
+            thread_comm = obj.comm if obj.comm != 0 else ""
+            thread_state = get_task_state(obj)
+            thread_color = task_state_color(thread_state)
+            if thread_color != crashcolor.RESET:
+                crashcolor.set_color(thread_color)
+            pid_str = "(%d)" % obj.pid if options.print_pid else ""
+            state_str = "[%s]" % task_state_str(thread_state) if options.print_state else ""
+            print_str = "{%s}%s%s " % (thread_comm, pid_str, state_str)
+            print(print_str, end='')
+            if thread_color != crashcolor.RESET:
                 crashcolor.set_color(crashcolor.RESET)
             if len(branch_locations) <= depth:
-                branch_locations.append(len(compact_str))
+                branch_locations.append(len(print_str))
             else:
-                branch_locations[depth] = len(compact_str)
-            pid_cnt += count
+                branch_locations[depth] = len(print_str)
             printed = 1
-        else:
-            printed = print_task(child, depth, first, options)
-            first = False
 
-        if idx == len(groups) - 1:
+        else:  # 'proc'
+            child = obj
+            if count > 1:
+                print_branch(depth, first)
+                first = False
+                cstate = get_task_state(child)
+                ccolor = task_state_color(cstate)
+                if ccolor != crashcolor.RESET:
+                    crashcolor.set_color(ccolor)
+                ccomm = child.comm if child.comm != 0 else ""
+                if is_kernel_thread(child):
+                    ccomm = "[%s]" % ccomm
+                compact_str = "%d*[%s] " % (count, ccomm)
+                print(compact_str, end='')
+                if ccolor != crashcolor.RESET:
+                    crashcolor.set_color(crashcolor.RESET)
+                if len(branch_locations) <= depth:
+                    branch_locations.append(len(compact_str))
+                else:
+                    branch_locations[depth] = len(compact_str)
+                pid_cnt += count
+                printed = 1
+            else:
+                printed = print_task(child, depth, first, options)
+                first = False
+
+        if idx == len(all_items) - 1:
             branch_bar[depth - 1] = LineType.LINE_SPACE
         else:
             branch_bar[depth - 1] = LineType.LINE_VERT
 
-        if count == 1:
+        if kind == 'proc' and count == 1:
             print_children(child, depth, options)
-            if getattr(options, 'show_threads', False):
-                if printed > 0:
-                    print()
-                print_threads(child, depth, options)
 
-        if idx != len(groups) - 1:
+        if idx != len(all_items) - 1:
             if printed > 0:
                 print()
 
