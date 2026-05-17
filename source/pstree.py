@@ -69,6 +69,9 @@ def print_pstree(options):
 
     print_task(init_task, 0, True, options)
     print_children(init_task, 0, options)
+    if getattr(options, 'show_threads', False):
+        print()
+        print_threads(init_task, 0, options)
 
     print ("\n\nTotal %s tasks printed" % (pid_cnt))
     if (options.print_legend):
@@ -185,12 +188,75 @@ def print_branch(depth, first):
 #        print ("b = %d, k = %d" % (branch_locations[i], k), end='')
         print("%s" % (line_type[k],), end='')
 
+
+def print_threads(task, depth, options):
+    global branch_bar, branch_locations, pid_cnt
+
+    if task.tgid != task.pid:
+        return  # only for group leader
+
+    thread_list = readSUListFromHead(task.thread_group,
+                                     'thread_group',
+                                     'struct task_struct',
+                                     maxel=1000000)
+    threads = [t for t in thread_list if t.pid != task.pid]
+    if not threads:
+        return
+
+    depth = depth + 1
+    while len(branch_bar) <= depth:
+        branch_bar.append(LineType.LINE_SPACE)
+
+    for idx, thread in enumerate(threads):
+        pid_cnt += 1
+
+        if idx == len(threads) - 1:
+            branch_bar[depth - 1] = LineType.LINE_LAST
+        else:
+            branch_bar[depth - 1] = LineType.LINE_BRANCH
+
+        # threads always appear on new lines — always use full alignment (first=False)
+        print_branch(depth, False)
+
+        thread_comm = thread.comm if thread.comm != 0 else ""
+        thread_state = get_task_state(thread)
+        thread_color = task_state_color(thread_state)
+        if thread_color != crashcolor.RESET:
+            crashcolor.set_color(thread_color)
+
+        pid_str = "(%d)" % thread.pid if options.print_pid else ""
+        state_str = "[%s]" % task_state_str(thread_state) if options.print_state else ""
+        print_str = "{%s}%s%s " % (thread_comm, pid_str, state_str)
+        print(print_str, end='')
+
+        if thread_color != crashcolor.RESET:
+            crashcolor.set_color(crashcolor.RESET)
+
+        if len(branch_locations) <= depth:
+            branch_locations.append(len(print_str))
+        else:
+            branch_locations[depth] = len(print_str)
+
+        if idx != len(threads) - 1:
+            branch_bar[depth - 1] = LineType.LINE_VERT
+            print()
+
+    branch_bar[depth - 1] = LineType.LINE_SPACE
+
+
 def get_thread_count(task):
     thread_list = readSUListFromHead(task.thread_group,
                                      'thread_group',
                                      'struct task_struct',
                                      maxel=1000000);
     return len(thread_list)
+
+
+def is_kernel_thread(task):
+    try:
+        return task.mm == 0
+    except:
+        return False
 
 
 def get_task_state(task):
@@ -216,19 +282,21 @@ def print_task(task, depth, first, options):
 
     pid_cnt = pid_cnt + 1
     thread_str = ""
-    if (options.print_thread):
+    if options.print_thread and not getattr(options, 'show_threads', False):
         thread_count = get_thread_count(task)
-        if (thread_count > 1):
-            if (task.tgid == task.pid):
-                thread_str = "---%d*[{%s}]" % (thread_count, task.comm)
+        if thread_count > 1:
+            if task.tgid == task.pid:
+                thread_str = "{%d}" % thread_count
             else:
-                return 0
+                return 0  # hide non-main threads when -g without -T
 
     print_branch(depth, first)
 
     comm_str = ""
     if (task.comm != 0):
         comm_str = task.comm
+    if is_kernel_thread(task):
+        comm_str = "[%s]" % comm_str
 
     task_state = get_task_state(task)
     task_color = task_state_color(task_state)
@@ -262,8 +330,38 @@ def print_task(task, depth, first, options):
     return 1
 
 
+def get_compact_groups(child_list, options):
+    if not getattr(options, 'compact_mode', True) or not child_list:
+        return [(1, c) for c in child_list]
+    groups = []
+    i = 0
+    while i < len(child_list):
+        comm = child_list[i].comm
+        # check if this child has no children (leaf node)
+        sub_children = readSUListFromHead(child_list[i].children, 'sibling',
+                                          'struct task_struct', maxel=2)
+        if len(sub_children) == 0:
+            # count consecutive same-named leaves
+            j = i + 1
+            while j < len(child_list):
+                if child_list[j].comm != comm:
+                    break
+                sub_j = readSUListFromHead(child_list[j].children, 'sibling',
+                                           'struct task_struct', maxel=2)
+                if len(sub_j) > 0:
+                    break
+                j += 1
+            if j - i > 1:
+                groups.append((j - i, child_list[i]))
+                i = j
+                continue
+        groups.append((1, child_list[i]))
+        i += 1
+    return groups
+
+
 def print_children(task, depth, options):
-    global branch_bar
+    global branch_bar, branch_locations, pid_cnt
 
     if (task == None):
         return
@@ -276,26 +374,53 @@ def print_children(task, depth, options):
                                     'sibling',
                                     'struct task_struct',
                                     maxel=1000000)
-    # first=2 signals only-child (straight connector); first=True signals first-of-many
-    first = 2 if len(child_list) == 1 else True
-    for idx, child in enumerate(child_list):
-        if (idx == len(child_list) - 1):
+
+    groups = get_compact_groups(child_list, options)
+    first = 2 if len(groups) == 1 else True
+    for idx, (count, child) in enumerate(groups):
+        if idx == len(groups) - 1:
             branch_bar[depth - 1] = LineType.LINE_LAST
         else:
             branch_bar[depth - 1] = LineType.LINE_BRANCH
 
-        printed = print_task(child, depth, first, options)
-        first = False
+        if count > 1:
+            print_branch(depth, first)
+            first = False
+            cstate = get_task_state(child)
+            ccolor = task_state_color(cstate)
+            if ccolor != crashcolor.RESET:
+                crashcolor.set_color(ccolor)
+            ccomm = child.comm if child.comm != 0 else ""
+            if is_kernel_thread(child):
+                ccomm = "[%s]" % ccomm
+            compact_str = "%d*[%s] " % (count, ccomm)
+            print(compact_str, end='')
+            if ccolor != crashcolor.RESET:
+                crashcolor.set_color(crashcolor.RESET)
+            if len(branch_locations) <= depth:
+                branch_locations.append(len(compact_str))
+            else:
+                branch_locations[depth] = len(compact_str)
+            pid_cnt += count
+            printed = 1
+        else:
+            printed = print_task(child, depth, first, options)
+            first = False
 
-        if (idx == len(child_list) - 1):
+        if idx == len(groups) - 1:
             branch_bar[depth - 1] = LineType.LINE_SPACE
         else:
             branch_bar[depth - 1] = LineType.LINE_VERT
 
-        print_children(child, depth, options)
+        if count == 1:
+            print_children(child, depth, options)
+            if getattr(options, 'show_threads', False):
+                if printed > 0:
+                    print()
+                print_threads(child, depth, options)
 
-        if (idx != len(child_list) - 1):
-            if (printed > 0):
+        if idx != len(groups) - 1:
+            if printed > 0:
                 print()
 
 def print_state_legend():
@@ -338,6 +463,12 @@ def pstree():
     op.add_option("-l", dest="print_legend", default=False,
                   action="store_true",
                   help="Print state color legend")
+    op.add_option("-T", dest="show_threads", default=False,
+                  action="store_true",
+                  help="Show threads as children with {name} notation")
+    op.add_option("-c", dest="compact_mode", default=True,
+                  action="store_false",
+                  help="Disable compact mode (compact identical leaf processes by default)")
 
     (o, args) = op.parse_args()
 
