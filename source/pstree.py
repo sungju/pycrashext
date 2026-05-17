@@ -300,12 +300,15 @@ def print_task(task, depth, first, options):
     if task_color != crashcolor.RESET:
         crashcolor.set_color(task_color)
 
-    if member_offset("struct kuid_t", "val") >= 0:
-        task_uid = task.loginuid.val
-    else:
-        task_uid = task.loginuid
+    try:
+        task_uid = int(task.loginuid.val)
+    except:
+        try:
+            task_uid = int(task.loginuid)
+        except:
+            task_uid = 0
 
-    if task_uid == 0xffffffff:
+    if task_uid in (0xffffffff, 4294967295, -1):
         task_uid = 0
     print_str = ("%s%s%s%s%s " %
            (comm_str,
