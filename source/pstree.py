@@ -169,13 +169,10 @@ def print_branch(depth, first):
     global branch_locations
     global branch_bar
 
-    color_on = crashcolor.get_color(crashcolor.DARKGRAY)
-    color_off = crashcolor.get_color(crashcolor.RESET)
-
     if (first and depth > 0):
         # first==2 means only child — use straight connector, not branching ─┬─
         connector_idx = 5 if (first == 2) else 1
-        print ("%s%s%s" % (color_on, line_type[connector_idx], color_off), end='')
+        print ("%s" % (line_type[connector_idx],), end='')
         return
 
     for i in range(0, depth):
@@ -186,7 +183,7 @@ def print_branch(depth, first):
         if (type(k) == tuple):
             k = k[0]
 #        print ("b = %d, k = %d" % (branch_locations[i], k), end='')
-        print("%s%s%s" % (color_on, line_type[k], color_off), end='')
+        print("%s" % (line_type[k],), end='')
 
 def get_thread_count(task):
     thread_list = readSUListFromHead(task.thread_group,
