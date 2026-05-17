@@ -31,11 +31,12 @@ class LineType(object):
     LINE_FIRST = 1,
     LINE_BRANCH = 2,
     LINE_LAST = 3,
-    LINE_VERT = 4
+    LINE_VERT = 4,
+    LINE_SINGLE = 5
 
 
-ascii_line_type   = ["    ", "-+- ", " |- ", " `- ", " |  "]
-unicode_line_type = ["    ", "─┬─ ", "├── ", "└── ", "│   "]
+ascii_line_type   = ["    ", "-+- ", " |- ", " `- ", " |  ", "--- "]
+unicode_line_type = ["    ", "─┬─ ", " ├─ ", " └─ ", " │  ", "─── "]
 line_type = unicode_line_type  # default to Unicode
 pid_cnt = 0
 branch_bar = []
@@ -172,7 +173,9 @@ def print_branch(depth, first):
     color_off = crashcolor.get_color(crashcolor.RESET)
 
     if (first and depth > 0):
-        print ("%s%s%s" % (color_on, line_type[1], color_off), end='')
+        # first==2 means only child — use straight connector, not branching ─┬─
+        connector_idx = 5 if (first == 2) else 1
+        print ("%s%s%s" % (color_on, line_type[connector_idx], color_off), end='')
         return
 
     for i in range(0, depth):
@@ -272,11 +275,12 @@ def print_children(task, depth, options):
     while (len(branch_bar) <= depth):
         branch_bar.append(LineType.LINE_SPACE)
 
-    first = True
     child_list = readSUListFromHead(task.children,
                                     'sibling',
                                     'struct task_struct',
                                     maxel=1000000)
+    # first=2 signals only-child (straight connector); first=True signals first-of-many
+    first = 2 if len(child_list) == 1 else True
     for idx, child in enumerate(child_list):
         if (idx == len(child_list) - 1):
             branch_bar[depth - 1] = LineType.LINE_LAST
