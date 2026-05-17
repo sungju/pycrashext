@@ -73,74 +73,95 @@ def print_pstree(options):
     if (options.print_legend):
         print_state_legend()
 
-TASK_RUNNING = 0
-TASK_INTERRUPTIBLE = 1
-TASK_UNINTERRUPTIBLE = 2
-__TASK_STOPPED = 4
-__TASK_TRACED = 8
-EXIT_ZOMBIE = 16
-EXIT_DEAD = 32
-TASK_DEAD = 64
-TASK_ZOMBIE = 128
+# Task state bit flags — stable across all RHEL versions 6-9
+TASK_RUNNING        = 0x0000  # 0
+TASK_INTERRUPTIBLE  = 0x0001  # 1
+TASK_UNINTERRUPTIBLE= 0x0002  # 2
+__TASK_STOPPED      = 0x0004  # 4
+__TASK_TRACED       = 0x0008  # 8
+# exit_state field flags (stored separately from task state in task.exit_state)
+# Note: EXIT_ZOMBIE and EXIT_DEAD values swapped between kernel generations:
+#   RHEL 6/7 (2.6.32/3.10): EXIT_ZOMBIE=0x10, EXIT_DEAD=0x20, TASK_DEAD=0x40
+#   RHEL 8/9 (4.18/5.14+):  EXIT_DEAD=0x10,  EXIT_ZOMBIE=0x20, TASK_DEAD=0x80
+# We use RHEL8/9 values for EXIT_DEAD/EXIT_ZOMBIE (correct zombie vs dead on modern kernels).
+# On RHEL6/7 the zombie/dead labels may be swapped cosmetically, but both are non-running.
+EXIT_DEAD           = 0x0010  # EXIT_DEAD on RHEL8/9, EXIT_ZOMBIE on RHEL6/7
+EXIT_ZOMBIE         = 0x0020  # EXIT_ZOMBIE on RHEL8/9, EXIT_DEAD on RHEL6/7
+TASK_DEAD_MASK      = 0x00C0  # covers TASK_DEAD=0x40 (RHEL6/7) and 0x80 (RHEL8/9)
+# Additional state flags
+TASK_WAKEKILL       = 0x0100
+TASK_NOLOAD         = 0x0400
+TASK_NEW            = 0x0800
 
 def task_state_color(state):
-    if isinstance(state, int):
-        state = state & 0xffff # 0x7f
-    elif "|" in state:
-        state = state[:state.find("|")]
-
-    try:
+    # Handle string states (older pykdump may return symbolic names)
+    if isinstance(state, str):
+        s = state.split("|")[0].strip()
         return {
-            TASK_RUNNING : crashcolor.BLUE,
-            TASK_INTERRUPTIBLE : crashcolor.RESET,
-            TASK_UNINTERRUPTIBLE : crashcolor.RED,
-            __TASK_STOPPED : crashcolor.CYAN,
-            __TASK_TRACED : crashcolor.MAGENTA,
-            EXIT_ZOMBIE : crashcolor.YELLOW,
-            EXIT_DEAD : crashcolor.LIGHTRED,
-            TASK_DEAD : crashcolor.LIGHTRED,
-            TASK_ZOMBIE: crashcolor.YELLOW,
-            "TASK_RUNNING" : crashcolor.BLUE,
-            "TASK_INTERRUPTIBLE" : crashcolor.RESET,
-            "TASK_UNINTERRUPTIBLE" : crashcolor.RED,
-            "TASK_STOPPED" : crashcolor.CYAN,
-            "__TASK_STOPPED" : crashcolor.CYAN,
-            "__TASK_TRACED" : crashcolor.MAGENTA,
-            "TASK_ZOMBIE" : crashcolor.YELLOW,
-            "TASK_DEAD" : crashcolor.LIGHTRED,
-        }[state]
-    except:
+            "TASK_RUNNING":        crashcolor.BLUE,
+            "TASK_INTERRUPTIBLE":  crashcolor.RESET,
+            "TASK_UNINTERRUPTIBLE":crashcolor.RED,
+            "TASK_STOPPED":        crashcolor.CYAN,
+            "__TASK_STOPPED":      crashcolor.CYAN,
+            "__TASK_TRACED":       crashcolor.MAGENTA,
+            "TASK_ZOMBIE":         crashcolor.YELLOW,
+            "EXIT_ZOMBIE":         crashcolor.YELLOW,
+            "TASK_DEAD":           crashcolor.LIGHTRED,
+            "EXIT_DEAD":           crashcolor.LIGHTRED,
+        }.get(s, crashcolor.RESET)
+
+    # Bitmask priority for integer states (covers composite states and all kernel versions)
+    state = int(state)
+    if state & (EXIT_ZOMBIE | EXIT_DEAD | TASK_DEAD_MASK):
+        # Zombie takes priority over dead
+        if state & EXIT_ZOMBIE:
+            return crashcolor.YELLOW
+        return crashcolor.LIGHTRED
+    if state & __TASK_STOPPED:
+        return crashcolor.CYAN
+    if state & __TASK_TRACED:
+        return crashcolor.MAGENTA
+    if state & TASK_UNINTERRUPTIBLE:
+        return crashcolor.RED
+    if state & TASK_INTERRUPTIBLE:
         return crashcolor.RESET
+    if state == TASK_RUNNING:
+        return crashcolor.BLUE
+    return crashcolor.RESET
 
 
 def task_state_str(state):
-    if isinstance(state, int):
-        state = state & 0xffff # 0x7f
-    elif "|" in state:
-        state = state[:state.find("|")]
-
-    try:
+    if isinstance(state, str):
+        s = state.split("|")[0].strip()
         return {
-            TASK_RUNNING: "RU",
-            TASK_INTERRUPTIBLE: "IN",
-            TASK_UNINTERRUPTIBLE: "UN",
-            __TASK_STOPPED: "ST",
-            __TASK_TRACED: "TR",
-            EXIT_ZOMBIE: "ZO",
-            EXIT_DEAD: "DE",
-            TASK_DEAD: "DE",
-            TASK_ZOMBIE: "ZO",
-            "TASK_RUNNING" : "RU",
-            "TASK_INTERRUPTIBLE" : "IN",
-            "TASK_UNINTERRUPTIBLE" : "UN",
-            "TASK_STOPPED" : "ST",
-            "__TASK_STOPPED" : "ST",
-            "__TASK_TRACED" : "TR",
-            "TASK_ZOMBIE" : "ZO",
-            "TASK_DEAD" : "DE",
-        }[state]
-    except:
-        return "??"
+            "TASK_RUNNING":        "RU",
+            "TASK_INTERRUPTIBLE":  "IN",
+            "TASK_UNINTERRUPTIBLE":"UN",
+            "TASK_STOPPED":        "ST",
+            "__TASK_STOPPED":      "ST",
+            "__TASK_TRACED":       "TR",
+            "TASK_ZOMBIE":         "ZO",
+            "EXIT_ZOMBIE":         "ZO",
+            "TASK_DEAD":           "DE",
+            "EXIT_DEAD":           "DE",
+        }.get(s, "??")
+
+    state = int(state)
+    if state & EXIT_ZOMBIE:
+        return "ZO"
+    if state & (EXIT_DEAD | TASK_DEAD_MASK):
+        return "DE"
+    if state & __TASK_STOPPED:
+        return "ST"
+    if state & __TASK_TRACED:
+        return "TR"
+    if state & TASK_UNINTERRUPTIBLE:
+        return "UN"
+    if state & TASK_INTERRUPTIBLE:
+        return "IN"
+    if state == TASK_RUNNING:
+        return "RU"
+    return "??"
 
 
 def print_branch(depth, first):
@@ -173,13 +194,17 @@ def get_thread_count(task):
 
 
 def get_task_state(task):
-    if member_offset("struct task_struct", "state") >= 0:
-        return task.state
-
+    state = 0
     if member_offset("struct task_struct", "__state") >= 0:
-        return task.__state
-
-    return 0
+        state = int(task.__state)
+    elif member_offset("struct task_struct", "state") >= 0:
+        state = int(task.state)
+    if member_offset("struct task_struct", "exit_state") >= 0:
+        try:
+            state |= int(task.exit_state)
+        except:
+            pass
+    return state
 
 
 def print_task(task, depth, first, options):
