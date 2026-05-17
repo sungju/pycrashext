@@ -330,6 +330,15 @@ def print_task(task, depth, first, options):
     return 1
 
 
+def task_has_children(task):
+    # An empty list_head has next == &self (points to itself).
+    # Using pointer comparison avoids readSUListFromHead and its maxel warnings.
+    try:
+        return task.children.next != Addr(task.children)
+    except:
+        return False
+
+
 def get_compact_groups(child_list, options):
     if not getattr(options, 'compact_mode', True) or not child_list:
         return [(1, c) for c in child_list]
@@ -337,18 +346,13 @@ def get_compact_groups(child_list, options):
     i = 0
     while i < len(child_list):
         comm = child_list[i].comm
-        # check if this child has no children (leaf node)
-        sub_children = readSUListFromHead(child_list[i].children, 'sibling',
-                                          'struct task_struct', maxel=2)
-        if len(sub_children) == 0:
+        if not task_has_children(child_list[i]):
             # count consecutive same-named leaves
             j = i + 1
             while j < len(child_list):
                 if child_list[j].comm != comm:
                     break
-                sub_j = readSUListFromHead(child_list[j].children, 'sibling',
-                                           'struct task_struct', maxel=2)
-                if len(sub_j) > 0:
+                if task_has_children(child_list[j]):
                     break
                 j += 1
             if j - i > 1:
