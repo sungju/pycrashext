@@ -310,16 +310,27 @@ def print_task(task, depth, first, options):
 
     if task_uid in (0xffffffff, 4294967295, -1):
         task_uid = 0
-    print_str = ("%s%s%s%s%s " %
-           (comm_str,
-            "(" + str(task.pid) + ")"
-                if options.print_pid else "",
-            "[" + task_state_str(get_task_state(task)) +"]"
-                if options.print_state else "",
-            "{" + str(task_uid) + "}"
-                if options.print_uid else "",
-            thread_str))
-    print ("%s" % (print_str), end='')
+
+    # Build display parts separately so uid can use a distinct color and notation
+    main_str = ("%s%s%s" % (
+        comm_str,
+        "(" + str(task.pid) + ")" if options.print_pid else "",
+        "[" + task_state_str(get_task_state(task)) + "]" if options.print_state else ""))
+    uid_str  = ("<%d>" % task_uid) if options.print_uid else ""
+    tail_str = "%s " % thread_str
+    print_str = main_str + uid_str + tail_str  # display width for alignment
+
+    print(main_str, end='')
+    if uid_str:
+        # Switch to green for uid, then restore task color
+        if task_color != crashcolor.RESET:
+            crashcolor.set_color(crashcolor.RESET)
+        crashcolor.set_color(crashcolor.GREEN)
+        print(uid_str, end='')
+        crashcolor.set_color(crashcolor.RESET)
+        if task_color != crashcolor.RESET:
+            crashcolor.set_color(task_color)
+    print(tail_str, end='')
     if task_color != crashcolor.RESET:
         crashcolor.set_color(crashcolor.RESET)
     if (len(branch_locations) <= depth):
