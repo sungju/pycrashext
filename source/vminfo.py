@@ -106,6 +106,70 @@ def hv_mem(options, hv_context):
         show_hv_details(options, hv_context, dm_device)
 
 
+def kvm_mem(options):
+    print("KVM/QEMU virtual machine (Nutanix AHV)")
+    print("----------------------------------------\n")
+    print("[ Memory ballooning ]")
+
+    try:
+        drv = readSymbol("virtio_balloon_driver")
+        p = drv.driver.p
+        if p == 0:
+            print("No balloon devices registered")
+            return
+
+        knode_driver_off = member_offset("struct device_private", "knode_driver")
+        vdev_dev_off = member_offset("struct virtio_device", "dev")
+
+        found = False
+        for knode in readSUListFromHead(p.klist_devices.k_list,
+                                        "n_node",
+                                        "struct klist_node"):
+            try:
+                dev_priv = readSU("struct device_private",
+                                  int(knode) - knode_driver_off)
+                dev = dev_priv.device
+                vdev = readSU("struct virtio_device", int(dev) - vdev_dev_off)
+                vb = readSU("struct virtio_balloon", int(vdev.priv))
+
+                crashcolor.set_color(crashcolor.LIGHTRED)
+                num_pages = int(vb.num_pages)
+                print("allocated size (pages)     = %d" % num_pages)
+                print("allocated size (bytes)     = %d, (%.2fGB)" % (
+                    num_pages * crash.PAGESIZE,
+                    num_pages * crash.PAGESIZE / 1024 / 1024 / 1024))
+
+                try:
+                    num_desired = int(vb.num_desired)
+                    print("required target (pages)    = %d" % num_desired)
+                    print("required target (bytes)    = %d, (%.2fGB)" % (
+                        num_desired * crash.PAGESIZE,
+                        num_desired * crash.PAGESIZE / 1024 / 1024 / 1024))
+                except AttributeError:
+                    pass
+                crashcolor.set_color(crashcolor.RESET)
+
+                if options.show_details:
+                    result = exec_crash_command(
+                        "struct virtio_balloon 0x%x -d" % int(vb))
+                    print("\nDetailed virtio_balloon struct:\n%s" % result)
+
+                found = True
+                break  # only one balloon device per guest
+
+            except Exception:
+                continue
+
+        if not found:
+            print("No virtio_balloon device instances found")
+
+    except Exception as e:
+        print("Error reading virtio_balloon data: %s" % str(e))
+
+    crashcolor.set_color(crashcolor.RESET)
+    print("\n")
+
+
 def get_system_info(options):
     results = exec_crash_command("sys -i").splitlines()
     print("System Information")
@@ -154,6 +218,10 @@ def balloon_info(options):
 
     if balloon != 0:
         vmw_mem(options, balloon, balloon_stats)
+        return
+
+    if symbol_exists("virtio_balloon_driver"):
+        kvm_mem(options)
         return
 
     print("Not VM environment or not recognizable VM")
