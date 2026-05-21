@@ -170,6 +170,16 @@ def kvm_mem(options):
     print("\n")
 
 
+def get_dmi_info():
+    """Return a dict of DMI fields parsed from 'sys -i' output."""
+    dmi = {}
+    for line in exec_crash_command("sys -i").splitlines():
+        if ':' in line:
+            key, _, val = line.partition(':')
+            dmi[key.strip()] = val.strip()
+    return dmi
+
+
 def get_system_info(options):
     results = exec_crash_command("sys -i").splitlines()
     print("System Information")
@@ -194,35 +204,74 @@ def get_system_info(options):
 
 def balloon_info(options):
     get_system_info(options)
-    hv_context = 0
-    try:
-        hv_context = readSymbol("hv_context")
-    except Exception:
-        pass
 
-    if hv_context != 0:
-        #and hv_context.synic_initialized == 1:
-        hv_mem(options, hv_context)
-        return
+    dmi = get_dmi_info()
+    vendor      = dmi.get('DMI_SYS_VENDOR',   '').lower()
+    product     = dmi.get('DMI_PRODUCT_NAME', '').lower()
+    bios_vendor = dmi.get('DMI_BIOS_VENDOR',  '').lower()
 
-    balloon = 0
-    balloon_stats = False
-    try:
-        if symbol_exists('balloon'):
-            balloon = readSymbol('balloon')
-        elif symbol_exists('balloon_stats'):
-            balloon = readSymbol('balloon_stats')
-            balloon_stats = True
-    except Exception:
-        pass
+    # Hyper-V
+    if 'microsoft' in vendor:
+        hv_context = 0
+        try:
+            hv_context = readSymbol("hv_context")
+        except Exception:
+            pass
+        if hv_context != 0:
+            hv_mem(options, hv_context)
+            return
 
-    if balloon != 0:
-        vmw_mem(options, balloon, balloon_stats)
-        return
+    # VMware
+    elif 'vmware' in vendor:
+        balloon = 0
+        balloon_stats = False
+        try:
+            if symbol_exists('balloon'):
+                balloon = readSymbol('balloon')
+            elif symbol_exists('balloon_stats'):
+                balloon = readSymbol('balloon_stats')
+                balloon_stats = True
+        except Exception:
+            pass
+        if balloon != 0:
+            vmw_mem(options, balloon, balloon_stats)
+            return
 
-    if symbol_exists("virtio_balloon_driver"):
+    # KVM / QEMU / Nutanix AHV
+    elif ('nutanix' in vendor or 'ahv' in product or
+          'qemu' in vendor or 'kvm' in vendor or
+          'ovmf' in bios_vendor):
         kvm_mem(options)
         return
+
+    # Fallback: symbol-based detection for unrecognised / missing DMI
+    else:
+        hv_context = 0
+        try:
+            hv_context = readSymbol("hv_context")
+        except Exception:
+            pass
+        if hv_context != 0:
+            hv_mem(options, hv_context)
+            return
+
+        balloon = 0
+        balloon_stats = False
+        try:
+            if symbol_exists('balloon'):
+                balloon = readSymbol('balloon')
+            elif symbol_exists('balloon_stats'):
+                balloon = readSymbol('balloon_stats')
+                balloon_stats = True
+        except Exception:
+            pass
+        if balloon != 0:
+            vmw_mem(options, balloon, balloon_stats)
+            return
+
+        if symbol_exists("virtio_balloon_driver"):
+            kvm_mem(options)
+            return
 
     print("Not VM environment or not recognizable VM")
 
