@@ -15,7 +15,7 @@ def get_dentry_objsize():
     Returns the objsize in bytes, or None on failure.
     """
     try:
-        result_lines = exec_crash_command("kmem -S dentry").splitlines()
+        result_lines = rh.get_data(None, "kmem -S dentry").splitlines()
         header_found = False
         for line in result_lines:
             words = line.split()
@@ -49,9 +49,9 @@ def get_system_total_memory_kb():
     except Exception:
         pass
     try:
-        from meminfo import get_page_shift
-        totalram_pages = readSymbol("totalram_pages")
-        page_size = 1 << get_page_shift()
+        import meminfo as mi
+        totalram_pages = rh.get_symbol("totalram_pages")
+        page_size = 1 << mi.get_page_shift()
         return (int(totalram_pages) * page_size) // 1024
     except Exception:
         pass
@@ -83,7 +83,7 @@ NEGATIVE_DENTRY_MEMORY_PERCENT_THRESHOLD = 20
 
 def run_rule(basic_data):
     try:
-        dentry_stat = readSymbol("dentry_stat")
+        dentry_stat = rh.get_symbol("dentry_stat")
         nr_dentry   = int(dentry_stat.nr_dentry)
         nr_unused   = int(dentry_stat.nr_unused)
         age_limit   = int(dentry_stat.age_limit)
