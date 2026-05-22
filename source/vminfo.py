@@ -244,8 +244,12 @@ def balloon_info(options):
         kvm_mem(options)
         return
 
-    # Fallback: symbol-based detection for unrecognised / missing DMI
+    # Fallback: symbol-based detection only when DMI vendor is absent
     else:
+        if vendor:
+            print("Not VM environment or not recognizable VM")
+            return
+
         hv_context = 0
         try:
             hv_context = readSymbol("hv_context")
