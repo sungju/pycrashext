@@ -254,8 +254,10 @@ def get_ps_output():
     return ps_list
 
 
-def get_ps():
+def get_ps(task_name=""):
     ps_list = get_ps_output()
+    if task_name:
+        ps_list = [t for t in ps_list if task_name.lower() in t["COMM"].lower()]
     result_str = "%-12s %8s %4s %4s %8s %8s %-8s %-5s %10s %8s %s\n" % \
                 ("USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "TTY", "STAT",\
                  "START", "TIME", "COMMAND")
@@ -274,44 +276,45 @@ def get_ps():
     return result_str
 
 
-def get_ps_aux():
+def get_ps_aux(task_name=""):
     '''
     USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
     root          1  0.0  0.0 128268  6956 ?        Ss   Aug21   4:21 /usr/lib/systemd/systemd --switch
     root          2  0.0  0.0      0     0 ?        S    Aug21   0:02 [kthreadd]
     '''
 
-    return get_ps()
+    return get_ps(task_name)
 
 
-def get_ps_auxcww():
+def get_ps_auxcww(task_name=""):
     '''
     USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
     root          1  0.0  0.0 128268  6956 ?        Ss   Aug21   4:21 systemd
     root          2  0.0  0.0      0     0 ?        S    Aug21   0:02 kthreadd
     '''
-    return get_ps()
+    return get_ps(task_name)
 
 
-def get_ps_auxww():
+def get_ps_auxww(task_name=""):
     '''
     USER        PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
     root          1  0.0  0.0 128268  6956 ?        Ss   Aug21   4:21 /usr/lib/systemd/systemd --switched-root --system --deserialize 22
     root          2  0.0  0.0      0     0 ?        S    Aug21   0:02 [kthreadd]
     '''
-    return get_ps()
+    return get_ps(task_name)
 
 
-def get_ps_ef():
+def get_ps_ef(task_name=""):
     '''
     UID         PID   PPID  C STIME TTY          TIME CMD
     root          1      0  0 Aug21 ?        00:04:21 /usr/lib/systemd/systemd --switched-root --system
     root          2      0  0 Aug21 ?        00:00:02 [kthreadd]
     '''
     ps_list = get_ps_output()
+    if task_name:
+        ps_list = [t for t in ps_list if task_name.lower() in t["COMM"].lower()]
     result_str = "%-12s %8s %8s %2s %8s %8s %8s %s\n" % \
                 ("UID", "PID", "PPID", "C", "STIME", "TTY", "TIME", "CMD")
-
 
     for task in ps_list:
         try:
@@ -676,15 +679,15 @@ def psinfo():
         sys.exit(0)
 
     if (o.aux):
-        print(get_ps_aux())
+        print(get_ps_aux(o.task_name))
         sys.exit(0)
 
     if (o.auxcww):
-        print(get_ps_auxcww())
+        print(get_ps_auxcww(o.task_name))
         sys.exit(0)
 
     if (o.auxww):
-        print(get_ps_auxww())
+        print(get_ps_auxww(o.task_name))
         sys.exit(0)
 
     if (o.policy_type != ""):
@@ -695,7 +698,7 @@ def psinfo():
         show_task_details(o)
         sys.exit(0)
 
-    print(get_ps_ef())
+    print(get_ps_ef(o.task_name))
 
 
 if ( __name__ == '__main__'):
