@@ -147,20 +147,19 @@ def show_task_files(taskObj):
     first = 1
     for i in range(0, max_fds):
         try:
-            if fds[i] <= 0:
-                continue
-            file_addr = readULong(fds[i])
-            if not file_addr or file_addr == 0:
+            file_addr = int(fds[i])
+            if file_addr == 0:
                 continue
             file = readSU("struct file", file_addr)
             dentry = file.f_path.dentry
-            if not dentry or dentry == 0:
+            if not dentry or int(dentry) == 0:
                 continue
-            info = exec_crash_command("files -d 0x%x" % dentry).splitlines()
+            info = exec_crash_command("files -d 0x%x" % int(dentry)).splitlines()
             if first == 1:
                 print("\t%s" % (info[0]))
                 first = 0
-            print("\t%s" % (info[1]))
+            if len(info) > 1:
+                print("\t%s" % (info[1]))
         except Exception:
             continue
 
