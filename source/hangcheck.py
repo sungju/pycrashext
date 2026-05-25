@@ -220,11 +220,12 @@ def hangcheck_display(options, args):
     )
 
     # Limit display to the longest-running tasks unless -a is given
-    if not options.all and total_count > DEFAULT_MAX_TASKS:
-        skipped = total_count - DEFAULT_MAX_TASKS
-        print("<... %d process%s skipped, use -a to show all ...>" %
+    max_tasks = getattr(options, 'number', 0) or DEFAULT_MAX_TASKS
+    if not options.all and total_count > max_tasks:
+        skipped = total_count - max_tasks
+        print("<... %d process%s skipped, use -a to show all or -n N for top N ...>" %
               (skipped, "es" if skipped > 1 else ""))
-        display_list = task_list_sorted[-DEFAULT_MAX_TASKS:]
+        display_list = task_list_sorted[-max_tasks:]
     else:
         display_list = task_list_sorted
 
@@ -268,6 +269,11 @@ def hangcheck_main():
                   dest="all",
                   default=False,
                   help="Shows all UN-state processes (default: latest %d)" % DEFAULT_MAX_TASKS)
+    op.add_option("-n", "--number",
+                  action="store", type="int",
+                  dest="number",
+                  default=0,
+                  help="Shows top N longest D-state processes (overrides default of %d)" % DEFAULT_MAX_TASKS)
     op.add_option("-d", "--detail",
                   action="store_true",
                   dest="detail",
