@@ -101,14 +101,31 @@ def get_task_wchan(pid):
     return "?"
 
 
+def get_task_uid_str(task):
+    """Return UID string, falling back from loginuid to effective uid."""
+    try:
+        val = task.loginuid.val
+    except Exception:
+        val = 0xffffffff
+
+    if val == 0xffffffff or val == 4294967295:
+        # loginuid not set (AUDIT_UID_UNSET) — use effective uid
+        try:
+            val = task.cred.uid.val
+        except Exception:
+            val = 0
+
+    return "root" if val == 0 else str(val)
+
+
 def show_task_details(taskObj):
     pid = taskObj["data"][2]
     task = readSU("struct task_struct", int(taskObj["data"][4], 16))
     wchan = get_task_wchan(pid)
-    print("\tpolicy = %s, priority = %d, UID = %d, wchan = %s" %
-          (get_task_policy_str(task.policy), task.prio if task.policy == 0 else
-           task.rt_priority, -1 if task.loginuid.val >= 0xffffffff else task.loginuid.val,
-           wchan))
+    print("\tpolicy = %s, priority = %d, UID = %s, wchan = %s" %
+          (get_task_policy_str(task.policy),
+           task.prio if task.policy == 0 else task.rt_priority,
+           get_task_uid_str(task), wchan))
 
 
 def show_task_files(taskObj):
