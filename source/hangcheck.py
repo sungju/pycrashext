@@ -156,10 +156,14 @@ def show_task_files(taskObj):
                 continue
             info = exec_crash_command("files -d 0x%x" % int(dentry)).splitlines()
             if first == 1:
+                crashcolor.set_color(crashcolor.CYAN)
                 print("\t%s" % (info[0]))
+                crashcolor.set_color(crashcolor.RESET)
                 first = 0
             if len(info) > 1:
+                crashcolor.set_color(crashcolor.LIGHTCYAN)
                 print("\t%s" % (info[1]))
+                crashcolor.set_color(crashcolor.RESET)
         except Exception:
             continue
 
