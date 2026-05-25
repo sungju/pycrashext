@@ -107,21 +107,38 @@ def show_task_files(taskObj):
             print("\t%s" % (info[1]))
 
 
+DEFAULT_MAX_TASKS = 5
+
+
 def hangcheck_display(options, args):
     get_task_list(options, args)
 
     hung_task_timeout_usecs = readSymbol("sysctl_hung_task_timeout_secs") * 1000000
 
     task_list_sorted = sorted(un_task_list, key=getKey, reverse=False)
-    hung_task_count = 0
-    for taskObj in task_list_sorted:
+    total_count = len(task_list_sorted)
+
+    # Count hung tasks across the full list for the summary line
+    hung_task_count = sum(
+        1 for t in task_list_sorted
+        if get_useconds(t["runtime"]) >= hung_task_timeout_usecs
+    )
+
+    # Limit display to the longest-running tasks unless -a is given
+    if not options.all and total_count > DEFAULT_MAX_TASKS:
+        skipped = total_count - DEFAULT_MAX_TASKS
+        print("<... %d process%s skipped, use -a to show all ...>" %
+              (skipped, "es" if skipped > 1 else ""))
+        display_list = task_list_sorted[-DEFAULT_MAX_TASKS:]
+    else:
+        display_list = task_list_sorted
+
+    for taskObj in display_list:
         runtime = get_useconds(taskObj["runtime"])
         if runtime >= hung_task_timeout_usecs * 2:
             crashcolor.set_color(crashcolor.LIGHTRED)
-            hung_task_count = hung_task_count + 1
         elif runtime >= hung_task_timeout_usecs:
             crashcolor.set_color(crashcolor.BLUE)
-            hung_task_count = hung_task_count + 1
 
         print(taskObj["raw"])
         if options.detail == True:
@@ -132,18 +149,21 @@ def hangcheck_display(options, args):
 
         crashcolor.set_color(crashcolor.RESET)
 
-
-    task_count = len(un_task_list)
-    if task_count > 0:
+    if total_count > 0:
         print("=" * 60)
-        task_s = "s" if task_count > 1 else ""
+        task_s = "s" if total_count > 1 else ""
         task_hung_s = "s" if hung_task_count > 1 else ""
         print("Total %d task%s were in D state. %d task%s were in D state longer than %d seconds" %
-              (task_count, task_s, hung_task_count, task_hung_s, hung_task_timeout_usecs / 1000000))
+              (total_count, task_s, hung_task_count, task_hung_s, hung_task_timeout_usecs / 1000000))
 
 
 def hangcheck_main():
     op = OptionParser()
+    op.add_option("-a", "--all",
+                  action="store_true",
+                  dest="all",
+                  default=False,
+                  help="Shows all UN-state processes (default: latest %d)" % DEFAULT_MAX_TASKS)
     op.add_option("-d", "--detail",
                   action="store_true",
                   dest="detail",
