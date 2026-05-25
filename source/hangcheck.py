@@ -83,11 +83,32 @@ def get_task_policy_str(policy):
         return "??"
 
 
+def get_task_wchan(pid):
+    """Return the top kernel stack symbol for a task (wchan equivalent)."""
+    try:
+        for line in exec_crash_command("bt %s" % pid).splitlines():
+            line = line.strip()
+            if line.startswith("#0 "):
+                parts = line.split()
+                # Format: "#0 [addr] symbol at addr" or "#0 [addr] symbol"
+                for i, p in enumerate(parts):
+                    if p == "at" and i > 0:
+                        return parts[i - 1]
+                if len(parts) >= 3:
+                    return parts[2]
+    except Exception:
+        pass
+    return "?"
+
+
 def show_task_details(taskObj):
+    pid = taskObj["data"][1]
     task = readSU("struct task_struct", int(taskObj["data"][4], 16))
-    print("\tpolicy = %s, priority = %d, UID = %d" % 
+    wchan = get_task_wchan(pid)
+    print("\tpolicy = %s, priority = %d, UID = %d, wchan = %s" %
           (get_task_policy_str(task.policy), task.prio if task.policy == 0 else
-           task.rt_priority, -1 if task.loginuid.val >= 0xffffffff else task.loginuid.val))
+           task.rt_priority, -1 if task.loginuid.val >= 0xffffffff else task.loginuid.val,
+           wchan))
 
 
 def show_task_files(taskObj):
@@ -110,12 +131,46 @@ def show_task_files(taskObj):
 DEFAULT_MAX_TASKS = 5
 
 
+def show_task_state_summary():
+    """Print a one-line count of tasks in each state."""
+    print("Task state summary: RU=%d, IN=%d, UN=%d, ZO=%d, Other=%d" % (
+        len(ru_task_list), len(in_task_list), len(un_task_list),
+        len(zo_task_list), len(ot_task_list)))
+    print("")
+
+
+def show_zombie_tasks():
+    """Display zombie (ZO) processes if any exist."""
+    if not zo_task_list:
+        return
+    print("=" * 60)
+    print("Zombie processes (%d):" % len(zo_task_list))
+    print("=" * 60)
+    for taskObj in zo_task_list:
+        crashcolor.set_color(crashcolor.MAGENTA)
+        print(taskObj["raw"])
+        crashcolor.set_color(crashcolor.RESET)
+    print("")
+
+
 def hangcheck_display(options, args):
     get_task_list(options, args)
 
     hung_task_timeout_usecs = readSymbol("sysctl_hung_task_timeout_secs") * 1000000
+    threshold_usecs = getattr(options, 'threshold', 0) * 1000000
+
+    show_task_state_summary()
+
+    print("hung_task_timeout_secs = %d" % (hung_task_timeout_usecs / 1000000))
+    print("")
 
     task_list_sorted = sorted(un_task_list, key=getKey, reverse=False)
+
+    # Apply minimum duration filter (-t)
+    if threshold_usecs > 0:
+        task_list_sorted = [t for t in task_list_sorted
+                            if get_useconds(t["runtime"]) >= threshold_usecs]
+
     total_count = len(task_list_sorted)
 
     # Count hung tasks across the full list for the summary line
@@ -141,11 +196,17 @@ def hangcheck_display(options, args):
             crashcolor.set_color(crashcolor.BLUE)
 
         print(taskObj["raw"])
-        if options.detail == True:
+        if options.detail:
             show_task_details(taskObj)
 
-        if options.files == True:
+        if options.files:
             show_task_files(taskObj)
+
+        if getattr(options, 'backtrace', False):
+            pid = taskObj["data"][1]
+            bt_result = exec_crash_command("bt %s" % pid)
+            for bt_line in bt_result.splitlines()[1:]:
+                print("\t%s" % bt_line)
 
         crashcolor.set_color(crashcolor.RESET)
 
@@ -153,8 +214,11 @@ def hangcheck_display(options, args):
         print("=" * 60)
         task_s = "s" if total_count > 1 else ""
         task_hung_s = "s" if hung_task_count > 1 else ""
-        print("Total %d task%s were in D state. %d task%s were in D state longer than %d seconds" %
-              (total_count, task_s, hung_task_count, task_hung_s, hung_task_timeout_usecs / 1000000))
+        print("Total %d task%s in D state. %d task%s in D state longer than %d seconds" %
+              (total_count, task_s, hung_task_count, task_hung_s,
+               hung_task_timeout_usecs / 1000000))
+
+    show_zombie_tasks()
 
 
 def hangcheck_main():
@@ -174,6 +238,16 @@ def hangcheck_main():
                   dest="files",
                   default=False,
                   help="Shows open files in the task")
+    op.add_option("-b", "--backtrace",
+                  action="store_true",
+                  dest="backtrace",
+                  default=False,
+                  help="Shows kernel backtrace (bt) for each D-state task")
+    op.add_option("-t", "--threshold",
+                  action="store", type="int",
+                  dest="threshold",
+                  default=0,
+                  help="Only show tasks in D state longer than N seconds")
     (o, args) = op.parse_args()
     hangcheck_display(o, args)
 
