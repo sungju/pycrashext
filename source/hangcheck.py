@@ -102,7 +102,7 @@ def get_task_wchan(pid):
 
 
 def show_task_details(taskObj):
-    pid = taskObj["data"][1]
+    pid = taskObj["data"][2]
     task = readSU("struct task_struct", int(taskObj["data"][4], 16))
     wchan = get_task_wchan(pid)
     print("\tpolicy = %s, priority = %d, UID = %d, wchan = %s" %
@@ -203,7 +203,7 @@ def hangcheck_display(options, args):
             show_task_files(taskObj)
 
         if getattr(options, 'backtrace', False):
-            pid = taskObj["data"][1]
+            pid = taskObj["data"][2]
             bt_result = exec_crash_command("bt %s" % pid)
             for bt_line in bt_result.splitlines()[1:]:
                 print("\t%s" % bt_line)
