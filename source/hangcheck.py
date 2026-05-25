@@ -130,19 +130,39 @@ def show_task_details(taskObj):
 
 def show_task_files(taskObj):
     task = readSU("struct task_struct", int(taskObj["data"][4], 16))
-    fdt = task.files.fdt
-    max_fds = fdt.max_fds
-    fds = fdt.fd
+    try:
+        if not task.files or task.files == 0:
+            print("\t(no file table — kernel thread?)")
+            return
+        fdt = task.files.fdt
+        if not fdt or fdt == 0:
+            print("\t(no fdt)")
+            return
+        max_fds = fdt.max_fds
+        fds = fdt.fd
+    except Exception as e:
+        print("\t(cannot read file table: %s)" % e)
+        return
+
     first = 1
     for i in range(0, max_fds):
-        if fds[i] > 0:
+        try:
+            if fds[i] <= 0:
+                continue
             file_addr = readULong(fds[i])
+            if not file_addr or file_addr == 0:
+                continue
             file = readSU("struct file", file_addr)
-            info = exec_crash_command("files -d 0x%x" % (file.f_path.dentry)).splitlines()
+            dentry = file.f_path.dentry
+            if not dentry or dentry == 0:
+                continue
+            info = exec_crash_command("files -d 0x%x" % dentry).splitlines()
             if first == 1:
                 print("\t%s" % (info[0]))
                 first = 0
             print("\t%s" % (info[1]))
+        except Exception:
+            continue
 
 
 DEFAULT_MAX_TASKS = 5
