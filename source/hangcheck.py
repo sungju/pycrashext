@@ -199,10 +199,10 @@ def hangcheck_display(options, args):
     hung_task_timeout_usecs = readSymbol("sysctl_hung_task_timeout_secs") * 1000000
     threshold_usecs = getattr(options, 'threshold', 0) * 1000000
 
-    show_task_state_summary()
-
-    print("hung_task_timeout_secs = %d" % (hung_task_timeout_usecs / 1000000))
-    print("")
+    if options.detail:
+        show_task_state_summary()
+        print("hung_task_timeout_secs = %d" % (hung_task_timeout_usecs / 1000000))
+        print("")
 
     task_list_sorted = sorted(un_task_list, key=getKey, reverse=False)
 
