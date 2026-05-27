@@ -259,7 +259,8 @@ def hangcheck_display(options, args):
               (total_count, task_s, hung_task_count, task_hung_s,
                hung_task_timeout_usecs / 1000000))
 
-    show_zombie_tasks()
+    if getattr(options, 'zombie', False):
+        show_zombie_tasks()
 
 
 def hangcheck_main():
@@ -294,6 +295,11 @@ def hangcheck_main():
                   dest="threshold",
                   default=0,
                   help="Only show tasks in D state longer than N seconds")
+    op.add_option("-z", "--zombie",
+                  action="store_true",
+                  dest="zombie",
+                  default=False,
+                  help="Show zombie (ZO) processes")
     (o, args) = op.parse_args()
     hangcheck_display(o, args)
 
