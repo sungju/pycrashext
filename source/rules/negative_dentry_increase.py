@@ -117,8 +117,8 @@ def run_rule(basic_data):
 
             memory_info = mem_line
 
-        # Requires BOTH high dentry % AND significant memory pressure
-        if sys_mem_pct is not None and sys_mem_pct < NEGATIVE_DENTRY_MEMORY_PERCENT_THRESHOLD:
+        # Only trigger when memory data is available AND usage exceeds threshold
+        if sys_mem_pct is None or sys_mem_pct < NEGATIVE_DENTRY_MEMORY_PERCENT_THRESHOLD:
             return None
 
         result_dict = {}
