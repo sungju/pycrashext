@@ -77,7 +77,6 @@ def add_rule(sysinfo):
     return False
 
 
-NEGATIVE_DENTRY_PERCENT_THRESHOLD = 50
 NEGATIVE_DENTRY_MEMORY_PERCENT_THRESHOLD = 33
 
 
@@ -95,9 +94,6 @@ def run_rule(basic_data):
             return None
 
         negative_percent = (nr_negative / nr_dentry) * 100
-
-        if negative_percent < NEGATIVE_DENTRY_PERCENT_THRESHOLD:
-            return None
 
         sys_mem_pct  = None
         memory_info  = ""
