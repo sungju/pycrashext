@@ -47,7 +47,7 @@ def get_called_functions(handler_name):
     return called
 
 
-def print_handler(tab_str, handler_type, handler_addr, kp):
+def print_handler(tab_str, handler_type, handler_addr, kp, show_details=False):
     if handler_addr != 0:
         handler_name = addr2sym(handler_addr)
         mod_name = get_module_name(handler_name)
@@ -89,8 +89,8 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
             except:
                 pass
 
-        # Show functions called by this handler
-        if handler_name:
+        # Show functions called by this handler (only with -d)
+        if show_details and handler_name:
             called = get_called_functions(handler_name)
             if called:
                 crashcolor.set_color(crashcolor.CYAN)
@@ -105,19 +105,19 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
 
 
 
-def print_handler_handler(handler_type, kprobe):
+def print_handler_handler(handler_type, kprobe, show_details=False):
     for kp in readSUListFromHead(kprobe.list,
                                 "list",
                                 "struct kprobe"):
         if handler_type == "pre":
-            print_handler("\t", handler_type, kp.pre_handler, kp)
+            print_handler("\t", handler_type, kp.pre_handler, kp, show_details)
         elif handler_type == "post":
-            print_handler("\t", handler_type, kp.post_handler, kp)
+            print_handler("\t", handler_type, kp.post_handler, kp, show_details)
         elif handler_type == "fault":
-            print_handler("\t", handler_type, kp.fault_handler, kp)
+            print_handler("\t", handler_type, kp.fault_handler, kp, show_details)
         elif handler_type == "break":
             try:
-                print_handler("\t", handler_type, kp.break_handler, kp)
+                print_handler("\t", handler_type, kp.break_handler, kp, show_details)
             except:
                 pass
         else:
@@ -148,17 +148,18 @@ def show_ftrace_list(options):
             print("struct kprobe 0x%x" % (kprobe))
             if kprobe.addr != 0:
                 print("\taddr = 0x%x (%s)" % (kprobe.addr, addr2sym(kprobe.addr)))
-            print_handler("", "pre", kprobe.pre_handler, kprobe)
-            print_handler_handler("pre", kprobe)
-            print_handler("", "post", kprobe.post_handler, kprobe)
-            print_handler_handler("post", kprobe)
-            print_handler("", "fault", kprobe.fault_handler, kprobe)
-            print_handler_handler("fault", kprobe)
+            sd = options.show_details
+            print_handler("", "pre", kprobe.pre_handler, kprobe, sd)
+            print_handler_handler("pre", kprobe, sd)
+            print_handler("", "post", kprobe.post_handler, kprobe, sd)
+            print_handler_handler("post", kprobe, sd)
+            print_handler("", "fault", kprobe.fault_handler, kprobe, sd)
+            print_handler_handler("fault", kprobe, sd)
             try:
-                print_handler("", "break", kprobe.break_handler, kprobe)
+                print_handler("", "break", kprobe.break_handler, kprobe, sd)
             except:
                 pass
-            print_handler_handler("break", kprobe)
+            print_handler_handler("break", kprobe, sd)
             if options.show_details:
                 try:
                     trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
