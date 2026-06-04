@@ -20,6 +20,33 @@ def get_module_name(symbol):
     return ""
 
 
+def get_called_functions(handler_name):
+    """Return unique function names called by handler_name via disassembly."""
+    called = []
+    seen = set()
+    try:
+        dis_out = exec_crash_command("dis %s" % handler_name)
+        for line in dis_out.splitlines():
+            stripped = line.strip()
+            # Match direct call instructions on x86 and arm64
+            is_call = any(op in stripped for op in
+                          ('callq ', 'call ', '\tbl\t', ' bl ', '\tblr\t', ' blr '))
+            if not is_call:
+                continue
+            # Extract symbol from <symbol+offset> or <symbol>
+            if '<' in line and '>' in line:
+                lt = line.rfind('<') + 1
+                gt = line.rfind('>')
+                if lt < gt:
+                    sym = line[lt:gt].split('+')[0].strip()
+                    if sym and not sym.startswith('0x') and sym not in seen:
+                        seen.add(sym)
+                        called.append(sym)
+    except Exception:
+        pass
+    return called
+
+
 def print_handler(tab_str, handler_type, handler_addr, kp):
     if handler_addr != 0:
         handler_name = addr2sym(handler_addr)
@@ -61,6 +88,19 @@ def print_handler(tab_str, handler_type, handler_addr, kp):
                     crashcolor.set_color(crashcolor.RESET)
             except:
                 pass
+
+        # Show functions called by this handler
+        if handler_name:
+            called = get_called_functions(handler_name)
+            if called:
+                crashcolor.set_color(crashcolor.CYAN)
+                print("\t\t%sCalled functions:" % tab_str)
+                crashcolor.set_color(crashcolor.RESET)
+                for func in called:
+                    mod = get_module_name(func)
+                    crashcolor.set_color(crashcolor.LIGHTCYAN)
+                    print("\t\t\t%s-> %s%s" % (tab_str, func, mod))
+                    crashcolor.set_color(crashcolor.RESET)
 
 
 
