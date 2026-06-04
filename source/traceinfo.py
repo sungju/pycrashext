@@ -153,8 +153,19 @@ def show_ftrace_list(options):
     else:
         trace_buffer = None
 
-    if (global_trace.buffer_disabled == 0 and
-        trace_buffer.buffer.record_disabled.counter == 0):
+    try:
+        ftrace_enabled = (global_trace.buffer_disabled == 0 and
+                          trace_buffer is not None and
+                          trace_buffer.buffer.record_disabled.counter == 0)
+    except (KeyError, AttributeError):
+        # record_disabled field absent in some kernel versions — fall back to
+        # buffer_disabled only
+        try:
+            ftrace_enabled = (global_trace.buffer_disabled == 0)
+        except Exception:
+            ftrace_enabled = True
+
+    if ftrace_enabled:
         print("** ftrace Enabled (struct trace_array 0x%x)" % global_trace)
     else:
         print("** ftrace Disabled")
@@ -296,6 +307,10 @@ def _build_bpf_prog_to_process_map():
 
 
 def show_bpf_tree(options):
+    if not symbol_exists("bpf_tree"):
+        print("BPF not available in this kernel")
+        return
+
     bpf_tree = readSymbol("bpf_tree")
     ksym_offset = member_offset("struct bpf_prog_aux", "ksym")
     count = 0
@@ -307,6 +322,15 @@ def show_bpf_tree(options):
         print("%-6s %-22s %-4s %-4s %-6s %-5s %-22s %s" % (
             "ID", "TYPE", "JIT", "GPL", "FUNCS", "MAPS", "OWNER", "NAME"))
         print("-" * 95)
+
+    # Verify struct bpf_ksym exists before walking the rbtree.
+    # It is absent on RHEL7 and early RHEL8 kernels.
+    try:
+        if member_offset("struct bpf_ksym", "tnode") < 0:
+            raise KeyError
+    except (KeyError, Exception):
+        print("struct bpf_ksym not available in this kernel version")
+        return
 
     for bpf_ksym in for_all_rbtree(bpf_tree.tree[0],
                                    "struct bpf_ksym",
