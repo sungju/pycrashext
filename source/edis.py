@@ -4252,7 +4252,8 @@ def edis():
         sys.exit(0)
 
     if len(args) != 0:
-        pykdump_path = os.environ.get("PYKDUMPPATH", "/home/sel/dkwon/pycrashext/source")
+        pykdump_path = os.environ.get("PYKDUMPPATH",
+                                      os.path.dirname(os.path.abspath(__file__)))
         disasm(args[0], o, args, pykdump_path)
     else:
         print("ERROR> edis needs an address or a symbol\n",
