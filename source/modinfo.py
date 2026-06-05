@@ -72,6 +72,32 @@ def is_our_module(module_addr):
     return True
 
 
+def get_module_core_size(module):
+    """Return core section size across all kernel versions (RHEL6-10)."""
+    try:                          # RHEL8+ (kernel 4.5+): core_layout.size
+        return int(module.core_layout.size)
+    except Exception:
+        pass
+    try:                          # RHEL6/7: core_size field directly
+        return int(module.core_size)
+    except Exception:
+        pass
+    return 0
+
+
+def get_module_core_base(module):
+    """Return core section base address across all kernel versions (RHEL6-10)."""
+    try:                          # RHEL8+ (kernel 4.5+): core_layout.base
+        return int(module.core_layout.base)
+    except Exception:
+        pass
+    try:                          # RHEL6/7: module_core field directly
+        return int(module.module_core)
+    except Exception:
+        pass
+    return 0
+
+
 def get_module_alloc_data(module):
     result = exec_crash_command("kmem 0x%x" % (int(module)))
     resultlines = result.splitlines()
@@ -340,10 +366,7 @@ def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=F
     if unloaded:
         crashcolor.set_color(crashcolor.MAGENTA | crashcolor.BOLD)
 
-    if member_offset("struct module", "core_layout") > -1:
-        core_size = module.core_layout.size
-    else:
-        core_size = module.core_size
+    core_size = get_module_core_size(module)
 
     print("0x%x %-25s %10d %s" % (int(module),
                              module.name,
@@ -635,9 +658,9 @@ def try_get_module_struct(options):
         print("\tstruct module 0x%x" % module)
         print("\tname : %s" % module.name)
         print("\tstatus : %s" % loaded_module)
-        baseaddr = module.core_layout.base
-        print("\tcore range 0x%x - 0x%x" % (baseaddr,\
-                                baseaddr + module.core_layout.size))
+        baseaddr = get_module_core_base(module)
+        print("\tcore range 0x%x - 0x%x" % (baseaddr,
+                                             baseaddr + get_module_core_size(module)))
         if options.show_symtab:
             show_manual_module_detail(options, module)
     else:
