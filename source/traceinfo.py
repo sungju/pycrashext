@@ -145,28 +145,35 @@ def show_ftrace_list(options):
     tp_offset = tp_offset + member_offset("struct kretprobe", "kp")
     for hh in kprobe_table_list:
         for kprobe in hlist_for_each_entry("struct kprobe", hh, "hlist"):
-            print("struct kprobe 0x%x" % (kprobe))
-            if kprobe.addr != 0:
-                print("\taddr = 0x%x (%s)" % (kprobe.addr, addr2sym(kprobe.addr)))
-            sd = options.show_details
-            print_handler("", "pre", kprobe.pre_handler, kprobe, sd)
-            print_handler_handler("pre", kprobe, sd)
-            print_handler("", "post", kprobe.post_handler, kprobe, sd)
-            print_handler_handler("post", kprobe, sd)
-            print_handler("", "fault", kprobe.fault_handler, kprobe, sd)
-            print_handler_handler("fault", kprobe, sd)
             try:
-                print_handler("", "break", kprobe.break_handler, kprobe, sd)
-            except:
-                pass
-            print_handler_handler("break", kprobe, sd)
-            if options.show_details:
+                print("struct kprobe 0x%x" % (kprobe))
                 try:
-                    trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
-                    print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
-                    print("\t\tcall.name = '%s'" % (trace_probe.call.name))
-                except:
+                    if kprobe.addr != 0:
+                        print("\taddr = 0x%x (%s)" % (kprobe.addr, addr2sym(kprobe.addr)))
+                except Exception:
+                    print("\taddr = (unreadable)")
+                sd = options.show_details
+                print_handler("", "pre", kprobe.pre_handler, kprobe, sd)
+                print_handler_handler("pre", kprobe, sd)
+                print_handler("", "post", kprobe.post_handler, kprobe, sd)
+                print_handler_handler("post", kprobe, sd)
+                print_handler("", "fault", kprobe.fault_handler, kprobe, sd)
+                print_handler_handler("fault", kprobe, sd)
+                try:
+                    print_handler("", "break", kprobe.break_handler, kprobe, sd)
+                except Exception:
                     pass
+                print_handler_handler("break", kprobe, sd)
+                if options.show_details:
+                    try:
+                        trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
+                        print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
+                        print("\t\tcall.name = '%s'" % (trace_probe.call.name))
+                    except Exception:
+                        pass
+            except Exception as e:
+                print("  (skipping kprobe 0x%x: %s)" % (int(kprobe), e))
+                continue
 
 
     if options.show_details:
