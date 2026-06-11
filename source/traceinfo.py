@@ -144,7 +144,18 @@ def show_ftrace_list(options):
     tp_offset = member_offset("struct trace_probe", "rp")
     tp_offset = tp_offset + member_offset("struct kretprobe", "kp")
     for hh in kprobe_table_list:
-        for kprobe in hlist_for_each_entry("struct kprobe", hh, "hlist"):
+        try:
+            kprobe_iter = hlist_for_each_entry("struct kprobe", hh, "hlist")
+        except Exception:
+            continue
+        while True:
+            try:
+                kprobe = next(kprobe_iter)
+            except StopIteration:
+                break
+            except Exception as e:
+                print("  (hlist walk error, skipping bucket: %s)" % e)
+                break
             try:
                 print("struct kprobe 0x%x" % (kprobe))
                 try:
@@ -172,7 +183,7 @@ def show_ftrace_list(options):
                     except Exception:
                         pass
             except Exception as e:
-                print("  (skipping kprobe 0x%x: %s)" % (int(kprobe), e))
+                print("  (skipping kprobe: %s)" % e)
                 continue
 
 
