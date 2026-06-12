@@ -139,6 +139,89 @@ def kprobe_flags_str(flags):
     return result_str 
 
 
+KPROBE_HASH_BITS = 6
+GOLDEN_RATIO_64  = 0x61C8864680B583EB  # used by hash_long in 64-bit kernels
+
+
+def hash_ptr_64(addr, bits):
+    """Replicate Linux hash_ptr(addr, bits) for 64-bit systems."""
+    h = (addr * GOLDEN_RATIO_64) & 0xFFFFFFFFFFFFFFFF
+    return h >> (64 - bits)
+
+
+def get_kprobe_by_ip(ip_addr):
+    """
+    Locate a kprobe by instruction-pointer address, mirroring get_kprobe():
+
+        head = &kprobe_table[hash_ptr(addr, KPROBE_HASH_BITS)];
+        hlist_for_each_entry_rcu(p, head, hlist)
+            if (p->addr == addr) return p;
+    """
+    try:
+        kprobe_table = readSymbol("kprobe_table")
+        bucket = hash_ptr_64(ip_addr, KPROBE_HASH_BITS)
+        head = kprobe_table[bucket]
+        kprobe_iter = hlist_for_each_entry("struct kprobe", head, "hlist")
+        while True:
+            try:
+                kp = next(kprobe_iter)
+            except StopIteration:
+                break
+            except Exception:
+                break
+            try:
+                if int(kp.addr) == ip_addr:
+                    return kp
+            except Exception:
+                continue
+    except Exception as e:
+        print("Error in get_kprobe_by_ip: %s" % e)
+    return None
+
+
+def show_kprobe_by_ip(options, ip_addr):
+    """Show the kprobe registered for a specific IP address."""
+    sym = addr2sym(ip_addr)
+    print("Looking up kprobe for ip = 0x%x (%s)" % (ip_addr, sym if sym else "?"))
+    print("  bucket index = %d (KPROBE_HASH_BITS=%d)\n" %
+          (hash_ptr_64(ip_addr, KPROBE_HASH_BITS), KPROBE_HASH_BITS))
+
+    kp = get_kprobe_by_ip(ip_addr)
+    if kp is None:
+        print("No kprobe found for address 0x%x" % ip_addr)
+        return
+
+    tp_offset = member_offset("struct trace_probe", "rp")
+    tp_offset = tp_offset + member_offset("struct kretprobe", "kp")
+
+    print("struct kprobe 0x%x" % kp)
+    try:
+        print("\taddr = 0x%x (%s)" % (kp.addr, addr2sym(kp.addr)))
+    except Exception:
+        print("\taddr = (unreadable)")
+
+    sd = options.show_details
+    print_handler("", "pre",   kp.pre_handler,   kp, sd)
+    print_handler_handler("pre",   kp, sd)
+    print_handler("", "post",  kp.post_handler,  kp, sd)
+    print_handler_handler("post",  kp, sd)
+    print_handler("", "fault", kp.fault_handler, kp, sd)
+    print_handler_handler("fault", kp, sd)
+    try:
+        print_handler("", "break", kp.break_handler, kp, sd)
+    except Exception:
+        pass
+    print_handler_handler("break", kp, sd)
+
+    if sd:
+        try:
+            trace_probe = readSU("struct trace_probe", kp - tp_offset)
+            print("\t\tflags : %s" % kprobe_flags_str(trace_probe.flags))
+            print("\t\tcall.name = '%s'" % trace_probe.call.name)
+        except Exception:
+            pass
+
+
 def show_ftrace_list(options):
     kprobe_table_list = readSymbol("kprobe_table")
     tp_offset = member_offset("struct trace_probe", "rp")
@@ -667,6 +750,10 @@ def traceinfo():
                   action="store_true",
                   help="show disassembled BPF program code in detailed output (use with -d)")
 
+    op.add_option("-i", "--ip", dest="ip_addr", default="",
+                  action="store", type="string",
+                  help="Look up kprobe for a specific IP address (hex, e.g. 0xffffffff...)")
+
     (o, args) = op.parse_args()
 
     # Parse optional BPF Program ID filter
@@ -678,6 +765,14 @@ def traceinfo():
         except:
             pass
     o.filter_ids = filter_ids
+
+    if o.ip_addr:
+        try:
+            ip_addr = int(o.ip_addr, 16) if o.ip_addr.startswith("0x") else int(o.ip_addr, 0)
+            show_kprobe_by_ip(o, ip_addr)
+        except ValueError:
+            print("Invalid IP address: %s (expected hex, e.g. 0xffffffff...)" % o.ip_addr)
+        sys.exit(0)
 
     if o.bpf_tree:
         show_bpf_tree(o)
