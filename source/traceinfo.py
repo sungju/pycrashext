@@ -136,7 +136,29 @@ def kprobe_flags_str(flags):
     if (flags & 4) == 4:
         result_str = result_str + "TP_FLAG_REGISTERED "
 
-    return result_str 
+    return result_str
+
+
+# struct kprobe.flags bitmask (include/linux/kprobes.h)
+_KPROBE_FLAGS = [
+    (1,  "GONE"),           # breakpoint already removed from table
+    (2,  "DISABLED"),       # probe temporarily disabled
+    (4,  "OPTIMIZED"),      # using optimised (jump) patching
+    (8,  "FTRACE"),         # using ftrace for patching
+    (16, "ON_FUNC_ENTRY"),  # probe sits on function entry point
+    (32, "AGGREGATED"),     # aggregate probe (multi-handler) [newer kernels]
+]
+
+def kprobe_flag_str(flags):
+    """Return a human-readable string for struct kprobe.flags."""
+    if flags == 0:
+        return "0 (active)"
+    parts = ["KPROBE_FLAG_%s" % name
+             for bit, name in _KPROBE_FLAGS if flags & bit]
+    unknown = flags & ~sum(bit for bit, _ in _KPROBE_FLAGS)
+    if unknown:
+        parts.append("UNKNOWN(0x%x)" % unknown)
+    return " | ".join(parts) if parts else "0"
 
 
 KPROBE_HASH_BITS = 6
@@ -215,6 +237,10 @@ def show_kprobe_by_ip(options, ip_addr):
 
     if sd:
         try:
+            print("\t\tkprobe.flags : %s" % kprobe_flag_str(int(kp.flags)))
+        except Exception:
+            pass
+        try:
             trace_probe = readSU("struct trace_probe", kp - tp_offset)
             print("\t\tflags : %s" % kprobe_flags_str(trace_probe.flags))
             print("\t\tcall.name = '%s'" % trace_probe.call.name)
@@ -259,6 +285,10 @@ def show_ftrace_list(options):
                     pass
                 print_handler_handler("break", kprobe, sd)
                 if options.show_details:
+                    try:
+                        print("\t\tkprobe.flags : %s" % kprobe_flag_str(int(kprobe.flags)))
+                    except Exception:
+                        pass
                     try:
                         trace_probe = readSU("struct trace_probe", kprobe - tp_offset)
                         print("\t\tflags : %s" % (kprobe_flags_str(trace_probe.flags)))
