@@ -478,6 +478,126 @@ def _build_bpf_prog_to_process_map():
     return prog_to_process
 
 
+def find_bpf_prog_by_addr(addr):
+    """
+    Walk the bpf_tree rbtree and return the bpf_ksym whose [start, end)
+    range contains addr.  Returns (bpf_ksym, aux_or_None) or (None, None).
+
+    The rbtree contains ksym entries for both JIT'd BPF programs and BPF
+    trampolines.  For programs, aux = readSU("struct bpf_prog_aux", ...).
+    For trampolines (no aux), aux is None.
+    """
+    if not symbol_exists("bpf_tree"):
+        return None, None
+
+    try:
+        bpf_tree   = readSymbol("bpf_tree")
+        ksym_offset = member_offset("struct bpf_prog_aux", "ksym")
+
+        try:
+            bpf_ksym_iter = for_all_rbtree(bpf_tree.tree[0],
+                                           "struct bpf_ksym", "tnode")
+        except (TypeError, KeyError):
+            return None, None
+
+        while True:
+            try:
+                bpf_ksym = next(bpf_ksym_iter)
+            except StopIteration:
+                break
+            except Exception:
+                break
+
+            try:
+                start = int(bpf_ksym.start)
+                end   = int(bpf_ksym.end)
+                if start <= addr < end:
+                    aux = None
+                    if ksym_offset >= 0:
+                        try:
+                            aux = readSU("struct bpf_prog_aux",
+                                         int(bpf_ksym) - ksym_offset)
+                        except Exception:
+                            pass
+                    return bpf_ksym, aux
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return None, None
+
+
+def show_bpf_by_addr(options, addr):
+    """Identify what BPF code lives at addr and display its details."""
+    print("Searching BPF ksym tree for address 0x%x ..." % addr)
+
+    bpf_ksym, aux = find_bpf_prog_by_addr(addr)
+
+    if bpf_ksym is None:
+        print("  Not found in BPF ksym tree.")
+        print("  The address may be a BPF trampoline or JIT body registered")
+        print("  under a different ksym type.  Try 'traceinfo -b -d' for the")
+        print("  full BPF program list with address ranges.")
+        return
+
+    # Decode ksym name
+    try:
+        raw = bpf_ksym.name
+        name = raw.decode("utf-8", errors="replace").rstrip("\x00") \
+               if isinstance(raw, bytes) else str(raw).rstrip("\x00")
+    except Exception:
+        name = "?"
+
+    start = int(bpf_ksym.start)
+    end   = int(bpf_ksym.end)
+    offset = addr - start
+
+    print("  Found in BPF ksym: %s" % name)
+    print("  JIT range       : 0x%x - 0x%x  (+0x%x bytes, offset +0x%x)" %
+          (start, end, end - start, offset))
+
+    if aux is None:
+        print("  Type            : BPF trampoline (no bpf_prog_aux — kernel-generated")
+        print("                    wrapper for fentry/fexit BPF programs)")
+        return
+
+    # bpf_prog_aux available — pull program details
+    print("  struct bpf_prog_aux : 0x%x" % int(aux))
+
+    try:
+        prog_id = int(aux.id)
+        print("  BPF prog ID     : %d" % prog_id)
+    except Exception:
+        pass
+
+    try:
+        prog = aux.prog
+        prog_type = int(prog.type)
+        type_name = BPF_PROG_TYPES.get(prog_type, "UNKNOWN_%d" % prog_type)
+        print("  Program type    : %s (%d)" % (type_name, prog_type))
+        try:
+            tag = "".join("%02x" % b for b in prog.tag[:8])
+            print("  Tag             : %s" % tag)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+    try:
+        raw = aux.name
+        aux_name = raw.decode("utf-8", errors="replace").rstrip("\x00") \
+                   if isinstance(raw, bytes) else str(raw).rstrip("\x00")
+        if aux_name:
+            print("  Program name    : %s" % aux_name)
+    except Exception:
+        pass
+
+    print("")
+    print("  Tip: run 'traceinfo -b' to list all loaded BPF programs,")
+    print("       or 'traceinfo -b -d' for full details including ranges.")
+
+
 def show_bpf_tree(options):
     if not symbol_exists("bpf_tree"):
         print("BPF not available in this kernel")
@@ -784,6 +904,10 @@ def traceinfo():
                   action="store", type="string",
                   help="Look up kprobe for a specific IP address (hex, e.g. 0xffffffff...)")
 
+    op.add_option("-A", "--addr", dest="bpf_addr", default="",
+                  action="store", type="string",
+                  help="Identify BPF code at a given address (hex) — shows prog ID, type, name")
+
     (o, args) = op.parse_args()
 
     # Parse optional BPF Program ID filter
@@ -802,6 +926,14 @@ def traceinfo():
             show_kprobe_by_ip(o, ip_addr)
         except ValueError:
             print("Invalid IP address: %s (expected hex, e.g. 0xffffffff...)" % o.ip_addr)
+        sys.exit(0)
+
+    if o.bpf_addr:
+        try:
+            addr = int(o.bpf_addr, 16) if o.bpf_addr.startswith("0x") else int(o.bpf_addr, 0)
+            show_bpf_by_addr(o, addr)
+        except ValueError:
+            print("Invalid address: %s (expected hex, e.g. 0xffffffffc264d000)" % o.bpf_addr)
         sys.exit(0)
 
     if o.bpf_tree:
