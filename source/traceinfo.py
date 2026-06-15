@@ -560,11 +560,15 @@ def show_bpf_by_addr(options, addr):
     if aux is None:
         print("  Type            : BPF trampoline (no bpf_prog_aux — kernel-generated")
         print("                    wrapper for fentry/fexit BPF programs)")
+        print("")
+        print("  Tip: run 'traceinfo -b' to list all loaded BPF programs,")
+        print("       or 'traceinfo -b -d' for full details including ranges.")
         return
 
     # bpf_prog_aux available — pull program details
     print("  struct bpf_prog_aux : 0x%x" % int(aux))
 
+    prog_addr = None
     try:
         prog_id = int(aux.id)
         print("  BPF prog ID     : %d" % prog_id)
@@ -573,6 +577,7 @@ def show_bpf_by_addr(options, addr):
 
     try:
         prog = aux.prog
+        prog_addr = int(prog)
         prog_type = int(prog.type)
         type_name = BPF_PROG_TYPES.get(prog_type, "UNKNOWN_%d" % prog_type)
         print("  Program type    : %s (%d)" % (type_name, prog_type))
@@ -592,6 +597,20 @@ def show_bpf_by_addr(options, addr):
             print("  Program name    : %s" % aux_name)
     except Exception:
         pass
+
+    # Look up which userspace process owns this BPF program
+    if prog_addr is not None:
+        try:
+            prog_to_process = _build_bpf_prog_to_process_map()
+            owner = prog_to_process.get(prog_addr)
+            if owner:
+                pid, comm = owner
+                print("  Owner process   : PID %-6d  (%s)" % (pid, comm))
+            else:
+                print("  Owner process   : (not found — process may have exited")
+                print("                    or BPF prog is pinned in bpffs)")
+        except Exception as e:
+            print("  Owner process   : (lookup failed: %s)" % e)
 
     print("")
     print("  Tip: run 'traceinfo -b' to list all loaded BPF programs,")
