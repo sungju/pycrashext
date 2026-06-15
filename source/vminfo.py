@@ -238,9 +238,12 @@ def balloon_info(options):
             return
 
     # KVM / QEMU / Nutanix AHV
-    elif ('nutanix' in vendor or 'ahv' in product or
+    # Covers: DMI_PRODUCT_NAME: KVM, QEMU; DMI_SYS_VENDOR: QEMU, Nutanix;
+    #         DMI_BIOS_VENDOR: SeaBIOS (used by KVM/QEMU), OVMF
+    elif ('nutanix' in vendor or
+          'ahv' in product or 'kvm' in product or 'qemu' in product or
           'qemu' in vendor or 'kvm' in vendor or
-          'ovmf' in bios_vendor):
+          'seabios' in bios_vendor or 'ovmf' in bios_vendor):
         kvm_mem(options)
         return
 
