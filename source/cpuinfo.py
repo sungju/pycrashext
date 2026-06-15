@@ -263,20 +263,33 @@ def show_cpuidle_state_table(options):
         if not state_defs:
             tried.append("cpuidle_state_table")
             try:
-                addr = Addr(readSymbol("cpuidle_state_table"))
-                for s in readSUArray("struct cpuidle_state", addr, 8):
-                    if s.name == "":
-                        break
-                    state_defs.append(s)
+                tbl_ptr = readSymbol("cpuidle_state_table")
+                if tbl_ptr == 0 or tbl_ptr is None:
+                    if options.verbose:
+                        print("  [cpuidle_state_table is NULL — no cpuidle driver active]")
+                else:
+                    addr = Addr(tbl_ptr)
+                    for s in readSUArray("struct cpuidle_state", addr, 8):
+                        if s.name == "":
+                            break
+                        state_defs.append(s)
             except Exception as e:
                 if options.verbose:
                     print("  [cpuidle_state_table failed: %s]" % e)
 
         num_states = len(state_defs)
         if num_states == 0:
-            print("No C-state definitions found")
-            print("  (searched: %s)" % ", ".join(tried))
-            print("  Use 'cpuinfo -v -s' for details, or check: sym -l | grep cpuidle")
+            # Check for haltpoll — the typical VM cpuidle driver
+            haltpoll_note = ""
+            if symbol_exists("haltpoll_driver") or symbol_exists("halt_poll_ns"):
+                haltpoll_note = "\n  haltpoll cpuidle driver detected (typical for KVM guests)."
+            print("No hardware C-state definitions found.")
+            print("  This is expected on virtual machines — guests usually do not use")
+            print("  hardware C-states. The hypervisor manages CPU power on their behalf.")
+            if haltpoll_note:
+                print(haltpoll_note)
+            if options.verbose:
+                print("  (searched: %s)" % ", ".join(tried))
             return
 
         # ------------------------------------------------------------------
