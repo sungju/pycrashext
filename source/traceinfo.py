@@ -500,6 +500,8 @@ def find_bpf_prog_by_addr(addr):
         except (TypeError, KeyError):
             return None, None
 
+        tramp_ksym_off = member_offset("struct bpf_tramp_image", "ksym")
+
         while True:
             try:
                 bpf_ksym = next(bpf_ksym_iter)
@@ -511,15 +513,45 @@ def find_bpf_prog_by_addr(addr):
             try:
                 start = int(bpf_ksym.start)
                 end   = int(bpf_ksym.end)
-                if start <= addr < end:
-                    aux = None
-                    if ksym_offset >= 0:
+                if not (start <= addr < end):
+                    continue
+
+                # Determine whether this ksym belongs to a BPF program or
+                # a BPF trampoline — they use different container structs.
+                is_trampoline = False
+                try:
+                    # bpf_ksym.prog == True  →  embedded in bpf_prog_aux
+                    # bpf_ksym.prog == False →  NOT a prog ksym (trampoline etc.)
+                    is_trampoline = not bool(bpf_ksym.prog)
+                except Exception:
+                    # Fallback: check name prefix
+                    try:
+                        n = bpf_ksym.name
+                        n = n.decode("utf-8", errors="replace") if isinstance(n, bytes) else str(n)
+                        is_trampoline = n.startswith("bpf_trampoline")
+                    except Exception:
+                        pass
+
+                if is_trampoline:
+                    # Return the tramp_image if accessible, else None for aux
+                    tramp_image = None
+                    if tramp_ksym_off >= 0:
                         try:
-                            aux = readSU("struct bpf_prog_aux",
-                                         int(bpf_ksym) - ksym_offset)
+                            tramp_image = readSU("struct bpf_tramp_image",
+                                                 int(bpf_ksym) - tramp_ksym_off)
                         except Exception:
                             pass
-                    return bpf_ksym, aux
+                    return bpf_ksym, ("trampoline", tramp_image)
+
+                # Regular BPF program ksym
+                aux = None
+                if ksym_offset >= 0:
+                    try:
+                        aux = readSU("struct bpf_prog_aux",
+                                     int(bpf_ksym) - ksym_offset)
+                    except Exception:
+                        pass
+                return bpf_ksym, aux
             except Exception:
                 continue
     except Exception:
@@ -556,6 +588,32 @@ def show_bpf_by_addr(options, addr):
     print("  Found in BPF ksym: %s" % name)
     print("  JIT range       : 0x%x - 0x%x  (+0x%x bytes, offset +0x%x)" %
           (start, end, end - start, offset))
+
+    # Trampoline case: aux is a ("trampoline", tramp_image) tuple
+    if isinstance(aux, tuple) and aux[0] == "trampoline":
+        tramp_image = aux[1]
+        print("  Type            : BPF trampoline (kernel-generated JIT wrapper)")
+        print("  Note            : Trampolines have no bpf_prog_aux of their own.")
+        print("                    They call the attached BPF programs listed below.")
+        if tramp_image is not None:
+            # Try to find the trampoline's parent and its attached programs
+            try:
+                ksym_off  = member_offset("struct bpf_tramp_image", "ksym")
+                tramp_obj = None
+                # bpf_tramp_image.image points to the allocated JIT memory
+                img_addr = int(tramp_image.image)
+                print("  JIT image       : 0x%x" % img_addr)
+            except Exception:
+                pass
+        # Show which programs are in the JIT range by scanning __bpf_prog_enter args
+        print("")
+        print("  To identify the BPF programs called from this trampoline,")
+        print("  disassemble it and look up the ptr passed to __bpf_prog_enter:")
+        print("    dis 0x%x 80" % start)
+        print("  Then use  'traceinfo -A <that_ptr>'  for each program pointer.")
+        print("")
+        print("  Tip: 'traceinfo -b -d' lists all BPF programs with address ranges.")
+        return
 
     if aux is None:
         print("  Type            : BPF trampoline (no bpf_prog_aux — kernel-generated")
