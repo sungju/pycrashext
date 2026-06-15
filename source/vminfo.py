@@ -139,14 +139,18 @@ def kvm_mem(options):
                     num_pages * crash.PAGESIZE,
                     num_pages * crash.PAGESIZE / 1024 / 1024 / 1024))
 
-                try:
-                    num_desired = int(vb.num_desired)
-                    print("required target (pages)    = %d" % num_desired)
-                    print("required target (bytes)    = %d, (%.2fGB)" % (
-                        num_desired * crash.PAGESIZE,
-                        num_desired * crash.PAGESIZE / 1024 / 1024 / 1024))
-                except AttributeError:
-                    pass
+                # Target page count — field name varies across kernel versions
+                # (num_desired in newer kernels, may be absent in older ones)
+                for _target_field in ("num_desired", "num_pfns"):
+                    try:
+                        num_desired = int(getattr(vb, _target_field))
+                        print("required target (pages)    = %d" % num_desired)
+                        print("required target (bytes)    = %d, (%.2fGB)" % (
+                            num_desired * crash.PAGESIZE,
+                            num_desired * crash.PAGESIZE / 1024 / 1024 / 1024))
+                        break
+                    except Exception:
+                        continue
                 crashcolor.set_color(crashcolor.RESET)
 
                 if options.show_details:
