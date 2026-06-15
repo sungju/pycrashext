@@ -219,58 +219,174 @@ def show_cpu_capability(options):
         crashcolor.set_color(crashcolor.RESET)
 
 
+def _fmt_us(us):
+    """Format microseconds as a human-readable string."""
+    if us < 0:
+        return "n/a"
+    if us >= 1000000:
+        return "%.1fs" % (us / 1000000.0)
+    if us >= 1000:
+        return "%.1fms" % (us / 1000.0)
+    return "%dus" % us
+
+
 def show_cpuidle_state_table(options):
     try:
-        idx = 0
-        cpu_state_name = {}
+        # ------------------------------------------------------------------
+        # 1. Collect state definitions from driver or static table
+        # ------------------------------------------------------------------
+        state_defs = []   # list of cpuidle_state structs
+        driver_name = "unknown"
+
         try:
             cpuidle_driver = readSymbol("cpuidle_curr_driver")
-            idx = 0
-            print("CPU idle driver : %s" % (cpuidle_driver.name))
-            if options.verbose:
-                print(cpuidle_driver)
-            for cpuidle_state in cpuidle_driver.states:
-                cpu_state_name[idx] = cpuidle_state
-                if options.verbose:
-                    print(cpuidle_state)
-                idx = idx + 1
-        except:
-            idx = 0
-            addr = Addr(readSymbol("cpuidle_state_table"))
-            cpuidle_state_table = readSUArray("struct cpuidle_state", addr, 8)
-            for cpuidle_state in cpuidle_state_table:
-                cpu_state_name[idx] = cpuidle_state
-                idx = idx + 1
+            if cpuidle_driver and cpuidle_driver != 0:
+                driver_name = str(cpuidle_driver.name)
+                for s in cpuidle_driver.states:
+                    if str(s.name) == "":
+                        continue
+                    state_defs.append(s)
+        except Exception:
+            pass
 
+        if not state_defs:
+            try:
+                addr = Addr(readSymbol("cpuidle_state_table"))
+                for s in readSUArray("struct cpuidle_state", addr, 8):
+                    if str(s.name) == "":
+                        continue
+                    state_defs.append(s)
+            except Exception:
+                pass
+
+        num_states = len(state_defs)
+        if num_states == 0:
+            print("No C-state definitions found")
+            return
+
+        # ------------------------------------------------------------------
+        # 2. Print state definition table
+        # ------------------------------------------------------------------
+        crashcolor.set_color(crashcolor.LIGHTCYAN)
+        print("CPU Idle Driver : %s\n" % driver_name)
+        crashcolor.set_color(crashcolor.RESET)
+
+        hdr = "%-10s %-35s %14s %14s %10s" % (
+            "State", "Description", "Exit Lat.(us)", "Target Res.", "Power(mW)")
+        print(hdr)
+        print("-" * len(hdr))
+        for s in state_defs:
+            name = str(s.name)
+            desc = str(s.desc)[:35]
+            try:
+                exit_lat = int(s.exit_latency)
+            except Exception:
+                exit_lat = -1
+            try:
+                target_res = int(s.target_residency)
+            except Exception:
+                target_res = -1
+            try:
+                power = int(s.power_usage)
+            except Exception:
+                power = -1
+
+            lat_str = _fmt_us(exit_lat) if exit_lat >= 0 else "n/a"
+            res_str = _fmt_us(target_res) if target_res >= 0 else "n/a"
+            pow_str = "%d" % power if power >= 0 else "n/a"
+
+            # Highlight high-latency states
+            if exit_lat > 100:
+                crashcolor.set_color(crashcolor.YELLOW)
+            print("%-10s %-35s %14s %14s %10s" % (name, desc, lat_str, res_str, pow_str))
+            crashcolor.set_color(crashcolor.RESET)
+
+        # ------------------------------------------------------------------
+        # 3. Collect per-CPU usage data
+        # ------------------------------------------------------------------
+        print("")
         cpuidle_devices = percpu.get_cpu_var("cpuidle_devices")
-        cpu_idx = 0
-        for addr in cpuidle_devices:
-            cpuidle_device = readSU("struct cpuidle_device", addr)
-            print("CPU %d:" % (cpu_idx))
-            if options.verbose:
-                print(cpuidle_device)
-            state_idx = 0
-            for state_usage in cpuidle_device.states_usage:
-                if state_usage.disable != 0:
-                    state_name = ""
+        cpu_data = []   # list of (cpu_idx, [(usage, time_us, disabled), ...])
+
+        for dev_addr in cpuidle_devices:
+            try:
+                dev = readSU("struct cpuidle_device", dev_addr)
+                states_usage = []
+                for i, su in enumerate(dev.states_usage):
+                    if i >= num_states:
+                        break
                     try:
-                        state_name = cpu_state_name[state_idx].name
-                    except:
-                        pass
-                    print("\t%10s : %d" % (state_name, state_usage.usage))
-                state_idx = state_idx + 1
-                if state_idx >= idx:
-                    break
-            cpu_idx = cpu_idx + 1
+                        usage = int(su.usage)
+                    except Exception:
+                        usage = 0
+                    try:
+                        time_us = int(su.time)
+                    except Exception:
+                        time_us = -1
+                    try:
+                        disabled = int(su.disable) != 0
+                    except Exception:
+                        disabled = False
+                    states_usage.append((usage, time_us, disabled))
+                cpu_data.append(states_usage)
+            except Exception:
+                cpu_data.append([])
+
+        num_cpus = len(cpu_data)
+        if num_cpus == 0:
+            return
+
+        # ------------------------------------------------------------------
+        # 4. Per-CPU usage table  (state × CPU)
+        # ------------------------------------------------------------------
+        COL_W = max(14, 8 + 1)   # width per CPU column
+        state_col_w = 10
+
+        # Header row
+        header = "%-*s" % (state_col_w, "State")
+        for cpu_idx in range(num_cpus):
+            header += " %*s" % (COL_W, "CPU%d" % cpu_idx)
+        crashcolor.set_color(crashcolor.LIGHTCYAN)
+        print("Per-CPU C-State Usage  (count / time in state):")
+        crashcolor.set_color(crashcolor.RESET)
+        print(header)
+        print("-" * len(header))
+
+        for s_idx, s in enumerate(state_defs):
+            name = str(s.name)
+            row = "%-*s" % (state_col_w, name)
+            for cpu_idx, states_usage in enumerate(cpu_data):
+                if s_idx < len(states_usage):
+                    usage, time_us, disabled = states_usage[s_idx]
+                    if disabled:
+                        cell = "disabled"
+                    elif time_us >= 0:
+                        cell = "%d/%s" % (usage, _fmt_us(time_us))
+                    else:
+                        cell = "%d" % usage
+                else:
+                    cell = "-"
+                row += " %*s" % (COL_W, cell)
+
+            # Highlight row if any CPU has non-trivial usage
+            total_usage = sum(
+                states_usage[s_idx][0]
+                for states_usage in cpu_data
+                if s_idx < len(states_usage)
+            )
+            if total_usage > 0:
+                crashcolor.set_color(crashcolor.LIGHTGREEN)
+            print(row)
+            crashcolor.set_color(crashcolor.RESET)
+
+        print("")
+
     except Exception as e:
-        print("Error : ", e)
-        pass
+        print("Error: %s" % e)
+
 
 def show_cstate(options):
-    if symbol_exists("cpuidle_state_table"):
-        show_cpuidle_state_table(options)
-    else:
-        print("Cannot tell you")
+    show_cpuidle_state_table(options)
 
 
 def get_cpumask_bits(mask_symbol):
