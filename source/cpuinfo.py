@@ -233,35 +233,50 @@ def _fmt_us(us):
 def show_cpuidle_state_table(options):
     try:
         # ------------------------------------------------------------------
-        # 1. Collect state definitions from driver or static table
+        # 1. Collect state definitions — try multiple symbol/access paths
         # ------------------------------------------------------------------
-        state_defs = []   # list of cpuidle_state structs
+        state_defs = []
         driver_name = "unknown"
+        tried = []
 
-        try:
-            cpuidle_driver = readSymbol("cpuidle_curr_driver")
-            if cpuidle_driver and cpuidle_driver != 0:
-                driver_name = str(cpuidle_driver.name)
-                for s in cpuidle_driver.states:
-                    if str(s.name) == "":
-                        continue
+        # Path A: cpuidle_curr_driver (RHEL6-8) or cpuidle_driver (some 5.x)
+        for sym in ("cpuidle_curr_driver", "cpuidle_driver"):
+            tried.append(sym)
+            if not symbol_exists(sym):
+                continue
+            try:
+                drv = readSymbol(sym)
+                if drv == 0 or drv is None:
+                    continue
+                driver_name = str(drv.name)
+                for s in drv.states:
+                    if s.name == "":
+                        break   # states are contiguous; empty name = end
                     state_defs.append(s)
-        except Exception:
-            pass
+                if state_defs:
+                    break
+            except Exception as e:
+                if options.verbose:
+                    print("  [%s failed: %s]" % (sym, e))
 
+        # Path B: static cpuidle_state_table (older kernels)
         if not state_defs:
+            tried.append("cpuidle_state_table")
             try:
                 addr = Addr(readSymbol("cpuidle_state_table"))
                 for s in readSUArray("struct cpuidle_state", addr, 8):
-                    if str(s.name) == "":
-                        continue
+                    if s.name == "":
+                        break
                     state_defs.append(s)
-            except Exception:
-                pass
+            except Exception as e:
+                if options.verbose:
+                    print("  [cpuidle_state_table failed: %s]" % e)
 
         num_states = len(state_defs)
         if num_states == 0:
             print("No C-state definitions found")
+            print("  (searched: %s)" % ", ".join(tried))
+            print("  Use 'cpuinfo -v -s' for details, or check: sym -l | grep cpuidle")
             return
 
         # ------------------------------------------------------------------
