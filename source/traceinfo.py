@@ -567,10 +567,63 @@ def show_bpf_by_addr(options, addr):
     bpf_ksym, aux = find_bpf_prog_by_addr(addr)
 
     if bpf_ksym is None:
-        print("  Not found in BPF ksym tree.")
-        print("  The address may be a BPF trampoline or JIT body registered")
-        print("  under a different ksym type.  Try 'traceinfo -b -d' for the")
-        print("  full BPF program list with address ranges.")
+        # The address might be a struct bpf_prog * (passed to __bpf_prog_enter)
+        # rather than a JIT code address — try reading it as a prog struct.
+        print("  Not found in BPF ksym tree as a JIT code address.")
+        print("  Trying 0x%x as struct bpf_prog * ..." % addr)
+        try:
+            prog = readSU("struct bpf_prog", addr)
+            aux  = prog.aux
+            print("  struct bpf_prog     : 0x%x" % addr)
+            print("  struct bpf_prog_aux : 0x%x" % int(aux))
+            try:
+                prog_id = int(aux.id)
+                print("  BPF prog ID     : %d" % prog_id)
+            except Exception:
+                pass
+            try:
+                prog_type = int(prog.type)
+                type_name = BPF_PROG_TYPES.get(prog_type, "UNKNOWN_%d" % prog_type)
+                print("  Program type    : %s (%d)" % (type_name, prog_type))
+            except Exception:
+                pass
+            try:
+                tag = "".join("%02x" % b for b in prog.tag[:8])
+                print("  Tag             : %s" % tag)
+            except Exception:
+                pass
+            try:
+                raw = aux.name
+                pname = raw.decode("utf-8", errors="replace").rstrip("\x00") \
+                        if isinstance(raw, bytes) else str(raw).rstrip("\x00")
+                if pname:
+                    print("  Program name    : %s" % pname)
+            except Exception:
+                pass
+            try:
+                ksym = aux.ksym
+                jit_start = int(ksym.start)
+                jit_end   = int(ksym.end)
+                if jit_start and jit_end > jit_start:
+                    print("  JIT range       : 0x%x - 0x%x (+0x%x bytes)" %
+                          (jit_start, jit_end, jit_end - jit_start))
+                    print("  (use 'traceinfo -A 0x%x' to look up via JIT addr)" % jit_start)
+            except Exception:
+                pass
+            # Owner process
+            try:
+                prog_to_process = _build_bpf_prog_to_process_map()
+                owner = prog_to_process.get(addr)
+                if owner:
+                    pid, comm = owner
+                    print("  Owner process   : PID %-6d  (%s)" % (pid, comm))
+                else:
+                    print("  Owner process   : (not found — process may have exited)")
+            except Exception:
+                pass
+        except Exception as e:
+            print("  Also not readable as struct bpf_prog *: %s" % e)
+            print("  Try 'traceinfo -b -d' for the full BPF program list.")
         return
 
     # Decode ksym name
