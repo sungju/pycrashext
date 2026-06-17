@@ -302,8 +302,16 @@ def show_rw_sem_waiters(sb):
 
 
 def show_freeze_wait_tasks(options, sb):
-    show_wait_list(options, sb.s_writers.wait, "WAIT TASKS")
-    show_wait_list(options, sb.s_writers.wait_unfrozen, "WAIT_UNFROZEN TASKS")
+    # 'wait' was removed in newer kernels — guard with member_offset
+    try:
+        if member_offset('struct sb_writers', 'wait') >= 0:
+            show_wait_list(options, sb.s_writers.wait, "WAIT TASKS")
+    except Exception:
+        pass
+    try:
+        show_wait_list(options, sb.s_writers.wait_unfrozen, "WAIT_UNFROZEN TASKS")
+    except Exception:
+        pass
     show_rw_sem_waiters(sb)
 
 
