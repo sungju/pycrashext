@@ -231,9 +231,80 @@ def find_freezer_tasks():
     return freezers
 
 
+_RW_SEM_LEVEL_NAMES = {
+    0: "SB_FREEZE_WRITE    ",
+    1: "SB_FREEZE_PAGEFAULT",
+    2: "SB_FREEZE_FS       ",
+}
+
+
+def show_rw_sem_waiters(sb):
+    """
+    Show tasks queued on each sb->s_writers.rw_sem[i].waiters (readers
+    blocked because a freeze writer holds the semaphore) and the current
+    writer task (freeze initiator) held in rw_sem[i].writer.task.
+    Only called when -d is given.
+    """
+    if member_offset('struct super_block', 's_writers') < 0:
+        return
+
+    try:
+        rw_sem = sb.s_writers.rw_sem
+    except Exception:
+        return
+
+    SB_FREEZE_LEVELS = 3
+    printed_header = False
+
+    for i in range(SB_FREEZE_LEVELS):
+        level_name = _RW_SEM_LEVEL_NAMES.get(i, "level %d" % i)
+        try:
+            sem = rw_sem[i]
+        except Exception:
+            continue
+
+        # Writer task waiting to complete the freeze at this level
+        try:
+            writer_task_ptr = sem.writer.task
+            if writer_task_ptr and int(writer_task_ptr) != 0:
+                writer_task = readSU("struct task_struct", int(writer_task_ptr))
+                if not printed_header:
+                    print("\t--- rw_sem waiters ---")
+                    printed_header = True
+                print("\t  [%s] writer (freeze initiator): %s (%d)" % (
+                    level_name, writer_task.comm, writer_task.pid))
+        except Exception:
+            pass
+
+        # Readers blocked because the semaphore is held for freezing
+        try:
+            waiters = sem.waiters
+            found_any = False
+            for wq in readSUListFromHead(waiters.task_list,
+                                         "task_list",
+                                         "struct __wait_queue"):
+                try:
+                    task = readSU("struct task_struct", wq.private)
+                    if not printed_header:
+                        print("\t--- rw_sem waiters ---")
+                        printed_header = True
+                    if not found_any:
+                        print("\t  [%s] readers blocked:" % level_name)
+                        found_any = True
+                    print("\t      %s (%d)" % (task.comm, task.pid))
+                except Exception:
+                    continue
+        except Exception:
+            pass
+
+    if printed_header:
+        print("")
+
+
 def show_freeze_wait_tasks(options, sb):
     show_wait_list(options, sb.s_writers.wait, "WAIT TASKS")
     show_wait_list(options, sb.s_writers.wait_unfrozen, "WAIT_UNFROZEN TASKS")
+    show_rw_sem_waiters(sb)
 
 
 def show_wait_list(options, wait, wait_name):
