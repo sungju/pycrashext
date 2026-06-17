@@ -154,18 +154,25 @@ def get_mount_options(mnt_flags):
 
     return result
 
+_FREEZE_INFO = {
+    0:  ("SB_UNFROZEN",        "normal — filesystem is fully operational"),
+    1:  ("SB_FREEZE_WRITE",    "new writes blocked; in-flight writes still running"),
+    2:  ("SB_FREEZE_PAGEFAULT","page faults to this FS also blocked"),
+    3:  ("SB_FREEZE_FS",       "FS-level operations blocked; journal commits draining"),
+    4:  ("SB_FREEZE_COMPLETE", "completely frozen — snapshot/quiesce point reached"),
+    -1: ("UNRECOGNIZED STATE", ""),
+}
+
 def get_frozen_str(frozen_type):
-    try:
-        return {
-            0: "SB_UNFROZEN",
-            1: "SB_FREEZE_WRITE",
-            2: "SB_FREEZE_PAGEFAULT",
-            3: "SB_FREEZE_FS",
-            4: "SB_FREEZE_COMPLETE",
-            -1: "UNRECOGNIZED STATE",
-        }[frozen_type]
-    except:
-        return "??"
+    return _FREEZE_INFO.get(frozen_type, ("??", ""))[0]
+
+def get_frozen_desc(frozen_type):
+    return _FREEZE_INFO.get(frozen_type, ("??", ""))[1]
+
+
+# Tasks in D-state with these frames likely caused or are involved in the freeze
+_FREEZER_FRAMES = ("freeze_super", "thaw_super", "sync_filesystem",
+                   "freeze_bdev", "thaw_bdev")
 
 
 MINORBITS = 20
@@ -180,6 +187,48 @@ def get_dev_no(super_block):
 
 def list_empty(list):
     return list.next.next == list.next
+
+
+def _count_wait_list(wait):
+    """Return (count, has_vmtoolsd, [(comm, pid), ...]) for a wait_queue_head."""
+    tasks = []
+    has_vmtoolsd = False
+    try:
+        for wq in readSUListFromHead(wait.task_list,
+                                     "task_list",
+                                     "struct __wait_queue"):
+            try:
+                task = readSU("struct task_struct", wq.private)
+                comm = str(task.comm)
+                pid  = int(task.pid)
+                tasks.append((comm, pid))
+                if comm == "vmtoolsd":
+                    has_vmtoolsd = True
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return len(tasks), has_vmtoolsd, tasks
+
+
+def find_freezer_tasks():
+    """
+    Heuristic: walk all tasks and return those whose kernel stack
+    contains a freeze-related frame (freeze_super, thaw_super, etc.).
+    """
+    freezers = []
+    try:
+        tt = Tasks.TaskTable()
+        for t in tt.allThreads():
+            try:
+                bt = exec_crash_command("bt %d" % t.pid)
+                if any(f in bt for f in _FREEZER_FRAMES):
+                    freezers.append((str(t.comm), int(t.pid)))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return freezers
 
 
 def show_freeze_wait_tasks(options, sb):
@@ -203,47 +252,118 @@ def show_wait_list(options, wait, wait_name):
 
 def all_filesystem_info(options):
     get_system_info()
-    fs_state_list = {} 
+    fs_state_list = {}
+    frozen_entries = []   # collect for summary
+
     super_blocks = sym2addr("super_blocks")
     for sb in readSUListFromHead(super_blocks,
-                                         "s_list",
-                                         "struct super_block"):
+                                 "s_list",
+                                 "struct super_block"):
         frozen = -1
-        if (member_offset('struct super_block', 's_writers') >= 0):
+        if member_offset('struct super_block', 's_writers') >= 0:
             frozen = sb.s_writers.frozen
-        elif (member_offset('struct super_block', 's_frozen') >= 0):
+        elif member_offset('struct super_block', 's_frozen') >= 0:
             frozen = sb.s_frozen
 
-        frozen_str = get_frozen_str(frozen)
-        fs_state_list[frozen_str] = fs_state_list[frozen_str] + 1 if frozen_str in fs_state_list else 1
+        frozen_str  = get_frozen_str(frozen)
+        frozen_desc = get_frozen_desc(frozen)
+        fs_state_list[frozen_str] = fs_state_list.get(frozen_str, 0) + 1
 
         vfsmnt = get_vfsmount_from_sb(sb)
         mnt_flags = 0
-        if (vfsmnt != None):
+        if vfsmnt is not None:
             mnt_flags = vfsmnt.mnt_flags
 
+        dev_major, dev_minor = get_dev_no(sb)
+        mount_path = dentry_to_filename(sb.s_root)
 
+        # Count waiting tasks and detect vmtoolsd involvement
+        wait_count = vmtoolsd_waiting = 0
+        wait_tasks = []
+        if frozen != 0 and member_offset('struct super_block', 's_writers') >= 0:
+            try:
+                wc, hv, wt = _count_wait_list(sb.s_writers.wait_unfrozen)
+                wait_count      += wc
+                vmtoolsd_waiting = vmtoolsd_waiting or hv
+                wait_tasks      += wt
+                wc2, hv2, wt2 = _count_wait_list(sb.s_writers.wait)
+                wait_count      += wc2
+                vmtoolsd_waiting = vmtoolsd_waiting or hv2
+                wait_tasks      += wt2
+            except Exception:
+                pass
+
+        # Colour by freeze level
         if frozen_str == "SB_FREEZE_COMPLETE":
             crashcolor.set_color(crashcolor.LIGHTRED)
-        elif frozen_str == "SB_FREEZE_WRITE":
+        elif frozen_str in ("SB_FREEZE_WRITE", "SB_FREEZE_PAGEFAULT",
+                            "SB_FREEZE_FS"):
             crashcolor.set_color(crashcolor.LIGHTCYAN)
 
-        dev_major, dev_minor = get_dev_no(sb)
+        wait_info = ""
+        if wait_count > 0:
+            wait_info = "  [%d task(s) blocked" % wait_count
+            if vmtoolsd_waiting:
+                wait_info += " incl. vmtoolsd ⚠"
+            wait_info += "]"
 
-        print ("SB: 0x%14x, frozen=%s, %s (%s) [%s], (%s) on %d:%d" %
-               (sb, frozen_str,
-               dentry_to_filename(sb.s_root), sb.s_id,
-                sb.s_type.name,
-                get_mount_options(mnt_flags),
-               dev_major, dev_minor))
+        print("SB: 0x%14x  frozen=%-22s  %s (%s) [%s] (%s) on %d:%d%s" % (
+              sb, frozen_str,
+              mount_path, sb.s_id, sb.s_type.name,
+              get_mount_options(mnt_flags),
+              dev_major, dev_minor, wait_info))
+
+        if frozen_desc and frozen != 0:
+            print("    %s" % frozen_desc)
+
+        if frozen != 0 and vmtoolsd_waiting:
+            crashcolor.set_color(crashcolor.LIGHTRED)
+            print("    *** vmtoolsd is blocked on this frozen FS — possible "
+                  "snapshot quiesce deadlock (see solutions/7089292) ***")
+            crashcolor.set_color(crashcolor.LIGHTCYAN)
 
         if options.show_details:
             show_freeze_wait_tasks(options, sb)
+        elif wait_tasks:
+            for comm, pid in wait_tasks:
+                print("      waiting: %s (%d)" % (comm, pid))
+
         crashcolor.set_color(crashcolor.RESET)
 
+        if frozen != 0:
+            frozen_entries.append((frozen_str, mount_path, sb.s_id,
+                                   wait_count, vmtoolsd_waiting))
+
+    # Summary
     print("")
-    for frozen_str in fs_state_list:
-        print("%25s = %d" % (frozen_str, fs_state_list[frozen_str]))
+    print("=" * 60)
+    print("Freeze state summary:")
+    for frozen_str, count in sorted(fs_state_list.items(),
+                                    key=lambda x: x[1], reverse=True):
+        if frozen_str != "SB_UNFROZEN":
+            crashcolor.set_color(crashcolor.LIGHTRED)
+        print("  %25s : %d" % (frozen_str, count))
+        crashcolor.set_color(crashcolor.RESET)
+
+    if frozen_entries:
+        print("")
+        print("Frozen filesystems:")
+        for fstate, mpath, sid, wcount, hv in frozen_entries:
+            note = " [vmtoolsd blocked]" if hv else ""
+            print("  %-22s  %s (%s)  %d waiter(s)%s" % (
+                  fstate, mpath, sid, wcount, note))
+
+        # Heuristic: show processes that may have triggered the freeze
+        print("")
+        print("Searching for freeze initiator (tasks with freeze frames) ...")
+        freezers = find_freezer_tasks()
+        if freezers:
+            crashcolor.set_color(crashcolor.YELLOW)
+            for comm, pid in freezers:
+                print("  Possible freezer: %s (%d)" % (comm, pid))
+            crashcolor.set_color(crashcolor.RESET)
+        else:
+            print("  (none found — freezer may have already exited)")
 
 
 def find_pid_from_file(options):
