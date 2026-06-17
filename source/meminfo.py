@@ -1698,6 +1698,7 @@ def collect_shared_mappings_global(task_list):
 
 def show_tasks_memusage(options):
     mem_usage_dict = {}
+    pid_count_dict = {}   # tracks how many PIDs are grouped per name
     account_shared = getattr(options, 'account_shared', False)
 
     if options.memusage_pss:
@@ -1778,6 +1779,8 @@ def show_tasks_memusage(options):
 
         if rss != 0:
             mem_usage_dict[pname] = rss
+        if not options.all:
+            pid_count_dict[pname] = pid_count_dict.get(pname, 0) + 1
 
     # Second pass: analyze shared memory if requested
     task_private_dict = {}  # Per-task private memory
@@ -1911,6 +1914,11 @@ def show_tasks_memusage(options):
 
         pname = sorted_usage[i][0]
         rss_kb = sorted_usage[i][1]
+        # Append process count when grouping by name (not -a mode)
+        if not options.all:
+            cnt = pid_count_dict.get(pname, 1)
+            if cnt > 1:
+                pname = "%s (%d×)" % (pname, cnt)
 
         if options.graph:
             # Truncate process name to fit column width
