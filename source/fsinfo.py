@@ -352,6 +352,69 @@ def show_wait_list(options, wait, wait_name):
         print()
 
 
+_WRITE_PATH_FRAMES = (
+    'vfs_write', '__sb_start_write', 'generic_file_write_iter',
+    'do_sync_write', 'generic_perform_write', 'iomap_file_buffered_write',
+    'ext4_file_write_iter', 'xfs_file_write_iter', 'btrfs_file_write_iter',
+    'nfs_file_write', 'aio_write', 'io_write',
+)
+
+
+def _find_blocking_writers(sb, initiator_pid):
+    """
+    Find tasks that may hold the percpu_rw_semaphore read lock on this
+    superblock, preventing freeze_super from draining.
+
+    Strategy: scan all threads for those that
+      (a) have at least one file open on this superblock, AND
+      (b) are in D state OR have a write-path frame in their bt.
+    """
+    sb_addr = int(sb)
+    candidates = []
+
+    try:
+        tt = Tasks.TaskTable()
+        for t in tt.allThreads():
+            if int(t.pid) == initiator_pid:
+                continue
+            try:
+                # Quick check: task must have files on this superblock
+                has_sb_file = False
+                try:
+                    fdt = t.files.fdt
+                    for i in range(min(int(fdt.max_fds), 256)):
+                        try:
+                            fp = int(fdt.fd[i])
+                            if fp == 0:
+                                continue
+                            f = readSU("struct file", fp)
+                            if int(f.f_inode.i_sb) == sb_addr:
+                                has_sb_file = True
+                                break
+                        except Exception:
+                            continue
+                except Exception:
+                    pass
+
+                if not has_sb_file:
+                    continue
+
+                bt = exec_crash_command("bt %d" % t.pid)
+                ps_line = exec_crash_command("ps -m %d" % t.pid)
+                is_dstate    = "[UN]" in ps_line
+                has_write_frame = any(f in bt for f in _WRITE_PATH_FRAMES)
+
+                if is_dstate or has_write_frame:
+                    candidates.append((str(t.comm), int(t.pid),
+                                       bt, is_dstate, has_write_frame))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    return candidates
+
+
 def _collect_rw_sem_info(sb):
     """
     Return a dict with freeze initiator and blocked readers per level.
@@ -449,6 +512,7 @@ def detect_frozen_fs_deadlocks(sb_list):
                         'fs': "%s (%s)" % (mount_path, fs_id),
                         'frozen': _FREEZE_INFO.get(frozen, ("??",""))[0],
                         'pid': pid, 'comm': comm,
+                        'sb': sb,
                         'msg': (
                             "%s (PID %d) is the freeze initiator and is itself "
                             "in D state — the freeze cannot complete because a "
@@ -475,6 +539,41 @@ def detect_frozen_fs_deadlocks(sb_list):
         print("\n%s  %s  (state: %s)" % (tag, issue['fs'], issue['frozen']))
         crashcolor.set_color(crashcolor.RESET)
         print("  " + issue['msg'])
+
+        if issue['type'] == 'STALLED_FREEZE':
+            pid = issue['pid']
+            comm = issue['comm']
+
+            # Show the freeze initiator's backtrace
+            print("\n  Backtrace of freeze initiator %s (%d):" % (comm, pid))
+            try:
+                bt = exec_crash_command("bt %d" % pid)
+                for line in bt.splitlines():
+                    print("    %s" % line)
+            except Exception as e:
+                print("    (bt failed: %s)" % e)
+
+            # Find tasks that may be blocking the freeze
+            print("\n  Searching for blocking writers on this FS "
+                  "(tasks with open files + write-path frames) ...")
+            try:
+                candidates = _find_blocking_writers(issue['sb'], pid)
+                if candidates:
+                    for c_comm, c_pid, c_bt, c_dstate, c_write in candidates:
+                        state_tag = "[D-state]" if c_dstate else "[write-path]"
+                        crashcolor.set_color(crashcolor.LIGHTRED if c_dstate
+                                             else crashcolor.YELLOW)
+                        print("\n  %s  %s (PID %d)" % (state_tag, c_comm, c_pid))
+                        crashcolor.set_color(crashcolor.RESET)
+                        for line in c_bt.splitlines()[:20]:
+                            print("      %s" % line)
+                        if len(c_bt.splitlines()) > 20:
+                            print("      ...")
+                else:
+                    print("  (no obvious blocking writers found — they may have "
+                          "already released the lock or run on another CPU)")
+            except Exception as e:
+                print("  (scan failed: %s)" % e)
 
     if any(i['type'] == 'SELF_DEADLOCK' for i in issues):
         print("\n  Reference: https://access.redhat.com/solutions/7089292")
