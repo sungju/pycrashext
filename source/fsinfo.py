@@ -352,10 +352,142 @@ def show_wait_list(options, wait, wait_name):
         print()
 
 
+def _collect_rw_sem_info(sb):
+    """
+    Return a dict with freeze initiator and blocked readers per level.
+    { level_idx: {'initiator': (comm, pid) | None,
+                  'blocked':   [(comm, pid), ...] } }
+    """
+    result = {}
+    SB_FREEZE_LEVELS = 3
+    try:
+        rw_sem = sb.s_writers.rw_sem
+    except Exception:
+        return result
+
+    for i in range(SB_FREEZE_LEVELS):
+        entry = {'initiator': None, 'blocked': []}
+        try:
+            sem = rw_sem[i]
+            try:
+                tp = sem.writer.task
+                if tp and int(tp) != 0:
+                    t = readSU("struct task_struct", int(tp))
+                    entry['initiator'] = (str(t.comm), int(t.pid))
+            except Exception:
+                pass
+            try:
+                head_list = _wqhead_list(sem.waiters)
+                for task in _wq_entries(head_list):
+                    entry['blocked'].append((str(task.comm), int(task.pid)))
+            except Exception:
+                pass
+        except Exception:
+            pass
+        result[i] = entry
+    return result
+
+
+def detect_frozen_fs_deadlocks(sb_list):
+    """
+    Analyse frozen super_blocks for deadlock patterns and print a report.
+
+    Pattern 1 — Self-deadlock:
+      The freeze initiator (rw_sem[i].writer.task) also appears in the
+      blocked-readers list of the same or a lower freeze level, meaning
+      the process froze the FS and then tried to write to it.
+
+    Pattern 2 — Stalled freeze:
+      The freeze initiator is in UN (D) state but the freeze level is
+      below SB_FREEZE_COMPLETE, meaning it is waiting for in-flight
+      writers to drain — but one of those writers may be stuck too.
+    """
+    issues = []
+
+    for frozen, mount_path, fs_id, sb in sb_list:
+        if frozen <= 0:
+            continue
+
+        rw_info = _collect_rw_sem_info(sb)
+        if not rw_info:
+            continue
+
+        # Collect all initiator PIDs and all blocked PIDs across levels
+        initiators = {}   # pid -> (comm, level_idx)
+        blocked_pids = set()
+
+        for lvl, data in rw_info.items():
+            if data['initiator']:
+                comm, pid = data['initiator']
+                initiators[pid] = (comm, lvl)
+            for comm, pid in data['blocked']:
+                blocked_pids.add((pid, comm))
+
+        # Pattern 1: initiator is also in the blocked set
+        for pid, (comm, lvl) in initiators.items():
+            if pid in {p for p, _ in blocked_pids}:
+                issues.append({
+                    'type': 'SELF_DEADLOCK',
+                    'fs': "%s (%s)" % (mount_path, fs_id),
+                    'frozen': _FREEZE_INFO.get(frozen, ("??",""))[0],
+                    'pid': pid, 'comm': comm,
+                    'msg': (
+                        "%s (PID %d) froze the filesystem then blocked trying "
+                        "to write to it — classic snapshot quiesce self-deadlock."
+                        % (comm, pid)),
+                })
+
+        # Pattern 2: initiator is in UN state (stalled freeze)
+        for pid, (comm, lvl) in initiators.items():
+            if pid in {p for p, _ in blocked_pids}:
+                continue   # already reported as self-deadlock
+            try:
+                bt_out = exec_crash_command("ps -m %d" % pid)
+                if "[UN]" in bt_out:
+                    issues.append({
+                        'type': 'STALLED_FREEZE',
+                        'fs': "%s (%s)" % (mount_path, fs_id),
+                        'frozen': _FREEZE_INFO.get(frozen, ("??",""))[0],
+                        'pid': pid, 'comm': comm,
+                        'msg': (
+                            "%s (PID %d) is the freeze initiator and is itself "
+                            "in D state — the freeze cannot complete because a "
+                            "required in-flight writer is stuck."
+                            % (comm, pid)),
+                    })
+            except Exception:
+                pass
+
+    if not issues:
+        print("  No frozen-filesystem deadlock detected.")
+        return
+
+    crashcolor.set_color(crashcolor.LIGHTRED)
+    print("=" * 60)
+    print("FROZEN FILESYSTEM DEADLOCK ANALYSIS")
+    print("=" * 60)
+    crashcolor.set_color(crashcolor.RESET)
+
+    for issue in issues:
+        tag = "[%s]" % issue['type']
+        crashcolor.set_color(crashcolor.LIGHTRED if issue['type'] == 'SELF_DEADLOCK'
+                             else crashcolor.YELLOW)
+        print("\n%s  %s  (state: %s)" % (tag, issue['fs'], issue['frozen']))
+        crashcolor.set_color(crashcolor.RESET)
+        print("  " + issue['msg'])
+
+    if any(i['type'] == 'SELF_DEADLOCK' for i in issues):
+        print("\n  Reference: https://access.redhat.com/solutions/7089292")
+        print("  Workaround: set ignoreFrozenFileSystems=true and "
+              "vmsvc.level=none in /etc/vmware-tools/tools.conf")
+    print("")
+
+
 def all_filesystem_info(options):
     get_system_info()
     fs_state_list = {}
     frozen_entries = []   # collect for summary
+    frozen_sb_list = []   # (frozen_level, mount_path, fs_id, sb) for deadlock detection
 
     super_blocks = sym2addr("super_blocks")
     for sb in readSUListFromHead(super_blocks,
@@ -435,6 +567,7 @@ def all_filesystem_info(options):
         if frozen != 0:
             frozen_entries.append((frozen_str, mount_path, sb.s_id,
                                    wait_count, vmtoolsd_waiting))
+            frozen_sb_list.append((frozen, mount_path, str(sb.s_id), sb))
 
     # Summary
     print("")
@@ -466,6 +599,11 @@ def all_filesystem_info(options):
             crashcolor.set_color(crashcolor.RESET)
         else:
             print("  (none found — freezer may have already exited)")
+
+    # Always run deadlock detection when frozen filesystems exist
+    if frozen_sb_list:
+        print("")
+        detect_frozen_fs_deadlocks(frozen_sb_list)
 
 
 def find_pid_from_file(options):
