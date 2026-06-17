@@ -194,18 +194,13 @@ def _count_wait_list(wait):
     tasks = []
     has_vmtoolsd = False
     try:
-        for wq in readSUListFromHead(wait.task_list,
-                                     "task_list",
-                                     "struct __wait_queue"):
-            try:
-                task = readSU("struct task_struct", wq.private)
-                comm = str(task.comm)
-                pid  = int(task.pid)
-                tasks.append((comm, pid))
-                if comm == "vmtoolsd":
-                    has_vmtoolsd = True
-            except Exception:
-                continue
+        head_list = _wqhead_list(wait)
+        for task in _wq_entries(head_list):
+            comm = str(task.comm)
+            pid  = int(task.pid)
+            tasks.append((comm, pid))
+            if comm == "vmtoolsd":
+                has_vmtoolsd = True
     except Exception:
         pass
     return len(tasks), has_vmtoolsd, tasks
@@ -279,21 +274,16 @@ def show_rw_sem_waiters(sb):
         # Readers blocked because the semaphore is held for freezing
         try:
             waiters = sem.waiters
+            head_list = _wqhead_list(waiters)
             found_any = False
-            for wq in readSUListFromHead(waiters.task_list,
-                                         "task_list",
-                                         "struct __wait_queue"):
-                try:
-                    task = readSU("struct task_struct", wq.private)
-                    if not printed_header:
-                        print("\t--- rw_sem waiters ---")
-                        printed_header = True
-                    if not found_any:
-                        print("\t  [%s] readers blocked:" % level_name)
-                        found_any = True
-                    print("\t      %s (%d)" % (task.comm, task.pid))
-                except Exception:
-                    continue
+            for task in _wq_entries(head_list):
+                if not printed_header:
+                    print("\t--- rw_sem waiters ---")
+                    printed_header = True
+                if not found_any:
+                    print("\t  [%s] readers blocked:" % level_name)
+                    found_any = True
+                print("\t      %s (%d)" % (task.comm, task.pid))
         except Exception:
             pass
 
@@ -315,17 +305,50 @@ def show_freeze_wait_tasks(options, sb):
     show_rw_sem_waiters(sb)
 
 
-def show_wait_list(options, wait, wait_name):
-    if not list_empty(wait.task_list):
-        print("\t%s" % (wait_name))
+def _wqhead_list(wait):
+    """
+    Return the list_head of a wait_queue_head_t regardless of kernel version.
+    Older kernels use .task_list; newer kernels use .head.
+    """
+    try:
+        return wait.head        # 4.13+
+    except Exception:
+        return wait.task_list   # pre-4.13
 
-    for wait_queue in readSUListFromHead(wait.task_list,
-                                         "task_list",
-                                         "struct __wait_queue"):
-        task = readSU("struct task_struct", wait_queue.private)
+
+def _wq_entries(wait_head_list):
+    """
+    Iterate wait_queue entries regardless of kernel version.
+    Older: struct __wait_queue  / .task_list member
+    Newer: struct wait_queue_entry / .entry member
+    Yields task_struct objects.
+    """
+    # Try newer kernel struct first
+    for struct_name, member_name in (
+        ("struct wait_queue_entry", "entry"),
+        ("struct __wait_queue",     "task_list"),
+    ):
+        try:
+            for wq in readSUListFromHead(wait_head_list, member_name, struct_name):
+                try:
+                    task = readSU("struct task_struct", wq.private)
+                    yield task
+                except Exception:
+                    continue
+            return   # successfully iterated — done
+        except Exception:
+            continue
+
+
+def show_wait_list(options, wait, wait_name):
+    head_list = _wqhead_list(wait)
+    if not list_empty(head_list):
+        print("\t%s" % wait_name)
+
+    for task in _wq_entries(head_list):
         print("\t%s (%d)" % (task.comm, task.pid))
 
-    if not list_empty(wait.task_list):
+    if not list_empty(head_list):
         print()
 
 
