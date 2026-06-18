@@ -451,7 +451,7 @@ def _collect_rw_sem_info(sb):
     return result
 
 
-def detect_frozen_fs_deadlocks(sb_list):
+def detect_frozen_fs_deadlocks(sb_list, options=None):
     """
     Analyse frozen super_blocks for deadlock patterns and print a report.
 
@@ -540,7 +540,7 @@ def detect_frozen_fs_deadlocks(sb_list):
         crashcolor.set_color(crashcolor.RESET)
         print("  " + issue['msg'])
 
-        if issue['type'] == 'STALLED_FREEZE':
+        if issue['type'] == 'STALLED_FREEZE' and options and options.show_details:
             pid = issue['pid']
             comm = issue['comm']
 
@@ -702,7 +702,7 @@ def all_filesystem_info(options):
     # Always run deadlock detection when frozen filesystems exist
     if frozen_sb_list:
         print("")
-        detect_frozen_fs_deadlocks(frozen_sb_list)
+        detect_frozen_fs_deadlocks(frozen_sb_list, options)
 
 
 def find_pid_from_file(options):
