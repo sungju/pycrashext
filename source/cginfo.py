@@ -1290,6 +1290,167 @@ def show_mem_cgroup_idr(options):
           (total_count, idr_max))
 
 
+def _quick_count_cgroups(cgrp, _depth=0):
+    """Recursively count cgroups under cgrp without printing."""
+    if _depth > 512:
+        return 0
+    count = 1
+    try:
+        for child in readSUListFromHead(cgrp.children, 'sibling',
+                                        'struct cgroup', maxel=100000):
+            count += _quick_count_cgroups(child, _depth + 1)
+    except Exception:
+        pass
+    return count
+
+
+def _subsys_names_from_mask(mask):
+    """Return sorted list of subsystem names set in mask."""
+    names = []
+    for sid, sname in sorted(cgroup_subsys_id_list.items()):
+        if mask & (1 << sid):
+            # Strip trailing _cgrp_id suffix added by the enum
+            clean = sname.replace('_cgrp_id', '')
+            names.append(clean)
+    return names
+
+
+def show_cgroup_overview():
+    """
+    Print a concise summary of the cgroup configuration.
+    Detects v1, v2, and hybrid setups.
+    """
+    SEP = "=" * 66
+
+    print(SEP)
+    print("Cgroup Overview")
+    print(SEP)
+
+    has_v2        = symbol_exists("cgrp_dfl_root")
+    has_rootnode  = symbol_exists("rootnode")        # very old kernels (pre-3.x)
+    has_v1_roots  = symbol_exists("cgroup_roots")
+
+    v1_hierarchies = []   # [(hid, subsys_names, cgroup_count, name)]
+    v2_controllers = []
+    v2_count       = 0
+
+    # ------------------------------------------------------------------ v2
+    if has_v2:
+        try:
+            dfl_root = readSymbol("cgrp_dfl_root")
+            try:
+                ctrl_mask      = int(dfl_root.cgrp.subtree_control)
+                v2_controllers = _subsys_names_from_mask(ctrl_mask)
+            except Exception:
+                pass
+            try:
+                v2_count = _quick_count_cgroups(dfl_root.cgrp)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ v1
+    if has_v1_roots:
+        try:
+            roots_head = readSymbol("cgroup_roots")
+            for root in readSUListFromHead(roots_head, 'root_list',
+                                           'struct cgroup_root', maxel=200):
+                hid = 0
+                try:
+                    hid = int(root.hierarchy_id)
+                except Exception:
+                    pass
+                if hid == 0 and has_v2:
+                    continue          # skip the default unified root
+                name = ""
+                try:
+                    name = str(root.name).rstrip('\x00')
+                except Exception:
+                    pass
+                subsys_names = []
+                try:
+                    subsys_names = _subsys_names_from_mask(int(root.subsys_mask))
+                except Exception:
+                    pass
+                cnt = 0
+                try:
+                    cnt = _quick_count_cgroups(root.cgrp)
+                except Exception:
+                    pass
+                v1_hierarchies.append((hid, subsys_names, cnt, name))
+        except Exception:
+            pass
+
+    # ------------------------------------------------------------------ version label
+    if has_v2 and v1_hierarchies:
+        version = "Hybrid  (cgroup v1 + v2 unified hierarchy)"
+    elif has_v2:
+        version = "cgroup v2  (unified hierarchy only)"
+    elif has_rootnode:
+        version = "cgroup v1  (legacy single-root, pre-3.x kernel)"
+    elif v1_hierarchies:
+        version = "cgroup v1  (multiple named hierarchies)"
+    else:
+        version = "Unknown"
+
+    crashcolor.set_color(crashcolor.LIGHTCYAN)
+    print("Version  : %s" % version)
+    crashcolor.set_color(crashcolor.RESET)
+    print("")
+
+    # ------------------------------------------------------------------ v2 section
+    if has_v2:
+        crashcolor.set_color(crashcolor.LIGHTBLUE)
+        print("[cgroup v2 — Unified Hierarchy]")
+        crashcolor.set_color(crashcolor.RESET)
+        print("  Cgroups     : %d" % v2_count)
+        if v2_controllers:
+            print("  Controllers : %s" % "  ".join(v2_controllers))
+        else:
+            print("  Controllers : (none enabled in subtree_control)")
+        print("")
+
+    # ------------------------------------------------------------------ v1 section
+    if v1_hierarchies:
+        crashcolor.set_color(crashcolor.LIGHTBLUE)
+        print("[cgroup v1 — Hierarchies]")
+        crashcolor.set_color(crashcolor.RESET)
+        print("  %-4s  %-35s %8s  %s" % ("ID", "Subsystems", "Cgroups", "Name"))
+        print("  " + "-" * 62)
+        for hid, subsys_names, cnt, name in sorted(v1_hierarchies, key=lambda x: x[0]):
+            ss_str = ", ".join(subsys_names) if subsys_names else "(none)"
+            print("  %-4d  %-35s %8d  %s" % (hid, ss_str, cnt, name))
+        print("")
+
+    # ------------------------------------------------------------------ legacy rootnode
+    if has_rootnode and not has_v2 and not v1_hierarchies:
+        crashcolor.set_color(crashcolor.LIGHTBLUE)
+        print("[cgroup v1 — Legacy Root]")
+        crashcolor.set_color(crashcolor.RESET)
+        try:
+            rootnode = readSymbol("rootnode")
+            ss_names = []
+            for ss in readSUListFromHead(rootnode.subsys_list, 'sibling',
+                                         'struct cgroup_subsys', maxel=100):
+                ss_names.append(str(ss.name))
+            print("  Subsystems : %s" % ", ".join(ss_names))
+        except Exception as e:
+            print("  (error reading rootnode: %s)" % e)
+        print("")
+
+    # ------------------------------------------------------------------ hints
+    print("-" * 66)
+    print("  cginfo -t          full cgroup tree")
+    print("  cginfo -t -d       tree with per-cgroup details")
+    print("  cginfo -t -l       tree with task lists")
+    if v1_hierarchies:
+        print("  cginfo -s <name>   filter by subsystem  (e.g. -s memory)")
+    if has_v2:
+        print("  cginfo -c <addr>   inspect a specific cgroup by address")
+    print("")
+
+
 def cgroupinfo():
     global empty_count
     global cgroup_count
@@ -1358,8 +1519,14 @@ def cgroupinfo():
         show_task_group_tree(o)
         sys.exit(0)
 
-    # default is showing tree
-    show_cgroup_tree(o)
+    if (o.cgroup_tree or o.cgroup_addr != "" or o.show_detail or
+            o.task_list or o.filter_cgroup_name != "" or
+            o.filter_subsys != ""):
+        # Explicit detail request — show the full tree
+        show_cgroup_tree(o)
+    else:
+        # Default: compact overview
+        show_cgroup_overview()
 
 
 if ( __name__ == '__main__'):
