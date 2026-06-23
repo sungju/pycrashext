@@ -154,24 +154,27 @@ def cgroup_task_list(cgroup, idx):
     else:
         return 0
 
-    for cg_cgroup_link in readSUListFromHead(list_start,
-                                             entry_name,
-                                             struct_name,
-                                             maxel=1000000):
-        if struct_name == "struct cg_cgroup_link":
-            task_list = cg_cgroup_link.cg.tasks
-        elif struct_name == "struct cgrp_cset_link":
-            task_list = cg_cgroup_link.cgrp.tasks
-        else:
-            break
+    indent = "\t" * idx
+    for link in readSUListFromHead(list_start, entry_name, struct_name,
+                                   maxel=1000000):
+        try:
+            if struct_name == "struct cg_cgroup_link":
+                task_head = link.cg.tasks
+            elif struct_name == "struct cgrp_cset_link":
+                # cset.tasks links task_struct.cg_list entries
+                task_head = link.cset.tasks
+            else:
+                break
 
-        for task in readSUListFromHead(cg_cgroup_link.cg.tasks,
-                                       "cg_list",
-                                       "struct task_struct",
-                                       maxel=1000000):
-            for i in range(0, idx):
-                print("\t", end="")
-            print("\t0x%x %s(%d)" % (task, task.comm, task.pid))
+            for task in readSUListFromHead(task_head, "cg_list",
+                                           "struct task_struct",
+                                           maxel=1000000):
+                try:
+                    print("%s0x%x  %s (%d)" % (indent, task, task.comm, task.pid))
+                except Exception:
+                    continue
+        except Exception:
+            continue
 
 
 def dentry_to_filename (dentry) :
