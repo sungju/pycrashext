@@ -991,14 +991,18 @@ def _compact_tree_node(options, cgrp, idx, full_path,
                 if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
                 return "%.1f KiB" % (b/1024)
             lim_str = _sz(limit) if limit > 0 else "unlimited"
+            crashcolor.set_color(crashcolor.CYAN)
             print("%smemory: %s / %s" % (mem_pfx, _sz(usage), lim_str))
+            crashcolor.set_color(crashcolor.RESET)
 
     crashcolor.set_color(crashcolor.RESET)
 
     if options.task_list:
         for task in _walk_cgroup_tasks(cgrp):
             try:
+                crashcolor.set_color(crashcolor.GREEN)
                 print("%s0x%x  %s (%d)" % (task_pfx, task, task.comm, task.pid))
+                crashcolor.set_color(crashcolor.RESET)
             except Exception:
                 continue
 
