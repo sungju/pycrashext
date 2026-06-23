@@ -913,6 +913,100 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
         pass
 
 
+def show_subsystem_info(options):
+    """
+    Show an overview of a specific cgroup subsystem.
+    Without -d: compact tree (name + task count per cgroup).
+    With    -d: tree with resource usage/limits per cgroup.
+    """
+    subsys_filter = options.filter_subsys.lower()
+
+    print("=" * 66)
+    print("Cgroup Subsystem: %s" % subsys_filter)
+    print("=" * 66)
+
+    found = False
+
+    # ---- cgroup v2: check unified hierarchy controllers ----------------
+    if symbol_exists("cgrp_dfl_root"):
+        try:
+            dfl = readSymbol("cgrp_dfl_root")
+            v2_ctrl = _subsys_names_from_mask(int(dfl.cgrp.subtree_control))
+            matching = [c for c in v2_ctrl if subsys_filter in c.lower()]
+            if matching or _quick_count_cgroups(dfl.cgrp) > 1:
+                found = True
+                crashcolor.set_color(crashcolor.LIGHTBLUE)
+                print("\n[cgroup v2 — unified hierarchy]")
+                crashcolor.set_color(crashcolor.RESET)
+                if matching:
+                    print("  Active controllers : %s" % "  ".join(matching))
+                print("  Total cgroups      : %d" % _quick_count_cgroups(dfl.cgrp))
+                print("")
+                _compact_tree_node(options, dfl.cgrp, 0, "")
+        except Exception as e:
+            pass
+
+    # ---- cgroup v1: find hierarchy whose subsys_mask includes filter ---
+    if symbol_exists("cgroup_roots"):
+        try:
+            roots_head = readSymbol("cgroup_roots")
+            for root in readSUListFromHead(roots_head, 'root_list',
+                                           'struct cgroup_root', maxel=100):
+                hid = 0
+                try:
+                    hid = int(root.hierarchy_id)
+                except Exception:
+                    pass
+                if hid == 0:
+                    continue
+                subsys_names = []
+                try:
+                    subsys_names = _subsys_names_from_mask(int(root.subsys_mask))
+                except Exception:
+                    pass
+                if not any(subsys_filter in n.lower() for n in subsys_names):
+                    continue
+                found = True
+                crashcolor.set_color(crashcolor.LIGHTBLUE)
+                print("\n[cgroup v1 — hierarchy %d: %s]" % (hid, ", ".join(subsys_names)))
+                crashcolor.set_color(crashcolor.RESET)
+                name = ""
+                try:
+                    name = str(root.name).rstrip('\x00')
+                    if name:
+                        print("  Name               : %s" % name)
+                except Exception:
+                    pass
+                print("  Total cgroups      : %d" % _quick_count_cgroups(root.cgrp))
+                print("")
+                _compact_tree_node(options, root.cgrp, 0, "")
+        except Exception as e:
+            pass
+
+    if not found:
+        print("  Subsystem '%s' not found in any active hierarchy." % subsys_filter)
+        # Show available subsystems as a hint
+        try:
+            avail = []
+            if symbol_exists("cgrp_dfl_root"):
+                dfl = readSymbol("cgrp_dfl_root")
+                avail += _subsys_names_from_mask(int(dfl.cgrp.subtree_control))
+            if symbol_exists("cgroup_roots"):
+                roots_head = readSymbol("cgroup_roots")
+                for root in readSUListFromHead(roots_head, 'root_list',
+                                               'struct cgroup_root', maxel=100):
+                    try:
+                        if int(root.hierarchy_id) > 0:
+                            avail += _subsys_names_from_mask(int(root.subsys_mask))
+                    except Exception:
+                        pass
+            if avail:
+                print("  Available          : %s" % ", ".join(sorted(set(avail))))
+        except Exception:
+            pass
+    print("")
+
+
 def show_compact_cgroup_tree(options):
     """Show a compact cgroup tree (v1 + v2, name + task count only)."""
     # v2
@@ -1903,7 +1997,11 @@ def cgroupinfo():
 
     # ------------------------------------------------------------------
     # Tier 3: targeted single-cgroup or filtered analysis
-    if o.cgroup_addr != "" or o.filter_cgroup_name != "" or o.filter_subsys != "":
+    if o.filter_subsys != "":
+        show_subsystem_info(o)
+        sys.exit(0)
+
+    if o.cgroup_addr != "" or o.filter_cgroup_name != "":
         show_cgroup_tree(o)
         sys.exit(0)
 
