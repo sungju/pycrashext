@@ -886,8 +886,13 @@ def _subtree_has_tasks(cgrp, depth=0):
     return False
 
 
-def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
-    """Compact tree display: name + task count; details only with -d."""
+def _compact_tree_node(options, cgrp, idx, full_path,
+                       prefix="", is_last=True, sys_limit=10000):
+    """
+    Compact tree display using Unicode tree characters.
+    prefix   : accumulated vertical-bar string from parent levels
+    is_last  : True when this node is the last sibling (use └── vs ├──)
+    """
     self_off = member_offset("struct cgroup", "self")
     try:
         name = str(getCgroupName(cgrp)).rstrip('\x00')
@@ -895,7 +900,6 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
         name = "?"
 
     path = (full_path.rstrip("/") + "/" + name) if name and name != "/" else full_path or "/"
-    indent = "  " * idx
     task_cnt = cgroup_task_count(cgrp)
 
     # Without -a, skip cgroups whose entire subtree has no tasks
@@ -904,13 +908,22 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
         if not _subtree_has_tasks(cgrp):
             return
 
+    # Build connector and next-level prefix
+    if idx == 0:
+        connector    = ""
+        child_prefix = ""
+        label        = path
+    else:
+        connector    = "└── " if is_last else "├── "
+        child_prefix = prefix + ("    " if is_last else "│   ")
+        label        = name
+
     if task_cnt == 0:
         crashcolor.set_color(crashcolor.RED)
 
-    print("%s%s  (%d tasks)" % (indent, path if idx == 0 else name, task_cnt))
+    print("%s%s%s  (%d tasks)" % (prefix, connector, label, task_cnt))
 
     if options.show_detail:
-        # Show resource values
         usage, limit = _mem_cgroup_usage(cgrp)
         if usage >= 0:
             def _sz(b):
@@ -918,7 +931,8 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
                 if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
                 return "%.1f KiB" % (b/1024)
             lim_str = _sz(limit) if limit > 0 else "unlimited"
-            print("%s    memory: %s / %s" % (indent, _sz(usage), lim_str))
+            print("%s%smemory: %s / %s" % (
+                child_prefix, "    ", _sz(usage), lim_str))
 
     crashcolor.set_color(crashcolor.RESET)
 
@@ -931,8 +945,16 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
                                       'struct cgroup_subsys_state', maxel=sys_limit):
             child = readSU("struct cgroup", int(css) + self_off)
             children.append(child)
-        for child in sorted(children, key=getCgroupName):
-            _compact_tree_node(options, child, idx + 1, path, sys_limit)
+
+        # Filter before rendering so we know which is truly last
+        if not show_all:
+            children = [c for c in children
+                        if cgroup_task_count(c) > 0 or _subtree_has_tasks(c)]
+
+        children = sorted(children, key=getCgroupName)
+        for i, child in enumerate(children):
+            _compact_tree_node(options, child, idx + 1, path,
+                               child_prefix, i == len(children) - 1, sys_limit)
     except Exception:
         pass
 
