@@ -1382,14 +1382,18 @@ def show_cgroup_overview():
         except Exception:
             pass
 
+    # v2 is "in use" only when it has active controllers or real sub-cgroups
+    v2_in_use = has_v2 and (bool(v2_controllers) or v2_count > 1)
+    v1_in_use = bool(v1_hierarchies)
+
     # ------------------------------------------------------------------ version label
-    if has_v2 and v1_hierarchies:
+    if v2_in_use and v1_in_use:
         version = "Hybrid  (cgroup v1 + v2 unified hierarchy)"
-    elif has_v2:
+    elif v2_in_use:
         version = "cgroup v2  (unified hierarchy only)"
     elif has_rootnode:
         version = "cgroup v1  (legacy single-root, pre-3.x kernel)"
-    elif v1_hierarchies:
+    elif v1_in_use:
         version = "cgroup v1  (multiple named hierarchies)"
     else:
         version = "Unknown"
@@ -1400,19 +1404,17 @@ def show_cgroup_overview():
     print("")
 
     # ------------------------------------------------------------------ v2 section
-    if has_v2:
+    if v2_in_use:
         crashcolor.set_color(crashcolor.LIGHTBLUE)
         print("[cgroup v2 — Unified Hierarchy]")
         crashcolor.set_color(crashcolor.RESET)
         print("  Cgroups     : %d" % v2_count)
-        if v2_controllers:
-            print("  Controllers : %s" % "  ".join(v2_controllers))
-        else:
-            print("  Controllers : (none enabled in subtree_control)")
+        print("  Controllers : %s" % ("  ".join(v2_controllers) if v2_controllers
+                                      else "(none enabled)"))
         print("")
 
     # ------------------------------------------------------------------ v1 section
-    if v1_hierarchies:
+    if v1_in_use:
         crashcolor.set_color(crashcolor.LIGHTBLUE)
         print("[cgroup v1 — Hierarchies]")
         crashcolor.set_color(crashcolor.RESET)
