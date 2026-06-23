@@ -142,6 +142,34 @@ def cgroup_task_count(cgroup):
     return count
 
 
+def _walk_cgroup_tasks(cgroup):
+    """Yield task_struct objects for every task in a cgroup."""
+    if member_offset("struct cgroup", "css_sets") >= 0:
+        list_start = cgroup.css_sets
+        entry_name = "cgrp_link_list"
+        struct_name = "struct cg_cgroup_link"
+    elif member_offset("struct cgroup", "cset_links") >= 0:
+        list_start = cgroup.cset_links
+        entry_name = "cset_link"
+        struct_name = "struct cgrp_cset_link"
+    else:
+        return
+
+    for link in readSUListFromHead(list_start, entry_name, struct_name,
+                                   maxel=1000000):
+        try:
+            task_head = (link.cg.tasks if struct_name == "struct cg_cgroup_link"
+                         else link.cset.tasks)
+            for task in readSUListFromHead(task_head, "cg_list",
+                                           "struct task_struct", maxel=1000000):
+                try:
+                    yield task
+                except Exception:
+                    continue
+        except Exception:
+            continue
+
+
 def cgroup_task_list(cgroup, idx, prefix=None):
     if member_offset("struct cgroup", "css_sets") >= 0:
         list_start = cgroup.css_sets
@@ -940,7 +968,12 @@ def _compact_tree_node(options, cgrp, idx, full_path,
     crashcolor.set_color(crashcolor.RESET)
 
     if options.task_list:
-        cgroup_task_list(cgrp, idx + 1, prefix=child_prefix + "    ")
+        task_pfx = child_prefix + "    "
+        for task in _walk_cgroup_tasks(cgrp):
+            try:
+                print("%s0x%x  %s (%d)" % (task_pfx, task, task.comm, task.pid))
+            except Exception:
+                continue
 
     try:
         children = []
