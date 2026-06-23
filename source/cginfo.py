@@ -868,6 +868,24 @@ def show_process_cgroup_map(options):
     print("")
 
 
+def _subtree_has_tasks(cgrp, depth=0):
+    """Return True if cgrp or any descendant has at least one task."""
+    if depth > 64:
+        return False
+    if cgroup_task_count(cgrp) > 0:
+        return True
+    self_off = member_offset("struct cgroup", "self")
+    try:
+        for css in readSUListFromHead(cgrp.self.children, 'sibling',
+                                      'struct cgroup_subsys_state', maxel=10000):
+            child = readSU("struct cgroup", int(css) + self_off)
+            if _subtree_has_tasks(child, depth + 1):
+                return True
+    except Exception:
+        pass
+    return False
+
+
 def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
     """Compact tree display: name + task count; details only with -d."""
     self_off = member_offset("struct cgroup", "self")
@@ -879,6 +897,12 @@ def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
     path = (full_path.rstrip("/") + "/" + name) if name and name != "/" else full_path or "/"
     indent = "  " * idx
     task_cnt = cgroup_task_count(cgrp)
+
+    # Without -a, skip cgroups whose entire subtree has no tasks
+    show_all = getattr(options, 'show_all', False)
+    if not show_all and task_cnt == 0:
+        if not _subtree_has_tasks(cgrp):
+            return
 
     if task_cnt == 0:
         crashcolor.set_color(crashcolor.RED)
@@ -1904,6 +1928,10 @@ def cgroupinfo():
     global PAGE_SIZE
 
     op = OptionParser()
+    op.add_option("-a", "--all", dest="show_all", default=False,
+                  action="store_true",
+                  help="Show all cgroups including those with 0 tasks")
+
     op.add_option("-c", "--cgroup", dest="cgroup_addr", default="",
                   action="store", type="string",
                   help="Shows a speicific cgroup tree")
