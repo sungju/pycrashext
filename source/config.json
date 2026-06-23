@@ -26,9 +26,9 @@
 		},
 		{
 			"command" : "cginfo",
-			"desc"    : "cgroup information",
+			"desc"    : "cgroup information (v1/v2/hybrid)",
 			"options" : "-h   - list available options",
-			"help"    : "cgroup information\n\n --tglist    - task group list with details\n --tree      - hierarchial display of cgroups"
+			"help"    : "cgroup information (supports cgroup v1, v2, and hybrid)\n\nDefault (no options)\n  Shows version, hierarchy list, and cgroup counts\n\nCommon analysis:\n  -m          Memory usage summary per cgroup (top consumers)\n  -p          Process-to-cgroup mapping\n  -s <name>   Subsystem/controller overview (e.g. -s memory)\n\nTree views:\n  -t          Compact cgroup tree (name + task count)\n  -t -d       Tree with per-cgroup resource details\n  -t -l       Tree with task lists\n\nModifiers:\n  -a          Show all cgroups including those with 0 tasks\n  -d          Detail mode (use with -m, -p, -s, or -t)\n  -n <name>   Filter tree by cgroup name\n  -c <addr>   Inspect a specific cgroup by address\n\nAdvanced:\n  -g          task_group list\n  -G <addr>   task_group tree\n  -i / -I     mem_cgroup IDR details"
 		},
 		{
 			"command" : "schedinfo",

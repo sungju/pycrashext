@@ -1927,58 +1927,74 @@ def cgroupinfo():
     global cgroup_count
     global PAGE_SIZE
 
-    op = OptionParser()
-    op.add_option("-a", "--all", dest="show_all", default=False,
-                  action="store_true",
-                  help="Show all cgroups including those with 0 tasks")
+    usage = ("cginfo [options]\n\n"
+             "  No options  : version overview + hierarchy summary\n"
+             "  -m          : memory usage per cgroup (top consumers)\n"
+             "  -p          : process-to-cgroup mapping\n"
+             "  -s <name>   : subsystem/controller overview (e.g. -s memory)\n"
+             "  -t          : compact cgroup tree (name + task count)\n"
+             "  -t -d       : tree with per-cgroup resource details\n"
+             "  -t -l       : tree with task lists per cgroup\n"
+             "  -c <addr>   : inspect a specific cgroup by address\n"
+             "  -g          : task_group list  [advanced]\n"
+             "  -i / -I     : mem_cgroup IDR   [advanced]\n")
+    op = OptionParser(usage=usage)
 
-    op.add_option("-c", "--cgroup", dest="cgroup_addr", default="",
-                  action="store", type="string",
-                  help="Shows a speicific cgroup tree")
-
-    op.add_option("-d", "--detail", dest="show_detail", default=0,
-                  action="store_true",
-                  help="Shows cgroup details (use with -t, -m, or -p)")
-
+    # --- Analysis options ---
     op.add_option("-m", "--memory", dest="memory_summary", default=0,
                   action="store_true",
-                  help="Show memory usage summary per cgroup (top consumers)")
+                  help="Memory usage summary sorted by consumption (top 20 by default)")
 
     op.add_option("-p", "--process", dest="process_map", default=0,
                   action="store_true",
-                  help="Show process-to-cgroup mapping")
-
-    op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
-                  action="store_true",
-                  help="task_group list")
-
-    op.add_option("-G", "--tgtree", dest="taskgroup_tree", default="",
-                  action="store", type="string",
-                  help="task_group tree")
-
-    op.add_option("-i", "--idr", dest="mem_cgroup_idr", default=0,
-                  action="store_true",
-                  help="mem_cgroup_idr detail")
-
-    op.add_option("-I", "--IDR", dest="mem_cgroup_idr_all", default=0,
-                  action="store_true",
-                  help="mem_cgroup_idr detail include free entries")
-
-    op.add_option("-l", "--tasklist", dest="task_list", default=0,
-                  action="store_true",
-                  help="Shows task list in cgroup")
-
-    op.add_option("-n", "--name", dest="filter_cgroup_name", default="",
-                  action="store", type="string",
-                  help="Shows cgroups with specified name only")
+                  help="Process-to-cgroup mapping: which processes are in which cgroup")
 
     op.add_option("-s", "--subsys", dest="filter_subsys", default="",
                   action="store", type="string",
-                  help="Shows cgroups with specified subsystem only")
+                  help="Show overview for a specific subsystem/controller (e.g. memory, cpu, io)")
 
+    # --- Tree options ---
     op.add_option("-t", "--tree", dest="cgroup_tree", default=0,
                   action="store_true",
-                  help="hierarchial display of cgroups")
+                  help="Compact cgroup tree (name + task count); add -d for resource details")
+
+    # --- Modifiers ---
+    op.add_option("-a", "--all", dest="show_all", default=False,
+                  action="store_true",
+                  help="Include cgroups with 0 tasks (hidden by default)")
+
+    op.add_option("-d", "--detail", dest="show_detail", default=0,
+                  action="store_true",
+                  help="Detail mode: resource usage/limits per cgroup (use with -m, -p, -s, -t)")
+
+    op.add_option("-l", "--tasklist", dest="task_list", default=0,
+                  action="store_true",
+                  help="Show task list per cgroup (use with -t)")
+
+    op.add_option("-n", "--name", dest="filter_cgroup_name", default="",
+                  action="store", type="string",
+                  help="Filter cgroup tree to entries whose name contains <name>")
+
+    op.add_option("-c", "--cgroup", dest="cgroup_addr", default="",
+                  action="store", type="string",
+                  help="Show the sub-tree rooted at a specific cgroup address (hex)")
+
+    # --- Advanced / low-level ---
+    op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
+                  action="store_true",
+                  help="[Advanced] task_group list with CPU scheduling details")
+
+    op.add_option("-G", "--tgtree", dest="taskgroup_tree", default="",
+                  action="store", type="string",
+                  help="[Advanced] task_group tree from a given address (hex)")
+
+    op.add_option("-i", "--idr", dest="mem_cgroup_idr", default=0,
+                  action="store_true",
+                  help="[Advanced] mem_cgroup IDR allocated entries")
+
+    op.add_option("-I", "--IDR", dest="mem_cgroup_idr_all", default=0,
+                  action="store_true",
+                  help="[Advanced] mem_cgroup IDR all entries including free slots")
 
     (o, args) = op.parse_args()
 
