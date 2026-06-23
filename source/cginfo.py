@@ -949,15 +949,39 @@ def _compact_tree_node(options, cgrp, idx, full_path,
         child_prefix = prefix + ("    " if is_last else "│   ")
         label        = name
 
+    # Collect children first so we can set the correct detail prefix for root
+    children = []
+    try:
+        for css in readSUListFromHead(cgrp.self.children, 'sibling',
+                                      'struct cgroup_subsys_state', maxel=sys_limit):
+            child = readSU("struct cgroup", int(css) + self_off)
+            children.append(child)
+        if not show_all:
+            children = [c for c in children
+                        if cgroup_task_count(c) > 0 or _subtree_has_tasks(c)]
+        children = sorted(children, key=getCgroupName)
+    except Exception:
+        pass
+
+    # Detail prefix for memory/task annotations:
+    #   root with children  → "│   " / "│       " (vertical bar shows continuity)
+    #   root without children → "    " / "    "
+    #   non-root            → child_prefix for both
+    if idx == 0:
+        if children:
+            mem_pfx  = "│   "
+            task_pfx = "│       "
+        else:
+            mem_pfx  = "    "
+            task_pfx = "    "
+    else:
+        mem_pfx  = child_prefix
+        task_pfx = child_prefix
+
     if task_cnt == 0:
         crashcolor.set_color(crashcolor.RED)
 
     print("%s%s%s  (%d tasks)" % (prefix, connector, label, task_cnt))
-
-    # detail_pfx: indentation for memory/task lines under this node.
-    # Use child_prefix directly (aligns with child connector start),
-    # but fall back to "    " for the root which has an empty child_prefix.
-    detail_pfx = child_prefix if child_prefix else "    "
 
     if options.show_detail:
         usage, limit = _mem_cgroup_usage(cgrp)
@@ -967,35 +991,20 @@ def _compact_tree_node(options, cgrp, idx, full_path,
                 if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
                 return "%.1f KiB" % (b/1024)
             lim_str = _sz(limit) if limit > 0 else "unlimited"
-            print("%smemory: %s / %s" % (detail_pfx, _sz(usage), lim_str))
+            print("%smemory: %s / %s" % (mem_pfx, _sz(usage), lim_str))
 
     crashcolor.set_color(crashcolor.RESET)
 
     if options.task_list:
         for task in _walk_cgroup_tasks(cgrp):
             try:
-                print("%s0x%x  %s (%d)" % (detail_pfx, task, task.comm, task.pid))
+                print("%s0x%x  %s (%d)" % (task_pfx, task, task.comm, task.pid))
             except Exception:
                 continue
 
-    try:
-        children = []
-        for css in readSUListFromHead(cgrp.self.children, 'sibling',
-                                      'struct cgroup_subsys_state', maxel=sys_limit):
-            child = readSU("struct cgroup", int(css) + self_off)
-            children.append(child)
-
-        # Filter before rendering so we know which is truly last
-        if not show_all:
-            children = [c for c in children
-                        if cgroup_task_count(c) > 0 or _subtree_has_tasks(c)]
-
-        children = sorted(children, key=getCgroupName)
-        for i, child in enumerate(children):
-            _compact_tree_node(options, child, idx + 1, path,
-                               child_prefix, i == len(children) - 1, sys_limit)
-    except Exception:
-        pass
+    for i, child in enumerate(children):
+        _compact_tree_node(options, child, idx + 1, path,
+                           child_prefix, i == len(children) - 1, sys_limit)
 
 
 def show_subsystem_info(options):
