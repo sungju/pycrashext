@@ -954,6 +954,11 @@ def _compact_tree_node(options, cgrp, idx, full_path,
 
     print("%s%s%s  (%d tasks)" % (prefix, connector, label, task_cnt))
 
+    # detail_pfx: indentation for memory/task lines under this node.
+    # Use child_prefix directly (aligns with child connector start),
+    # but fall back to "    " for the root which has an empty child_prefix.
+    detail_pfx = child_prefix if child_prefix else "    "
+
     if options.show_detail:
         usage, limit = _mem_cgroup_usage(cgrp)
         if usage >= 0:
@@ -962,16 +967,14 @@ def _compact_tree_node(options, cgrp, idx, full_path,
                 if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
                 return "%.1f KiB" % (b/1024)
             lim_str = _sz(limit) if limit > 0 else "unlimited"
-            print("%s%smemory: %s / %s" % (
-                child_prefix, "    ", _sz(usage), lim_str))
+            print("%smemory: %s / %s" % (detail_pfx, _sz(usage), lim_str))
 
     crashcolor.set_color(crashcolor.RESET)
 
     if options.task_list:
-        task_pfx = child_prefix + "    "
         for task in _walk_cgroup_tasks(cgrp):
             try:
-                print("%s0x%x  %s (%d)" % (task_pfx, task, task.comm, task.pid))
+                print("%s0x%x  %s (%d)" % (detail_pfx, task, task.comm, task.pid))
             except Exception:
                 continue
 
