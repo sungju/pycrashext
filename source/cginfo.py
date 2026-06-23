@@ -963,8 +963,12 @@ def show_subsystem_info(options):
     """
     Show an overview of a specific cgroup subsystem.
     Without -d: compact tree (name + task count per cgroup).
-    With    -d: tree with resource usage/limits per cgroup.
+    With    -d: tree with resource usage/limits AND task list per cgroup.
     """
+    # -d implies task list when used with -s
+    if options.show_detail:
+        options.task_list = True
+
     subsys_filter = options.filter_subsys.lower()
 
     print("=" * 66)
