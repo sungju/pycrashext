@@ -142,7 +142,7 @@ def cgroup_task_count(cgroup):
     return count
 
 
-def cgroup_task_list(cgroup, idx):
+def cgroup_task_list(cgroup, idx, prefix=None):
     if member_offset("struct cgroup", "css_sets") >= 0:
         list_start = cgroup.css_sets
         entry_name = "cgrp_link_list"
@@ -154,7 +154,7 @@ def cgroup_task_list(cgroup, idx):
     else:
         return 0
 
-    indent = "\t" * idx
+    indent = prefix if prefix is not None else "\t" * idx
     for link in readSUListFromHead(list_start, entry_name, struct_name,
                                    maxel=1000000):
         try:
@@ -940,7 +940,7 @@ def _compact_tree_node(options, cgrp, idx, full_path,
     crashcolor.set_color(crashcolor.RESET)
 
     if options.task_list:
-        cgroup_task_list(cgrp, idx + 1)
+        cgroup_task_list(cgrp, idx + 1, prefix=child_prefix + "    ")
 
     try:
         children = []
