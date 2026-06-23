@@ -1800,17 +1800,7 @@ def show_cgroup_overview():
         print("")
 
     # ------------------------------------------------------------------ hints
-    print("-" * 66)
-    print("  cginfo -m          memory usage summary per cgroup")
-    print("  cginfo -p          process-to-cgroup mapping")
-    print("  cginfo -t          compact cgroup tree (name + task count)")
-    print("  cginfo -t -d       tree with per-cgroup resource details")
-    print("  cginfo -t -l       tree with task lists")
-    if v1_hierarchies:
-        print("  cginfo -s <name>   filter tree by subsystem  (e.g. -s memory)")
-    print("  cginfo -c <addr>   inspect a specific cgroup by address")
-    print("  cginfo -g          task_group list  [advanced]")
-    print("  cginfo -i          mem_cgroup IDR   [advanced]")
+    print("(Run 'cginfo -h' for all options.)")
     print("")
 
 
