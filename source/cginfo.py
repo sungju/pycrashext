@@ -608,6 +608,364 @@ def show_cgroup2_tree_node(options, cgrp, idx, full_path):
 
 
 
+def _cgroup_full_path(cgrp, max_depth=32):
+    """Build the full path of a cgroup by walking up its parent chain."""
+    self_off = member_offset("struct cgroup", "self")
+    parts = []
+    cur = cgrp
+    for _ in range(max_depth):
+        try:
+            name = str(getCgroupName(cur)).rstrip('\x00')
+        except Exception:
+            name = "?"
+        if not name or name == "/":
+            break
+        parts.append(name)
+        try:
+            parent_css = cur.self.parent
+            if not parent_css or int(parent_css) == 0:
+                break
+            cur = readSU("struct cgroup", int(parent_css) + self_off)
+        except Exception:
+            break
+    return "/" + "/".join(reversed(parts)) if parts else "/"
+
+
+def _task_cgroup_path(task):
+    """Return the cgroup path for a given task (tries v2 first, then v1)."""
+    self_off = member_offset("struct cgroup", "self")
+    try:
+        css_set = task.cgroups
+        # v2: use the task's unified-hierarchy cgroup
+        if symbol_exists("cgrp_dfl_root"):
+            try:
+                dfl_cgrp = css_set.dfl_cgrp
+                if dfl_cgrp and int(dfl_cgrp) != 0:
+                    return _cgroup_full_path(dfl_cgrp)
+            except Exception:
+                pass
+        # v1: pick the first populated subsystem
+        for sid in sorted(cgroup_subsys_id_list.keys()):
+            try:
+                css = css_set.subsys[sid]
+                if not css or int(css) == 0:
+                    continue
+                cgrp = readSU("struct cgroup", int(css) + self_off)
+                if int(cgrp) != 0:
+                    return _cgroup_full_path(cgrp)
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return "/"
+
+
+def _mem_cgroup_usage(cgrp):
+    """
+    Read memory usage in bytes for a cgroup.
+    Returns (usage_bytes, limit_bytes) or (-1, -1) on failure.
+    Tries several field-name patterns to cover v4.x – v6.x kernels.
+    """
+    usage = -1
+    limit = -1
+    try:
+        mem_id = None
+        for sid, sname in cgroup_subsys_id_list.items():
+            if 'memory' in sname:
+                mem_id = sid
+                break
+        if mem_id is None:
+            return -1, -1
+
+        css = cgrp.subsys[mem_id]
+        if not css or int(css) == 0:
+            return -1, -1
+
+        css_off = member_offset("struct mem_cgroup", "css")
+        if css_off < 0:
+            return -1, -1
+
+        mem_cg = readSU("struct mem_cgroup", int(css) - css_off)
+
+        for get_usage in (
+            lambda m: int(m.memory.usage.counter),  # 5.x+  (page_counter in bytes)
+            lambda m: int(m.res.usage.counter) * crash.PAGESIZE,  # 4.x (pages)
+        ):
+            try:
+                usage = get_usage(mem_cg)
+                break
+            except Exception:
+                pass
+
+        for get_limit in (
+            lambda m: int(m.memory.max),            # 5.x+
+            lambda m: int(m.res.limit.counter) * crash.PAGESIZE,  # 4.x
+        ):
+            try:
+                val = get_limit(mem_cg)
+                if 0 < val < (1 << 60):             # skip PAGE_COUNTER_MAX
+                    limit = val
+                break
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+    return usage, limit
+
+
+def _collect_cgroup_mem_info(cgrp, results, max_depth=0, depth=0):
+    """Recursively collect (path, usage, limit) for cgroups with memory data."""
+    if depth > 64:
+        return
+    usage, limit = _mem_cgroup_usage(cgrp)
+    if usage >= 0:
+        results.append((_cgroup_full_path(cgrp), usage, limit))
+    self_off = member_offset("struct cgroup", "self")
+    try:
+        for css in readSUListFromHead(cgrp.self.children, 'sibling',
+                                      'struct cgroup_subsys_state', maxel=100000):
+            child = readSU("struct cgroup", int(css) + self_off)
+            _collect_cgroup_mem_info(child, results, max_depth, depth + 1)
+    except Exception:
+        pass
+
+
+def show_memory_summary(options):
+    """Show top memory-consuming cgroups across all hierarchies."""
+    print("=" * 70)
+    print("Memory Usage by Cgroup")
+    print("=" * 70)
+    print("%-45s %12s %12s %6s" % ("Cgroup", "Usage", "Limit", "Use%"))
+    print("-" * 70)
+
+    results = []
+
+    # v2 unified hierarchy
+    if symbol_exists("cgrp_dfl_root"):
+        try:
+            dfl = readSymbol("cgrp_dfl_root")
+            _collect_cgroup_mem_info(dfl.cgrp, results)
+        except Exception:
+            pass
+
+    # v1 memory hierarchy
+    if symbol_exists("cgroup_roots"):
+        try:
+            roots_head = readSymbol("cgroup_roots")
+            for root in readSUListFromHead(roots_head, 'root_list',
+                                           'struct cgroup_root', maxel=100):
+                hid = 0
+                try:
+                    hid = int(root.hierarchy_id)
+                except Exception:
+                    pass
+                if hid == 0:
+                    continue
+                # Only walk memory hierarchy
+                try:
+                    mask = int(root.subsys_mask)
+                    mem_bit = False
+                    for sid, sname in cgroup_subsys_id_list.items():
+                        if 'memory' in sname and (mask & (1 << sid)):
+                            mem_bit = True
+                            break
+                    if not mem_bit:
+                        continue
+                except Exception:
+                    pass
+                try:
+                    _collect_cgroup_mem_info(root.cgrp, results)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    if not results:
+        print("  (no memory cgroup data available)")
+        return
+
+    # Sort by usage descending, show top 20 by default
+    n = 20 if not options.show_detail else len(results)
+    results.sort(key=lambda x: x[1], reverse=True)
+
+    def _sz(b):
+        if b < 0:   return "n/a"
+        if b >= 1 << 30: return "%.1f GiB" % (b / (1 << 30))
+        if b >= 1 << 20: return "%.1f MiB" % (b / (1 << 20))
+        if b >= 1 << 10: return "%.1f KiB" % (b / (1 << 10))
+        return "%d B" % b
+
+    total_usage = sum(r[1] for r in results if r[1] >= 0)
+    for path, usage, limit in results[:n]:
+        pct = ""
+        if limit > 0 and usage >= 0:
+            pct_val = usage * 100.0 / limit
+            pct = "%.1f%%" % pct_val
+            if pct_val > 90:
+                crashcolor.set_color(crashcolor.LIGHTRED)
+            elif pct_val > 70:
+                crashcolor.set_color(crashcolor.YELLOW)
+        print("%-45s %12s %12s %6s" % (
+            path[:45], _sz(usage), _sz(limit) if limit >= 0 else "unlimited", pct))
+        crashcolor.set_color(crashcolor.RESET)
+
+    if len(results) > n:
+        print("  ... (%d more, use -d to show all)" % (len(results) - n))
+    print("-" * 70)
+    print("Total tracked usage: %s across %d cgroups" % (_sz(total_usage), len(results)))
+    print("")
+
+
+def show_process_cgroup_map(options):
+    """Show which cgroup each process belongs to (grouped by cgroup path)."""
+    print("=" * 70)
+    print("Process-to-Cgroup Mapping")
+    print("=" * 70)
+
+    cgroup_map = {}   # cgroup_path -> [(pid, comm)]
+    try:
+        tt = Tasks.TaskTable()
+        seen_pids = set()
+        for task in tt.allThreads():
+            pid = int(task.pid)
+            if pid in seen_pids:
+                continue
+            # Only show thread leaders (tgid == pid)
+            try:
+                if int(task.tgid) != pid:
+                    continue
+            except Exception:
+                pass
+            seen_pids.add(pid)
+            try:
+                path = _task_cgroup_path(task)
+                comm = str(task.comm).rstrip('\x00')
+                cgroup_map.setdefault(path, []).append((pid, comm))
+            except Exception:
+                continue
+    except Exception as e:
+        print("Error walking task list: %s" % e)
+        return
+
+    if not cgroup_map:
+        print("  (no data)")
+        return
+
+    for path in sorted(cgroup_map.keys()):
+        procs = cgroup_map[path]
+        crashcolor.set_color(crashcolor.LIGHTCYAN)
+        print("\n%s  (%d process%s)" % (path, len(procs),
+                                         "es" if len(procs) != 1 else ""))
+        crashcolor.set_color(crashcolor.RESET)
+        if options.show_detail or len(procs) <= 5:
+            for pid, comm in sorted(procs, key=lambda x: x[0]):
+                print("    %7d  %s" % (pid, comm))
+        else:
+            for pid, comm in sorted(procs, key=lambda x: x[0])[:5]:
+                print("    %7d  %s" % (pid, comm))
+            print("    ... (%d more, use -d to show all)" % (len(procs) - 5))
+    print("")
+
+
+def _compact_tree_node(options, cgrp, idx, full_path, sys_limit=10000):
+    """Compact tree display: name + task count; details only with -d."""
+    self_off = member_offset("struct cgroup", "self")
+    try:
+        name = str(getCgroupName(cgrp)).rstrip('\x00')
+    except Exception:
+        name = "?"
+
+    path = (full_path.rstrip("/") + "/" + name) if name and name != "/" else full_path or "/"
+    indent = "  " * idx
+    task_cnt = cgroup_task_count(cgrp)
+
+    if task_cnt == 0:
+        crashcolor.set_color(crashcolor.RED)
+
+    print("%s%s  (%d tasks)" % (indent, path if idx == 0 else name, task_cnt))
+
+    if options.show_detail:
+        # Show resource values
+        usage, limit = _mem_cgroup_usage(cgrp)
+        if usage >= 0:
+            def _sz(b):
+                if b >= 1<<30: return "%.1f GiB" % (b/(1<<30))
+                if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
+                return "%.1f KiB" % (b/1024)
+            lim_str = _sz(limit) if limit > 0 else "unlimited"
+            print("%s    memory: %s / %s" % (indent, _sz(usage), lim_str))
+
+    crashcolor.set_color(crashcolor.RESET)
+
+    if options.task_list:
+        cgroup_task_list(cgrp, idx + 1)
+
+    try:
+        children = []
+        for css in readSUListFromHead(cgrp.self.children, 'sibling',
+                                      'struct cgroup_subsys_state', maxel=sys_limit):
+            child = readSU("struct cgroup", int(css) + self_off)
+            children.append(child)
+        for child in sorted(children, key=getCgroupName):
+            _compact_tree_node(options, child, idx + 1, path, sys_limit)
+    except Exception:
+        pass
+
+
+def show_compact_cgroup_tree(options):
+    """Show a compact cgroup tree (v1 + v2, name + task count only)."""
+    # v2
+    if symbol_exists("cgrp_dfl_root"):
+        try:
+            dfl = readSymbol("cgrp_dfl_root")
+            v2_ctrl = _subsys_names_from_mask(int(dfl.cgrp.subtree_control))
+            if v2_ctrl or _quick_count_cgroups(dfl.cgrp) > 1:
+                crashcolor.set_color(crashcolor.LIGHTBLUE)
+                print("\n[cgroup v2 — Unified Hierarchy]")
+                crashcolor.set_color(crashcolor.RESET)
+                _compact_tree_node(options, dfl.cgrp, 0, "")
+        except Exception:
+            pass
+
+    # v1
+    if symbol_exists("cgroup_roots"):
+        try:
+            roots_head = readSymbol("cgroup_roots")
+            for root in readSUListFromHead(roots_head, 'root_list',
+                                           'struct cgroup_root', maxel=100):
+                hid = 0
+                try:
+                    hid = int(root.hierarchy_id)
+                except Exception:
+                    pass
+                if hid == 0:
+                    continue
+                subsys_names = []
+                try:
+                    subsys_names = _subsys_names_from_mask(int(root.subsys_mask))
+                except Exception:
+                    pass
+                crashcolor.set_color(crashcolor.LIGHTBLUE)
+                print("\n[cgroup v1 — %s]" % (", ".join(subsys_names) or "hierarchy %d" % hid))
+                crashcolor.set_color(crashcolor.RESET)
+                _compact_tree_node(options, root.cgrp, 0, "")
+        except Exception as e:
+            print("Error walking v1 roots: %s" % e)
+
+    # Legacy rootnode
+    if symbol_exists("rootnode") and not symbol_exists("cgroup_roots"):
+        try:
+            rootnode = readSymbol("rootnode")
+            crashcolor.set_color(crashcolor.LIGHTBLUE)
+            print("\n[cgroup v1 — Legacy Root]")
+            crashcolor.set_color(crashcolor.RESET)
+            _compact_tree_node(options, rootnode.top_cgroup, 0, "")
+        except Exception:
+            pass
+    print("")
+
+
 def show_cgroup2_tree(options):
     if options.cgroup_addr != "":
         cgroup = readSU("struct cgroup", int(options.cgroup_addr, 16))
@@ -1443,13 +1801,16 @@ def show_cgroup_overview():
 
     # ------------------------------------------------------------------ hints
     print("-" * 66)
-    print("  cginfo -t          full cgroup tree")
-    print("  cginfo -t -d       tree with per-cgroup details")
+    print("  cginfo -m          memory usage summary per cgroup")
+    print("  cginfo -p          process-to-cgroup mapping")
+    print("  cginfo -t          compact cgroup tree (name + task count)")
+    print("  cginfo -t -d       tree with per-cgroup resource details")
     print("  cginfo -t -l       tree with task lists")
     if v1_hierarchies:
-        print("  cginfo -s <name>   filter by subsystem  (e.g. -s memory)")
-    if has_v2:
-        print("  cginfo -c <addr>   inspect a specific cgroup by address")
+        print("  cginfo -s <name>   filter tree by subsystem  (e.g. -s memory)")
+    print("  cginfo -c <addr>   inspect a specific cgroup by address")
+    print("  cginfo -g          task_group list  [advanced]")
+    print("  cginfo -i          mem_cgroup IDR   [advanced]")
     print("")
 
 
@@ -1465,7 +1826,15 @@ def cgroupinfo():
 
     op.add_option("-d", "--detail", dest="show_detail", default=0,
                   action="store_true",
-                  help="Shows cgroup details")
+                  help="Shows cgroup details (use with -t, -m, or -p)")
+
+    op.add_option("-m", "--memory", dest="memory_summary", default=0,
+                  action="store_true",
+                  help="Show memory usage summary per cgroup (top consumers)")
+
+    op.add_option("-p", "--process", dest="process_map", default=0,
+                  action="store_true",
+                  help="Show process-to-cgroup mapping")
 
     op.add_option("-g", "--tglist", dest="taskgroup_list", default=0,
                   action="store_true",
@@ -1521,14 +1890,36 @@ def cgroupinfo():
         show_task_group_tree(o)
         sys.exit(0)
 
-    if (o.cgroup_tree or o.cgroup_addr != "" or o.show_detail or
-            o.task_list or o.filter_cgroup_name != "" or
-            o.filter_subsys != ""):
-        # Explicit detail request — show the full tree
+    # ------------------------------------------------------------------
+    # Tier 1: common analysis options
+    if o.memory_summary:
+        show_memory_summary(o)
+        sys.exit(0)
+
+    if o.process_map:
+        show_process_cgroup_map(o)
+        sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Tier 2: tree views
+    if o.cgroup_tree:
+        if o.show_detail or o.task_list:
+            # Detailed tree (verbose — existing behaviour)
+            show_cgroup_tree(o)
+        else:
+            # Compact tree: name + task count only
+            show_compact_cgroup_tree(o)
+        sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Tier 3: targeted single-cgroup or filtered analysis
+    if o.cgroup_addr != "" or o.filter_cgroup_name != "" or o.filter_subsys != "":
         show_cgroup_tree(o)
-    else:
-        # Default: compact overview
-        show_cgroup_overview()
+        sys.exit(0)
+
+    # ------------------------------------------------------------------
+    # Default: compact overview
+    show_cgroup_overview()
 
 
 if ( __name__ == '__main__'):
