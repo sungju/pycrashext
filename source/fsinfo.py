@@ -852,6 +852,33 @@ def get_inode_details(inode):
           (size_to_human_readable(inode.i_size), inode.i_ino, inode.i_nlink, i_uid, i_gid)
 
 
+def _show_sb_freeze_state(sb):
+    """Print freeze state of the superblock only when it is not SB_UNFROZEN."""
+    frozen = -1
+    try:
+        if member_offset('struct super_block', 's_writers') >= 0:
+            frozen = sb.s_writers.frozen
+        elif member_offset('struct super_block', 's_frozen') >= 0:
+            frozen = sb.s_frozen
+    except Exception:
+        return
+
+    if frozen <= 0:
+        return
+
+    frozen_str  = get_frozen_str(frozen)
+    frozen_desc = get_frozen_desc(frozen)
+
+    print("== Freeze State ==")
+    crashcolor.set_color(crashcolor.LIGHTRED if frozen_str == "SB_FREEZE_COMPLETE"
+                         else crashcolor.LIGHTCYAN)
+    print("  %s" % frozen_str)
+    crashcolor.set_color(crashcolor.RESET)
+    if frozen_desc:
+        print("  %s" % frozen_desc)
+    print("")
+
+
 def show_file_details(options):
     file = readSU("struct file", int(options.file, 16))
     dentry_details = exec_crash_command("files -d 0x%x" % (file.f_path.dentry))
@@ -880,6 +907,8 @@ def show_file_details(options):
                 print("== Mount Info ==")
             print(mount_line)
             found = True
+
+    _show_sb_freeze_state(file.f_path.dentry.d_sb)
 
 
 def show_open_files(options):
