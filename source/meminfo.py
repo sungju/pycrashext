@@ -11,6 +11,7 @@ import os
 import sys
 import operator
 import gc  # For garbage collection
+import re
 from collections import defaultdict
 import shutil
 import copy
@@ -4607,6 +4608,101 @@ def get_stack_bits():
 
 import gc
 
+
+def analyze_page_owner_file(filename, options):
+    """Parse a meminfo -od output file and reproduce the same summary analysis."""
+    global alloc_by_dict
+    global alloc_type_dict
+    global alloc_module_dict
+    global page_size
+
+    alloc_by_dict = {}
+    alloc_type_dict = {}
+    alloc_module_dict = {}
+
+    try:
+        with open(filename) as f:
+            lines = f.readlines()
+    except Exception as e:
+        print("Error opening file '%s': %s" % (filename, e))
+        return
+
+    # Try to recover page_size from the Notes line at the end of the file
+    notes_re = re.compile(r'Notes: Calculation was done with pagesize=(\d+)')
+    for line in lines:
+        m = notes_re.search(line)
+        if m:
+            page_size = int(m.group(1))
+            break
+
+    # "Page allocated via order N, mask 0xHEX(FLAGS), pid PID, tgid TGID (COMM), ..."
+    page_re_rhel8 = re.compile(
+        r'Page allocated via order (\d+), mask 0x[0-9a-f]+\([^)]*\),'
+        r' pid (\d+), tgid \d+ \(([^)]+)\)')
+    # "Page allocated via order N, mask 0xHEX"  (RHEL7, no pid)
+    page_re_rhel7 = re.compile(r'Page allocated via order (\d+), mask 0x[0-9a-f]+')
+    # "  [<ADDR>] FUNCTION_NAME"
+    trace_re = re.compile(r'^\s+\[<([0-9a-f]+)>\]\s+(.*)')
+
+    i = 0
+    total_entries = 0
+    while i < len(lines):
+        line = lines[i].rstrip()
+
+        m8 = page_re_rhel8.search(line)
+        if m8:
+            order = int(m8.group(1))
+            by_type = "%d (%s)" % (int(m8.group(2)), m8.group(3))
+        elif 'Page allocated via order' in line:
+            m7 = page_re_rhel7.search(line)
+            if m7:
+                order = int(m7.group(1))
+                by_type = ""
+            else:
+                i += 1
+                continue
+        else:
+            i += 1
+            continue
+
+        i += 1
+        # Skip the PFN line
+        if i < len(lines) and lines[i].startswith('PFN'):
+            i += 1
+
+        # Collect trace lines and rebuild the by_whom key in the same format
+        # that save_page_owner uses: "\n\t  [<HEX>] FUNC"
+        by_whom = ""
+        mod_name = ""
+        while i < len(lines):
+            tm = trace_re.match(lines[i])
+            if tm:
+                addr_str = tm.group(1)
+                func = tm.group(2).strip()
+                by_whom += "\n\t  [<%s>] %s" % (addr_str, func)
+                if mod_name == "":
+                    words = func.split()
+                    if words and words[-1].startswith("[") and words[-1].endswith("]"):
+                        mod_name = words[-1][1:-1]
+                i += 1
+            else:
+                break
+
+        size = 2 ** order
+
+        if by_whom:
+            alloc_by_dict[by_whom] = alloc_by_dict.get(by_whom, 0) + size
+        if by_type:
+            alloc_type_dict[by_type] = alloc_type_dict.get(by_type, 0) + size
+        if mod_name:
+            alloc_module_dict[mod_name] = alloc_module_dict.get(mod_name, 0) + size
+
+        total_entries += 1
+
+    print("Analyzed %d page allocations from '%s'" % (total_entries, filename))
+    print_page_owner_summary(options, sys.stdout)
+
+
 def show_page_owner_all(options):
     global alloc_by_dict
     global alloc_type_dict
@@ -5638,7 +5734,10 @@ def meminfo():
 
 
     if (o.page_owner):
-        show_page_owner_all(o)
+        if args:
+            analyze_page_owner_file(args[0], o)
+        else:
+            show_page_owner_all(o)
         sys.exit(0)
 
     if (o.OOM):
