@@ -4823,54 +4823,69 @@ def show_page_owner_all(options):
         tty = open('/dev/tty', 'w')
     except:
         tty = os.fdopen(os.dup(sys.stdout.fileno()), 'w')
-    while pfn < max_pfn:
-        if tty != None:
-            print(f"{pfn:,} out of {max_pfn:,} pages processed."
-                        f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
 
-        page_owner = pfn_to_page_owner(pfn)
-        if page_owner == -1 or page_owner == 0 or page_owner == None:
-            pfn = pfn + 1
-            continue
+    interrupted = False
+    try:
+        while pfn < max_pfn:
+            if tty != None:
+                print(f"{pfn:,} out of {max_pfn:,} pages processed."
+                            f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
 
-        # Wrap entire page_owner processing in try-except to handle invalid objects
-        try:
-            # Access page_owner.order - this might fail if page_owner is invalid
-            if page_owner.order >= nr_free_areas:
+            page_owner = pfn_to_page_owner(pfn)
+            if page_owner == -1 or page_owner == 0 or page_owner == None:
                 pfn = pfn + 1
                 continue
 
-            # Skip tail pages of multi-page allocations
-            # Only process the head page (aligned to allocation order)
-            if not is_aligned(pfn, 1 << page_owner.order):
-                pfn = pfn + 1
-                continue
-
-            nr_entries, trace_entries = get_trace_entries(page_owner)
-            if nr_entries == 0:
-                pfn = pfn + 1
-                continue
-
+            # Wrap entire page_owner processing in try-except to handle invalid objects
             try:
-                save_page_owner(page_owner, nr_entries, trace_entries)
+                # Access page_owner.order - this might fail if page_owner is invalid
+                if page_owner.order >= nr_free_areas:
+                    pfn = pfn + 1
+                    continue
 
-                if options.details:  # shows raw call trace
-                    show_page_owner(pfn, page_owner, pageblock_order,\
-                            nr_entries, trace_entries)
+                # Skip tail pages of multi-page allocations
+                # Only process the head page (aligned to allocation order)
+                if not is_aligned(pfn, 1 << page_owner.order):
+                    pfn = pfn + 1
+                    continue
 
-            except Exception as e:
-                print(e)
+                nr_entries, trace_entries = get_trace_entries(page_owner)
+                if nr_entries == 0:
+                    pfn = pfn + 1
+                    continue
 
-        except:
-            # page_owner object is invalid or points to bad memory
-            # Skip this PFN and continue
-            pass
+                try:
+                    save_page_owner(page_owner, nr_entries, trace_entries)
 
-        pfn = pfn + 1
+                    if options.details:  # shows raw call trace
+                        show_page_owner(pfn, page_owner, pageblock_order,\
+                                nr_entries, trace_entries)
 
+                except Exception as e:
+                    print(e)
+
+            except Exception:
+                # page_owner object is invalid or points to bad memory
+                # Skip this PFN and continue
+                pass
+
+            pfn = pfn + 1
+
+    except KeyboardInterrupt:
+        interrupted = True
 
     if tty != None:
         print(" " * 70, end="\r", file=tty) # clear the line
+
+    if interrupted:
+        total_pfns = max_pfn - min_low_pfn
+        processed_pfns = pfn - min_low_pfn
+        percent = (processed_pfns * 100.0 / total_pfns) if total_pfns > 0 else 0
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\n*** Interrupted by user (Ctrl-C) ***")
+        print("Processed %d out of %d pages (%.2f%%) - showing partial results\n" %
+              (processed_pfns, total_pfns, percent))
+        crashcolor.set_color(crashcolor.RESET)
 
     print_page_owner_summary(options, tty)
 
