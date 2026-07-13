@@ -22,7 +22,7 @@ def add_rule(sysinfo):
         return True
     
     release = sysinfo["RELEASE"]
-    if ("el8" or "el9") in release:
+    if "el8" in release or "el9" in release:
         return True
 
     return False
@@ -39,7 +39,7 @@ def get_total_physical_mem_kb():
     except:
         totalram_pages = 0
 
-    return totalram_pages * 4
+    return totalram_pages * (rh.get_page_size() // 1024)
 
 
 BUG_CONSIDER_PERCENT = 50 # Not scientific number, but 50% sounds reasonable

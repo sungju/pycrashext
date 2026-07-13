@@ -475,11 +475,11 @@ def hugetlb_total_pages():
 def get_page_shift():
     resultline = exec_crash_command("ptob 1")
     if len(resultline) == 0:
-        return 0
+        return 12
 
     words = resultline.split()
     if len(words) < 2:
-        return 0
+        return 12
 
     value = int(words[1], 16)
     idx = 0
@@ -488,6 +488,10 @@ def get_page_shift():
         idx = idx + 1
 
     return idx - 1
+
+
+def get_page_size():
+    return 1 << get_page_shift()
 
 
 vm_stat = None
@@ -1194,7 +1198,7 @@ def get_pss_for_task(task_addr):
                 rss = rss + get_pss_for_physical(line[1])
 
     if rss > 0:
-        rss = rss / 4096.0
+        rss = rss / float(get_page_size())
     return rss
 
 
@@ -1379,8 +1383,7 @@ def _collect_page_keys_for_vma(vma_addr, task_addr):
                 continue
 
             # Convert to PFN immediately to save memory
-            # PFN = physical_address / page_size (4096 bytes)
-            pfn = physical_addr >> 12
+            pfn = physical_addr >> get_page_shift()
             page_keys.add(pfn)
             pages_added += 1
 
@@ -3595,7 +3598,7 @@ def hstate_vma(vma):
 
 
 def huge_page_shift(h):
-    return h.order + page_shift
+    return h.order + get_page_shift()
 
 
 def huge_page_order(h):

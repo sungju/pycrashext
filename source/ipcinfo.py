@@ -7,9 +7,7 @@ from pykdump.API import *
 import sys
 import operator
 import crashcolor
-
-
-page_size = 4096
+import meminfo
 
 
 def bytes_to_str(num_bytes):
@@ -90,6 +88,7 @@ def show_shared_memory(options):
                 if len(words) < 3:
                     continue
                 pages = words[2].split('/')
+                page_size = meminfo.get_page_size()
                 alloc_bytes = int(pages[0]) * page_size
                 rss_bytes = int(pages[1]) * page_size
                 swap_bytes = int(pages[2]) * page_size

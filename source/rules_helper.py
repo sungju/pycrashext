@@ -21,3 +21,11 @@ def is_symbol_exists(symbol):
 
 def get_size_str(size):
     return meminfo.get_size_str(size)
+
+
+def get_page_size():
+    return meminfo.get_page_size()
+
+
+def get_page_shift():
+    return meminfo.get_page_shift()

@@ -58,25 +58,29 @@ def check_system_hang(task_list):
 
 
 def run_rule(basic_data):
-    result = find_uninterruptible_tasks(rh.get_data(basic_data, "ps -m"))
-    system_hung = check_system_hang(result)
-    if system_hung == False:
+    try:
+        result = find_uninterruptible_tasks(rh.get_data(basic_data, "ps -m"))
+        system_hung = check_system_hang(result)
+        if system_hung == False:
+            return None
+
+        result_dict = {}
+        result_dict["TITLE"] = "hung tasks detected by %s" % \
+                                ntpath.basename(__file__)
+        min_idx = max(len(result) - 5, 0)
+        result_dict["MSG"] = "%s UN tasks\n" % (len(result)) + \
+                "%s" % ("...\n" if min_idx > 0 else "") + \
+                "\n".join(result[min_idx:])
+        result_dict["KCS_TITLE"] = "System becomes unresponsive with message \"INFO: task <process>:<pid> blocked for more than 120 seconds\"."
+        result_dict["KCS_URL"] = "https://access.redhat.com/solutions/31453"
+        result_dict["RESOLUTION"] = "Please check long blocked tasks.\n" \
+                "\tCurrent hung_task_timeout_secs is %d seconds" % \
+                (readSymbol("sysctl_hung_task_timeout_secs"))
+
+        return [result_dict]
+    except Exception as e:
+        print(e)
         return None
-
-    result_dict = {}
-    result_dict["TITLE"] = "hung tasks detected by %s" % \
-                            ntpath.basename(__file__)
-    min_idx = max(len(result) - 5, 0)
-    result_dict["MSG"] = "%s UN tasks\n" % (len(result)) + \
-            "%s" % ("...\n" if min_idx > 0 else "") + \
-            "\n".join(result[min_idx:])
-    result_dict["KCS_TITLE"] = "System becomes unresponsive with message \"INFO: task <process>:<pid> blocked for more than 120 seconds\"."
-    result_dict["KCS_URL"] = "https://access.redhat.com/solutions/31453"
-    result_dict["RESOLUTION"] = "Please check long blocked tasks.\n" \
-            "\tCurrent hung_task_timeout_secs is %d seconds" % \
-            (readSymbol("sysctl_hung_task_timeout_secs"))
-
-    return [result_dict]
 
 def hung_task_check():
     import pprint

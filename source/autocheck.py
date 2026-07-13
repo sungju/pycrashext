@@ -45,8 +45,8 @@ def load_rules():
             if os.path.exists(path + "/rules"):
                 source_path = path + "/rules"
                 load_rules_in_a_path(source_path)
-        except:
-            print ("Couldn't find %s/rules directory" % (path))
+        except Exception as e:
+            print ("Couldn't find %s/rules directory: %s" % (path, e))
 
     return modules
 
@@ -68,8 +68,8 @@ def show_rules_list():
             crashcolor.set_color(crashcolor.RESET)
         try:
             print(": %s" % (module.description()))
-        except:
-            print(": No description available")
+        except Exception as e:
+            print(": No description available (%s)" % e)
 
         crashcolor.set_color(crashcolor.RESET)
 
@@ -177,8 +177,8 @@ def run_rules(options):
             if result_list != None:
                 issue_count = issue_count + len(result_list)
                 print_result(result_list)
-        except:
-            print("Error running rule %s" % (module))
+        except Exception as e:
+            print("Error running rule %s: %s" % (module.__name__, e))
 
     if issue_count > 0:
         print("*" * 75)
@@ -200,8 +200,8 @@ def reload_rules():
             print("Reloading [%s]" % (module.__name__), end='')
             module = importlib.reload(module)
             print("... DONE")
-        except:
-            print("... FAILED")
+        except Exception as e:
+            print("... FAILED (%s)" % e)
 
     print("Reloading DONE")
 
