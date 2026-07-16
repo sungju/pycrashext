@@ -19,8 +19,11 @@ def  show_cpuid_x86(options):
     cpuinfo_addrs = percpu.get_cpu_var("cpu_info")
     for cpu, addr in enumerate(cpuinfo_addrs):
         cpuinfo_x86 = readSU("struct cpuinfo_x86", addr)
-        phys_proc_id = cpuinfo_x86.phys_proc_id
-        cpu_core_id = cpuinfo_x86.cpu_core_id
+
+        try:
+            phys_proc_id = cpuinfo_x86.topo.pkg_id
+        except:
+            phys_proc_id = cpuinfo_x86.phys_proc_id
 
         cpu_core_dict = {}
         if (phys_proc_id in phys_cpu_list):
@@ -38,8 +41,14 @@ def  show_cpuid_x86(options):
 
         for cpu in core_dict:
             cpuinfo_x86 = core_dict[cpu]
+
+            try:
+                cpu_core_id = cpuinfo_x86.topo.core_id
+            except:
+                cpu_core_id = cpuinfo_x86.cpu_core_id
+
             print("\tCPU %3d, core %3d : 0x%x %s" %
-                  (cpu, cpuinfo_x86.cpu_core_id,
+                  (cpu, cpu_core_id,
                    cpuinfo_x86,
                    cpuinfo_x86.x86_model_id))
 
