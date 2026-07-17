@@ -990,6 +990,46 @@ crash> edis -c nfs4_proc_renew -m 3
 ```
 
 
+### vminfo ###
+It provides virtual-machine related information. With no option it shows the hypervisor type and memory-ballooning usage (VMware, Hyper-V, and KVM/virtio balloon are supported).
+
+`vminfo --overcommit` infers **hypervisor CPU/memory overcommit** from a single vmcore. This is aimed at the case where a guest suddenly shows very high load / soft lockups but per-CPU frequency (`cpuinfo --speed`) looks fine — the classic signature of the host descheduling the guest's vCPUs (CPU *steal*). Because some hypervisors (notably VMware) do not export steal time to the guest (`paravirt_steal_enabled=0`), the command correlates every signal that stays visible in the dump: load-average shape, run-queue depth, per-vCPU timer-tick stalls (`rq->clock_task - curr->se.exec_start`, i.e. how long a vCPU's tick stopped advancing), steal time (when accounted), and memory ballooning.
+
+```
+crash> vminfo --overcommit
+Hypervisor overcommit analysis
+==============================
+Virtualization : VMware
+Steal accounting: DISABLED (paravirt_steal_enabled=0) -> guest cannot measure
+                  CPU steal directly; inference is from load / run-queues / ticks.
+
+-- CPU pressure --
+Load average   : 200.03 / 48.38 / 17.34 (1/5/15m) over 48 CPUs -> 4.17x oversubscribed
+                 load1 >> load15: the pile-up is recent (sudden stall, not steady load)
+Runnable tasks : 809 total across 48 CPUs (16.9 per CPU); deepest run-queue = 67
+Hot run-queues : 29 CPUs with >= 8 runnable  [CPU43:67, CPU44:62, CPU36:44, ...]
+
+vCPU tick stalls (rq->clock_task - curr->se.exec_start): timer ticks stopped,
+which on a guest means the hypervisor was NOT running these vCPUs --
+   CPU  stalled(s)  task on-CPU
+     1       6.741  cssdagent
+    20       3.426  cssdmonitor
+
+-- Memory pressure (ballooning) --
+VMware balloon  : 2940860 pages reclaimed by host (11.22 GB)
+               target 2940860 pages (11.22 GB)  [at target]
+
+== Verdict ==
+LIKELY hypervisor CPU overcommit.
+  Evidence: load 200 on 48 CPUs (4.2x); run-queues up to 67 deep; 2 vCPU(s) with timer ticks stalled up to 6.7s.
+  Note: steal is unaccounted on this guest, so the case is inferential; confirm
+        against the hypervisor host's CPU-ready / co-stop metrics.
+Host MEMORY pressure present (balloon active) -- check for co-occurring memory
+overcommit on the host.
+```
+
+The verdict is inferential on hypervisors that hide steal, so it points you to confirm against the host's own metrics (VMware CPU-ready / co-stop, memory balloon/swap). A timer-tick stall of several seconds is the strongest single-snapshot evidence a vCPU was descheduled by the host.
+
 ### timeinfo ###
 It provides time related information. For now, it is providing clock source details.
 
