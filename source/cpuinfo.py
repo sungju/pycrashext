@@ -19,27 +19,27 @@ def  show_cpuid_x86(options):
     cpuinfo_addrs = percpu.get_cpu_var("cpu_info")
     for cpu, addr in enumerate(cpuinfo_addrs):
         cpuinfo_x86 = readSU("struct cpuinfo_x86", addr)
-        phys_proc_id = cpuinfo_x86.phys_proc_id
-        cpu_core_id = cpuinfo_x86.cpu_core_id
 
-        cpu_core_dict = {}
-        if (phys_proc_id in phys_cpu_list):
-            cpu_core_dict = phys_cpu_list[phys_proc_id]
+        try:
+            phys_proc_id = cpuinfo_x86.topo.pkg_id
+        except:
+            phys_proc_id = cpuinfo_x86.phys_proc_id
 
-        cpu_core_dict[cpu] = cpuinfo_x86
-        phys_cpu_list[phys_proc_id] = cpu_core_dict
+        phys_cpu_list.setdefault(phys_proc_id, {})[cpu] = cpuinfo_x86
 
-
-    for phys_cpu in phys_cpu_list:
+    for phys_cpu, core_dict in phys_cpu_list.items():
         crashcolor.set_color(crashcolor.BLUE)
         print("<<< Physical CPU %3d >>>" % (phys_cpu))
         crashcolor.set_color(crashcolor.RESET)
-        core_dict = phys_cpu_list[phys_cpu]
 
-        for cpu in core_dict:
-            cpuinfo_x86 = core_dict[cpu]
+        for cpu, cpuinfo_x86 in core_dict.items():
+            try:
+                cpu_core_id = cpuinfo_x86.topo.core_id
+            except:
+                cpu_core_id = cpuinfo_x86.cpu_core_id
+
             print("\tCPU %3d, core %3d : 0x%x %s" %
-                  (cpu, cpuinfo_x86.cpu_core_id,
+                  (cpu, cpu_core_id,
                    cpuinfo_x86,
                    cpuinfo_x86.x86_model_id))
 
