@@ -1,9 +1,95 @@
+# pycrashext commands #
+
+These crash commands are implemented as [PyKdump](https://sourceforge.net/projects/pykdump/) epython scripts. The 'mpykdump' extension must be loaded in 'crash' before the commands can be used.
+
+## Setup ##
+
+The simplest way is to run the installer at the top of this repository:
+
+```
+$ git clone https://github.com/sungju/pycrashext
+$ cd pycrashext
+$ sh ./install.sh
+$ logout
+< login again >
+```
+
+'install.sh' does the following:
+
+- Adds the 'mpykdump' extension loading and the command registration (`epython .../source/regext.py`) into '~/.crashrc'
+- Sets 'PYKDUMPPATH' in '~/.bash_profile' so the command scripts under this directory can be found
+- Optionally sets 'CRASHEXT_SERVER' in '~/.bash_profile' which is needed for the commands that talk to the 'remoteapi' server ('edis', 'git', 'ai' and 'insights'). See README.md under the ./remoteapi directory for the server setup.
+
+### Environment variables ###
+
+| Variable | Description |
+|---|---|
+| PYKDUMPPATH | Path list that contains this 'source' directory. Used to locate the command scripts |
+| CRASHEXT_SERVER | remoteapi server address (example: `http://myserver:5000`). Used by 'edis', 'git', 'ai' and 'insights' |
+| AI_ENGINE | Default AI engine for the 'ai' command ('ollama' or 'podman') |
+| AI_MODEL | Default AI model name for the 'ai' command (example: llama3.2) |
+| AI_REQUEST_TIMEOUT | Request timeout in seconds for the 'ai' command (default: 30) |
+| CODE_THEME | Color theme used when rendering the markdown output of the 'ai' command |
+| PYTHON_LIB | Additional python library paths to be added into sys.path |
+
+### Command registration ###
+
+Commands are registered by 'regext.py' which reads 'config.json' in this directory. Each entry looks like below and can be turned off by adding `"enabled": false`.
+
+```
+{
+    "command" : "meminfo",
+    "desc"    : "Memory information",
+    "options" : "-h   - list available options",
+    "help"    : "memory related information"
+}
+```
+
+## Provided commands ##
+
+Every command accepts '-h' to show the available options.
+
+| Command | Description |
+|---|---|
+| ai | Analyse command output using an AI model (needs remoteapi) |
+| auditinfo | Audit subsystem information |
+| autocheck | Diagnose known issues using the rules under ./rules |
+| bh | Bottom half (softirq/tasklet) information |
+| caseinfo | Show case number when running on a retrace server |
+| cginfo | cgroup information (v1/v2/hybrid) |
+| cpuinfo | CPU information |
+| devinfo | Device information |
+| edis | Enhanced disassembly with source lines (needs remoteapi) |
+| fsinfo | Filesystem information |
+| git | Run 'git log/show' on remote kernel source repositories (needs remoteapi) |
+| hangcheck | Show hung (D-state) tasks with details |
+| insights | Run insights rules (needs remoteapi; server plugin currently deprecated) |
+| ipcinfo | IPC information |
+| ipmi | IPMI information |
+| lockinfo | Lock related information (spinlock/mcs lock) |
+| lockup | Detect long running tasks on CPUs |
+| meminfo | Memory information |
+| modinfo | Module related information |
+| netinfo | Network information |
+| psinfo | 'ps'-like process information |
+| pstree | Process list in tree format |
+| revs | Reverse engineering helper |
+| schedinfo | Scheduling information |
+| screen | Screen handling (reset) |
+| seinfo | SELinux sidtab information |
+| selinuxinfo | SELinux status |
+| syscallinfo | System call table listing and modification check |
+| timeinfo | Time related information (clock sources) |
+| traceinfo | ftrace/BPF tracing information |
+| vminfo | Virtual machine related information |
+
 ## Commands ##
 
 ### insights ###
 
 - Insights is a rule based engine to detect known issues. [https://github.com/RedHatInsights/insights-core](https://github.com/RedHatInsights/insights-core)
-- In this exteion, it is cowork with 'remoteapi' server located under ./remoteapi/ directory. For details, how to use 'remoteapi', please check README.md under ./remoteapi directory
+- This command sends the collected data to the 'remoteapi' server located under the ./remoteapi/ directory. For details on how to set up 'remoteapi', please check README.md under the ./remoteapi directory.
+- NOTE: The server side insights plugin is currently deprecated (remoteapi/web/plugins/insights.py.deprecated), so this command only works against a server that re-enables that plugin. For local rule based checking, use 'autocheck' below.
 
 ```
 crash> insights
@@ -85,6 +171,13 @@ def run_rule(sysinfo):
 Shows system call list and can check for any modifications.
 
 ```
+Options:
+  -c, --check           Check for any modifications in syscall table
+  -n SYSCALL_NO, --no=SYSCALL_NO
+                        Shows detailed information for a specific syscall no
+```
+
+```
 crash> syscallinfo 
   0 ffffffff8119a660 (T) sys_read                  fs/read_write.c: 435
   1 ffffffff8119a710 (T) sys_write                 fs/read_write.c: 453
@@ -105,25 +198,31 @@ crash> syscallinfo --check
 1 system calls were modified
 ```
 
-### epstree ###
+### pstree ###
 It prints out process list in tree format.
 
 ```
-crash> epstree -h
-Usage: epstree.py [options]
+crash> pstree -h
+Usage: pstree.py [options]
 
 Options:
   -h, --help  show this help message and exit
   -p          Print process ID
+  -u          Print User ID
   -g          Print number of threads
   -s          Print task state
   -t TASK_ID  Print specific task and its children
+  -A          Use ASCII characters for tree (default: Unicode)
+  -l          Print state color legend
+  -T          Show threads as children with {name} notation
+  -c          Disable compact mode (identical leaf processes are
+              compacted by default)
 ```
 
 Examples)
 
 ```
-crash> epstree
+crash> pstree
 swapper/0 -+- systemd -+- systemd-journal 
            |           |- lvmetad 
            |           |- systemd-udevd -+- systemd-udevd 
@@ -136,7 +235,7 @@ swapper/0 -+- systemd -+- systemd-journal
            |           |- systemd-logind
 ...
 
-crash> epstree -p
+crash> pstree -p
 swapper/0(0) -+- systemd(1) -+- systemd-journal(811) 
               |              |- lvmetad(835) 
               |              |- systemd-udevd(843) -+- systemd-udevd(284694) 
@@ -149,7 +248,7 @@ swapper/0(0) -+- systemd(1) -+- systemd-journal(811)
               |              |- systemd-logind(1407)
 ...
 
-crash> epstree -p -t 843
+crash> pstree -p -t 843
 systemd-udevd(843) -+- systemd-udevd(284694) 
                     `- systemd-udevd(284791) 
 
@@ -158,6 +257,21 @@ Total 3 tasks printed
 
 ### lockup ###
 Detects any long running tasks on CPUs.
+
+```
+Options:
+  -b, --backtrace       Shows backtrace of the process
+  -c, --compact         Exclude swapper/* from the list
+  -d, --details         Show task details
+  -r, --reverse         Show longest holder at top
+  -t, --tasks           Show tasks in each runqueue
+  -s, --rt              Show RT statistics
+  -q QSPINLOCK, --qspinlock=QSPINLOCK
+                        Shows qspinlock details
+  --smp-call=SMP_CALL   Analyze SMP call function data: --smp-call
+                        <call_function_data_addr>[,<__call_single_data_addr>]
+  -u, --user            Show user space running only
+```
 
 ```
 crash> lockup
@@ -331,11 +445,40 @@ Total number of task_group(s) = 130
 ```
 
 
-### emodinfo ###
+### modinfo ###
 It provides module details as well as a way to disassemble all the functions in the module.
 
 ```
-crash> emodinfo
+crash> modinfo -h
+Options:
+  -h, --help            show this help message and exit
+  --disasm=DISASM_MODULE
+                        Disassemble a module functions
+  --details=MODULE_DETAIL
+                        Show details
+  -c, --contents        Show contents of each symbols
+  -t                    Shows tainted modules only
+  -g                    Shows gaps between modules as well as physically
+                        allocated sizes
+  -a                    Shows address range for the module
+  -u                    Shows unloaded module data if possible
+  -f                    Shows meanings of tainted flags
+  -s                    Shows strings from each data section
+  -l SHOW_LONGER_THAN   Set the minimum size to show for -s. default=5
+  --batch_run=BATCH_RUN
+                        Run major options all together to get detailed info
+  --target_dir=TARGET_DIR
+                        Result will be saved in this directory
+  --nodate              Do not use date in target filename
+  -m MODULE_ADDR, --module=MODULE_ADDR
+                        Trying to retrieve module structure
+  -y SYMTAB, --symtab=SYMTAB
+                        Trying to retrieve module symbol table
+  -r, --reverse         Trying to disasm from unloaded module
+```
+
+```
+crash> modinfo
 struct module *    MODULE_NAME                     SIZE
 0xffffffffc036f780 dm_mod                        123941
 0xffffffffc0389160 dm_log                         18411
@@ -347,7 +490,7 @@ struct module *    MODULE_NAME                     SIZE
 0xffffffffc03e11a0 ptp                            19231
 0xffffffffc0395000 i2c_algo_bit                   13413
 
-crash> emodinfo --details oracleacfs
+crash> modinfo --details oracleacfs
 struct module   : 0xffffffffa085a200
 name            : oracleacfs
 version         : None
@@ -370,7 +513,7 @@ exit            : ofs_cleanup_module (0xffffffffa06a2320)
 0xffffffffa0720ce0 (t) STACK_pop
 
 
-crash> emodinfo --disasm=oracleacfs
+crash> modinfo --disasm=oracleacfs
 ---------- BEGIN disassemble OfsLocateExtent() ----------
 0xffffffffa0500000 <OfsLocateExtent>:   push   %rbp
 0xffffffffa0500001 <OfsLocateExtent+0x1>:       mov    %rsp,%rbp
@@ -387,7 +530,7 @@ crash> emodinfo --disasm=oracleacfs
 This command also can be very useful to track down any recently unloaded modules. It can be useful to find rootkit modules which has just disappeared.
 
 ```
-crash> emodinfo -u
+crash> modinfo -u
 struct module *    MODULE_NAME                     SIZE 
 0xffffffffa000ed00 dm_mod                         81692 
 0xffffffffa0016420 iTCO_vendor_support             3088 
@@ -398,7 +541,7 @@ struct module *    MODULE_NAME                     SIZE
 ...
 
 
-crash> emodinfo -u -g
+crash> modinfo -u -g
 struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa000ed00 dm_mod                         81692      86016          0
 ...
@@ -408,7 +551,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa014bee0 ioatdma                        58482      65536      20480
 ...
 
-crash> emodinfo -u -g -a
+crash> modinfo -u -g -a
 struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 0xffffffffa000ed00 dm_mod                         81692      86016          0
 ...
@@ -421,7 +564,7 @@ struct module *    MODULE_NAME                     SIZE ALLOC_SIZE    GAPSIZE
 ...
 ```
 
-If you are suspecting an unloaded module in invalid op such as below, you can try 'emodinfo -m {address}' to see if it was belong to a module.
+If you are suspecting an unloaded module in invalid op such as below, you can try 'modinfo -m {address}' to see if it was belong to a module.
 
 ```
 crash> bt
@@ -457,13 +600,13 @@ PID: 24390  TASK: ffff9c271b16d140  CPU: 1   COMMAND: "badprocess"
 From the above, 'RIP' is invalid. Let's check what was in there. If shows that the address was belong to the module ensilo.
 
 ```
-crash> emodinfo -m ffffffffc07fdfb0
+crash> modinfo -m ffffffffc07fdfb0
 Found the below module
 	struct module 0xffffffffc0889de0
 	name : ensilo_3_10_0_957_x86_64
 	status : unloaded
 
-crash> emodinfo --details=0xffffffffc0889de0
+crash> modinfo --details=0xffffffffc0889de0
 struct module   : 0xffffffffc0889de0
 name            : ensilo_3_10_0_957_x86_64
 version         : None
@@ -828,44 +971,6 @@ crash> edis -c nfs4_proc_renew -m 3
 ```
 
 
-### vmwareinfo ###
-It displays VMware ballooning usage. It is useful to check out unacounted memory in VMware virtual guest.
-
-```
-crash> vmwareinfo
-  size = 0x2e1c39
-  target = 0x606770
-  stats = {
-    timer = 0x2138df, 
-    alloc = 0x2e130b, 
-    alloc_fail = 0x7, 
-    sleep_alloc = 0xa59, 
-    sleep_alloc_fail = 0x0, 
-    refused_alloc = 0x123, 
-    refused_free = 0x123, 
-    free = 0x0, 
-    lock = 0x2e1d5c, 
-    lock_fail = 0x123, 
-    unlock = 0x0, 
-    unlock_fail = 0x0, 
-    target = 0x2138df, 
-    target_fail = 0x14, 
-    start = 0x15, 
-    start_fail = 0x0, 
-    guest_type = 0x15, 
-    guest_type_fail = 0x0
-  }
-
-allocated size (pages)     = 3021881
-allocated size (bytes)     = 12377624576, (11.53GB)
-required target (pages)    = 6317936
-required target (bytes)    = 25878265856, (24.10GB)
-
-rate_alloc                 = 2048
-
-```
-
-
 ### timeinfo ###
 It provides time related information. For now, it is providing clock source details.
 
@@ -899,7 +1004,9 @@ Options:
   -h, --help            show this help message and exit
   -a, --all             Show all the output
   -b, --budyinfo        Show /proc/buddyinfo like output
+  -c, --compact         Show compact data for other options
   -d, --details         Show detailed output
+  --debug               Show debug output
   -e ERROR_CODE, --error=ERROR_CODE
                         Interpret page_fault error code
   -f TLB_LIST, --tlb=TLB_LIST
@@ -907,16 +1014,40 @@ Options:
                         0xffffade6b68037e0 -d
   -F PTE_FLAGS, --pte_flags=PTE_FLAGS
                         Shows the meaning of pte flags
-  -g GFP_MASK, --gfp_mask=GFP_MASK
+  -G GFP_MASK, --gfp_mask=GFP_MASK
                         Interpret gfp_mask value
+  -g, --graph           Show bar chart for memory usage visualization
   -i, --meminfo         Show /proc/meminfo-like output
+  -l, --longer          Show more data than normal
   -m, --numa            Show NUMA info
+  --maxcount=MAXCOUNT   Check only maxcount
+  --memory_limit=MEMORY_LIMIT
+                        Limit call trace storage to reduce memory usage
+                        (default: 0, no limit)
   -n, --nogroup         Show data in individual tasks
+  -o, --page_owner      Show page_owner details
+  -O, --OOM             Analyse OOM messages in log
+  --overall             Show overall memory usage breakdown with bar graphs
+  --oom-summary         Show OOM summary dashboard with pattern analysis
+  --process-filter=PROCESS_FILTER
+                        Filter OOM events by process name (comma-separated or
+                        regex)
+  --oom-count=OOM_COUNT
+                        Limit number of OOM events to display
+  --oom-top=OOM_TOP     Show top N memory consumers (default: 10)
+  -P, --pss             Show memory usages(pss) by tasks
   -p PERCPU, --percpu=PERCPU
                         Convert percpu address into virtual address
+  --pager=PAGER         Show progress per specified term. default=2000
+  --progress            Show progress results while handling operation
+  --reverse             Show results in reverse order
   -s, --slabtop         Show slabtop-like output
   -S SLABDETAIL, --slabdetail=SLABDETAIL
                         Show details of a slab
+  --shared              Account for shared memory in OOM analysis to prevent
+                        double-counting
+  --corrupt=CORRUPT     Check SLAB corruption. Format:
+                        <kmem_cache_addr|slab_name>[:<cpu_num>]
   -t PERCPU_TYPE, --type=PERCPU_TYPE
                         Specify percpu type : u8, u16, u32, u64, s8, s16, s32,
                         s64, int
@@ -924,6 +1055,8 @@ Options:
   -U USER_ALLOC, --user_alloc=USER_ALLOC
                         Show slub_debug=U usage
   -v, --vm              Show 'vm' output with more details
+  -w, --swap            Show swap usage
+  -W, --swap_full       Show swap usage in detail
 
 crash> meminfo --memusage
 ======================================================================
@@ -1063,10 +1196,10 @@ crash> revs -h
 Usage: revs.py [options]
 
 Options:
-  -h, --help  show this help message and exit
-  --regs      Registers used for argument passing
-  --asm=ASM   Simple manual for GNU assembly
-  --list      Shows the list of instructions you can check details
+  -h, --help         show this help message and exit
+  -r, --regs         Registers used for argument passing
+  -a ASM, --asm=ASM  Simple manual for GNU assembly
+  -l, --list         Shows the list of instructions you can check details
 
 crash> revs
 ** function parameters for x86_64 **
@@ -1108,11 +1241,31 @@ crash> psinfo -h
 Usage: psinfo.py [options]
 
 Options:
-  -h, --help  show this help message and exit
-  --aux       ps aux
-  --auxcww    ps auxcww
-  --auxww     ps auxww
-  --ef        ps -ef
+  -h, --help            show this help message and exit
+  --aux                 ps aux
+  --auxcww              ps auxcww
+  --auxww               ps auxww
+  --ef                  ps -ef
+  -p POLICY_TYPE, --policy=POLICY_TYPE
+                        Shows specific policy type of processes only.
+                        0 : NORMAL, 1 : FIFO, 2 : RR, 3 : BATCH,
+                        5 : IDLE, 6 : DEADLINE
+  -s, --searchstack     Search each task stack to find value specified in
+                        include with 'bt -f'
+  -S, --Searchstack     Search each task stack to find value specified in
+                        include with 'bt -F'
+  -n, --nodetails       Shows no stack contents
+  -i INCLUDE, --include=INCLUDE
+                        comma separated value list to search with
+                        --searchstack
+  -e EXCLUDE, --exclude=EXCLUDE
+                        comma separated value list to ignore in
+                        --searchstack
+  -k TASK_NAME, --taskname=TASK_NAME
+                        limit search range only to tasks with matching task
+                        name
+  -t TASKADDR, --task=TASKADDR
+                        Shows general information about a task
 
 crash> psinfo --aux | head
 USER              PID %CPU %MEM      VSZ      RSS TTY      STAT       START     TIME COMMAND
@@ -1136,4 +1289,60 @@ root                4        2  0    May26        ?  116,05:21:33 [ksoftirqd/0]
 root                5        2  0    May26        ?  116,05:21:33 [stopper/0]
 root                6        2  0    May26        ?  116,05:21:33 [watchdog/0]
 root                7        2  0    May26        ?  116,05:21:33 [migration/1]
+```
+
+### git ###
+
+It runs `git log` / `git show` on the kernel source repositories hosted by the 'remoteapi' server. This is useful to find which commit introduced or changed a symbol without leaving 'crash'. It needs 'CRASHEXT_SERVER' to be set (see the 'edis' section and README.md under ./remoteapi).
+
+```
+crash> git -h
+Usage:
+  git <log|show> [git-options]
+
+Subcommands:
+  log              Search git log (supports all git log options, default: --max-count=1)
+  show             Show commit details (supports all git show options)
+
+Options:
+  --repos=<repos>  Comma-separated list of repos (e.g., rhel9,linux,upstream)
+  --timeout=<n>    Request timeout in seconds (default: 3600)
+  --verbose        Show verbose output
+  -h, --help       Show help
+```
+
+Examples)
+
+```
+crash> git log -Sclip_push --max-count=5
+crash> git show abc123def --stat
+crash> git log -Sinit_new_ldt --repos=rhel9,upstream
+```
+
+### ai ###
+
+It sends the output of a crash command (or a file) to an AI engine running behind the 'remoteapi' server and prints the analysis in markdown. It needs 'CRASHEXT_SERVER' to be set; the engine/model can be selected per invocation or via the 'AI_ENGINE'/'AI_MODEL' environment variables.
+
+```
+crash> ai -h
+Options:
+  -h, --help            show this help message and exit
+  -c CMD_STR, --cmd=CMD_STR
+                        The output of this command will be analysed
+  -e AI_ENGINE, --engine=AI_ENGINE
+                        Choose AI engine to use (ollama, podman)
+  -i INPUT_FILE, --input=INPUT_FILE
+                        Use file for input data
+  -m AI_MODEL, --model=AI_MODEL
+                        Choose AI model to use
+  -r, --reset           Reset AI prompt history
+  -t TASKID, --taskid=TASKID
+                        vmcore taskid
+```
+
+Examples)
+
+```
+crash> ai -c "bt"
+crash> ai -c "log" -m llama3.2
 ```
