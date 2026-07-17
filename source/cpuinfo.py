@@ -6,6 +6,7 @@
 
 from pykdump.API import *
 from LinuxDump import percpu
+from LinuxDump import Tasks
 
 import sys
 from optparse import OptionParser
@@ -108,6 +109,351 @@ def show_cpufreq():
             except:
                 pass
 
+
+
+def get_rq_behind():
+    """
+    Return (behind_by_cpu, watchdog_thresh, softlockup_thresh).
+
+    behind_by_cpu maps cpu -> seconds its runqueue clock is behind the most
+    up-to-date runqueue in the system.  This is the same 'N sec behind' signal
+    the 'lockup' command reports and tells us which CPUs failed to make
+    scheduling progress (a soft lockup pre-condition).
+    """
+    behind_by_cpu = {}
+    watchdog_thresh = -1
+    softlockup_thresh = -1
+    try:
+        rqlist = Tasks.getRunQueues()
+        now = max(rq.Timestamp for rq in rqlist)
+        for rq in rqlist:
+            behind_by_cpu[rq.cpu] = (now - rq.Timestamp) / 1000000000.0
+    except Exception:
+        return behind_by_cpu, watchdog_thresh, softlockup_thresh
+
+    try:
+        watchdog_thresh = readSymbol("watchdog_thresh")
+        softlockup_thresh = watchdog_thresh * 2
+    except Exception:
+        try:
+            softlockup_thresh = readSymbol("softlockup_thresh")
+            watchdog_thresh = softlockup_thresh // 2
+        except Exception:
+            watchdog_thresh = 10
+            softlockup_thresh = 20
+
+    return behind_by_cpu, watchdog_thresh, softlockup_thresh
+
+
+def get_base_khz():
+    """Base (TSC/MPERF reference) frequency in kHz."""
+    for sym in ("cpu_khz", "tsc_khz"):
+        try:
+            val = readSymbol(sym)
+            if val:
+                return int(val)
+        except Exception:
+            continue
+    return 0
+
+
+def get_max_khz_by_cpu():
+    """
+    Per-CPU maximum frequency (kHz) taken from the cpufreq policy when
+    available.  Falls back to an empty dict so callers can use the base freq.
+    """
+    max_khz = {}
+    try:
+        addrs = percpu.get_cpu_var("cpufreq_cpu_data")
+    except Exception:
+        return max_khz
+
+    for cpu, addr in enumerate(addrs):
+        try:
+            policy_addr = readULong(addr)
+            if not policy_addr:
+                continue
+            policy = readSU("struct cpufreq_policy", policy_addr)
+            cur_max = 0
+            if member_offset("struct cpufreq_policy", "cpuinfo") >= 0:
+                try:
+                    cur_max = policy.cpuinfo.max_freq
+                except Exception:
+                    cur_max = 0
+            if not cur_max:
+                cur_max = policy.max
+            if cur_max:
+                max_khz[cpu] = int(cur_max)
+        except Exception:
+            continue
+    return max_khz
+
+
+def get_jiffies_age_sec(last_update_jiffies):
+    """Convert a jiffies timestamp into 'seconds ago' using HZ and jiffies."""
+    try:
+        hz = sys_info.HZ
+    except Exception:
+        hz = 1000
+    if not hz:
+        hz = 1000
+    try:
+        now = readSymbol("jiffies")
+    except Exception:
+        return -1.0
+    # jiffies can be exported as jiffies_64; normalise to a plain int
+    try:
+        now = int(now)
+    except Exception:
+        return -1.0
+    delta = now - int(last_update_jiffies)
+    if delta < 0:
+        return -1.0
+    return delta / float(hz)
+
+
+def get_measured_khz(cpu, base_khz):
+    """
+    Return (khz, age_sec) for a CPU using the kernel's own APERF/MPERF samples.
+    This is driver-agnostic: it is updated from scale_freq_tick() on every
+    scheduler tick regardless of the active cpufreq driver.
+
+    Returns (None, -1) when no APERF/MPERF sample is available.
+    """
+    # RHEL7/8-era: per_cpu(samples) is 'struct aperfmperf_sample' whose .khz
+    # field already holds the last measured effective frequency.  We do not try
+    # to derive a monotonic 'now' from the dump to age the .time field — that is
+    # fragile — so age is reported as n/a for this path (the .khz value is the
+    # last tick's sample, which is what matters during a soft lockup).
+    if (symbol_exists("samples")
+            and member_offset("struct aperfmperf_sample", "khz") >= 0):
+        try:
+            addrs = percpu.get_cpu_var("samples")
+            s = readSU("struct aperfmperf_sample", addrs[cpu])
+            khz = int(s.khz)
+            if khz:
+                return khz, -1.0
+        except Exception:
+            pass
+
+    # 5.x+: per_cpu(cpu_samples) is 'struct aperfmperf' storing the last tick's
+    # aperf/mperf deltas (.acnt/.mcnt) plus a jiffies .last_update.
+    if symbol_exists("cpu_samples") and base_khz:
+        try:
+            addrs = percpu.get_cpu_var("cpu_samples")
+            s = readSU("struct aperfmperf", addrs[cpu])
+            acnt = int(s.acnt)
+            mcnt = int(s.mcnt)
+            if mcnt:
+                khz = base_khz * acnt // mcnt
+                age = -1.0
+                if member_offset("struct aperfmperf", "last_update") >= 0:
+                    age = get_jiffies_age_sec(s.last_update)
+                return khz, age
+        except Exception:
+            pass
+
+    # Last resort: per_cpu(arch_freq_scale) is a SCHED_CAPACITY_SCALE-relative
+    # ratio (1024 == max).  Needs a max frequency to turn into kHz; handled by
+    # the caller when it multiplies by max_khz.
+    if symbol_exists("arch_freq_scale"):
+        try:
+            addrs = percpu.get_cpu_var("arch_freq_scale")
+            scale = int(readULong(addrs[cpu]))
+            # Encode as a negative sentinel so the caller knows this is a scale
+            # (relative to 1024), not an absolute kHz value.
+            return -scale, -1.0
+        except Exception:
+            pass
+
+    return None, -1.0
+
+
+def get_throttle_count(cpu):
+    """
+    Return (core_count, package_count) thermal-throttle counts for a CPU, or
+    (None, None) when the thermal throttle state is not present.  Non-zero
+    counts are direct evidence the hardware capped this CPU's frequency.
+    """
+    if not symbol_exists("thermal_state"):
+        return None, None
+    try:
+        addrs = percpu.get_cpu_var("thermal_state")
+        ts = readSU("struct thermal_state", addrs[cpu])
+        core = pkg = None
+        if member_offset("struct thermal_state", "core_throttle") >= 0:
+            try:
+                core = int(ts.core_throttle.count)
+            except Exception:
+                core = None
+        if member_offset("struct thermal_state", "package_throttle") >= 0:
+            try:
+                pkg = int(ts.package_throttle.count)
+            except Exception:
+                pkg = None
+        return core, pkg
+    except Exception:
+        return None, None
+
+
+def get_pstate_by_cpu():
+    """Per-CPU (current_pstate, max_pstate) from intel_pstate when loaded."""
+    pstate = {}
+    try:
+        all_cpu_data = readSymbol("all_cpu_data")
+    except Exception:
+        return pstate
+    if not all_cpu_data:
+        return pstate
+    total = sys_info.CPUS
+    for cpu in range(total):
+        try:
+            cpudata = all_cpu_data[cpu]
+            if not cpudata:
+                continue
+            pstate[cpu] = (int(cpudata.pstate.current_pstate),
+                           int(cpudata.pstate.max_pstate))
+        except Exception:
+            continue
+    return pstate
+
+
+# A CPU running below this fraction of its maximum is treated as "slow".
+SLOW_FRACTION = 0.60
+# APERF/MPERF samples older than this many seconds are treated as not
+# representative of the lockup window.
+STALE_SAMPLE_SEC = 60.0
+
+
+def show_cpu_speed(options):
+    """
+    Driver-agnostic effective CPU speed, aimed at soft-lockup analysis.
+
+    For every online CPU it prints the measured effective frequency (from the
+    kernel's APERF/MPERF samples), how it compares to the CPU's maximum, the
+    sample age, thermal-throttle counts, intel_pstate cur/max p-state, and how
+    far the CPU's runqueue is 'behind'.  A CPU that is BOTH running well below
+    its maximum AND behind on scheduling is flagged as a soft-lockup SUSPECT.
+    """
+    if not sys_info.machine in ("x86_64", "i386", "i686", "athlon"):
+        print("Effective-speed analysis is only available on x86 architectures")
+        return
+
+    base_khz = get_base_khz()
+    max_khz_by_cpu = get_max_khz_by_cpu()
+    pstate_by_cpu = get_pstate_by_cpu()
+    behind_by_cpu, watchdog_thresh, softlockup_thresh = get_rq_behind()
+
+    online_cpus = get_cpumask_bits("__cpu_online_mask")
+    if not online_cpus:
+        online_cpus = get_cpumask_bits("cpu_online_map")
+    if not online_cpus:
+        online_cpus = set(range(sys_info.CPUS))
+
+    crashcolor.set_color(crashcolor.LIGHTCYAN)
+    print("Base frequency = %s MHz, kernel.watchdog_thresh = %d "
+          "(soft lockup at %d sec)" %
+          (("%.0f" % (base_khz / 1000.0)) if base_khz else "n/a",
+           watchdog_thresh, softlockup_thresh))
+    print("Effective frequency is measured from APERF/MPERF "
+          "(driver-agnostic, updated on each scheduler tick)\n")
+    crashcolor.set_color(crashcolor.RESET)
+
+    hdr = "%4s %10s %10s %6s %9s %9s %8s %s" % (
+        "CPU", "eff.MHz", "max.MHz", "%max", "sample", "behind", "throttle",
+        "note")
+    print(hdr)
+    print("-" * len(hdr))
+
+    any_suspect = False
+    for cpu in sorted(online_cpus):
+        max_khz = max_khz_by_cpu.get(cpu, base_khz)
+        khz, age = get_measured_khz(cpu, base_khz)
+
+        # arch_freq_scale fallback comes back as a negative "scale/1024" value.
+        if khz is not None and khz < 0 and max_khz:
+            khz = max_khz * (-khz) // 1024
+
+        if khz is None or khz <= 0:
+            eff_mhz_str = "n/a"
+            pct = None
+        else:
+            eff_mhz_str = "%.0f" % (khz / 1000.0)
+            pct = (100.0 * khz / max_khz) if max_khz else None
+
+        max_mhz_str = ("%.0f" % (max_khz / 1000.0)) if max_khz else "n/a"
+        pct_str = ("%.0f%%" % pct) if pct is not None else "n/a"
+        if age is not None and age >= 0:
+            age_str = "%.1fs" % age
+        else:
+            age_str = "n/a"
+
+        behind = behind_by_cpu.get(cpu)
+        behind_str = ("%.1fs" % behind) if behind is not None else "n/a"
+
+        core_thr, pkg_thr = get_throttle_count(cpu)
+        if core_thr is None and pkg_thr is None:
+            thr_str = "n/a"
+            throttled = False
+        else:
+            thr_str = "%d/%d" % (core_thr or 0, pkg_thr or 0)
+            throttled = bool((core_thr or 0) or (pkg_thr or 0))
+
+        notes = []
+        stale = (age is not None and age >= 0 and age > STALE_SAMPLE_SEC)
+        slow = (pct is not None and pct < SLOW_FRACTION * 100)
+        is_behind = (behind is not None and watchdog_thresh > 0
+                     and behind >= watchdog_thresh)
+
+        if pstate_by_cpu.get(cpu):
+            cur_ps, max_ps = pstate_by_cpu[cpu]
+            notes.append("pstate %d/%d" % (cur_ps, max_ps))
+        if throttled:
+            notes.append("THROTTLED")
+        if stale:
+            notes.append("sample stale (>%ds; not representative)"
+                         % int(STALE_SAMPLE_SEC))
+
+        color = crashcolor.RESET
+        # SUSPECT: measurably slow, the sample is fresh enough to trust, and
+        # the CPU is behind on scheduling -> slowness plausibly caused a stall.
+        if slow and not stale and is_behind:
+            notes.insert(0, "SUSPECT: slow while behind")
+            color = crashcolor.RED
+            any_suspect = True
+        elif throttled and slow:
+            color = crashcolor.LIGHTRED
+        elif slow or throttled:
+            color = crashcolor.YELLOW
+
+        crashcolor.set_color(color)
+        print("%4d %10s %10s %6s %9s %9s %8s %s" %
+              (cpu, eff_mhz_str, max_mhz_str, pct_str, age_str, behind_str,
+               thr_str, ", ".join(notes)))
+        crashcolor.set_color(crashcolor.RESET)
+
+    print("")
+    if any_suspect:
+        crashcolor.set_color(crashcolor.RED)
+        print("One or more CPUs were running well below their maximum "
+              "frequency while also")
+        print("falling behind on scheduling. A sustained low frequency can "
+              "stretch a normal")
+        print("operation past the %d sec soft-lockup threshold. Cross-check "
+              "with 'lockup' and" % softlockup_thresh)
+        print("the backtrace of the stuck task ('bt' on the CPU's current "
+              "task).")
+        crashcolor.set_color(crashcolor.RESET)
+    else:
+        print("No CPU is both slow and behind. If a soft lockup occurred, the "
+              "cause is more")
+        print("likely software (spin loops, lock contention, IRQ storms) than "
+              "CPU frequency;")
+        print("use 'lockup' and the stuck task's backtrace to investigate.")
+
+    if base_khz == 0:
+        print("\nNOTE: base frequency (cpu_khz/tsc_khz) was unavailable; "
+              "percentages may be approximate.")
 
 
 TLBSTATE_OK=1
@@ -575,6 +921,10 @@ def cpuinfo():
     op.add_option("-s", "--cstate", dest="cstate", default=0,
                   action="store_true",
                   help="Show CPU c-state")
+    op.add_option("--speed", dest="speed", default=0,
+                  action="store_true",
+                  help="Show driver-agnostic effective CPU speed "
+                       "(APERF/MPERF) for soft-lockup analysis")
     op.add_option("-t", "--tlb", dest="tlb", default=0,
                   action="store_true",
                   help="Show CPU tlb state")
@@ -590,6 +940,10 @@ def cpuinfo():
 
     if (o.cpufreq):
         show_cpufreq()
+        sys.exit(0)
+
+    if (o.speed):
+        show_cpu_speed(o)
         sys.exit(0)
 
     if (o.cpuid):
