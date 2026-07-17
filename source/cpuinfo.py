@@ -113,14 +113,18 @@ def show_cpufreq():
 
 def get_rq_behind():
     """
-    Return (behind_by_cpu, watchdog_thresh, softlockup_thresh).
+    Return (behind_by_cpu, nr_running_by_cpu, watchdog_thresh,
+    softlockup_thresh).
 
     behind_by_cpu maps cpu -> seconds its runqueue clock is behind the most
     up-to-date runqueue in the system.  This is the same 'N sec behind' signal
     the 'lockup' command reports and tells us which CPUs failed to make
-    scheduling progress (a soft lockup pre-condition).
+    scheduling progress (a soft lockup pre-condition).  nr_running_by_cpu maps
+    cpu -> number of runnable tasks, a guest-visible sign of CPU pressure that
+    stays meaningful even when the hypervisor is starving the vCPU.
     """
     behind_by_cpu = {}
+    nr_running_by_cpu = {}
     watchdog_thresh = -1
     softlockup_thresh = -1
     try:
@@ -128,8 +132,12 @@ def get_rq_behind():
         now = max(rq.Timestamp for rq in rqlist)
         for rq in rqlist:
             behind_by_cpu[rq.cpu] = (now - rq.Timestamp) / 1000000000.0
+            try:
+                nr_running_by_cpu[rq.cpu] = int(rq.nr_running)
+            except Exception:
+                pass
     except Exception:
-        return behind_by_cpu, watchdog_thresh, softlockup_thresh
+        return behind_by_cpu, nr_running_by_cpu, watchdog_thresh, softlockup_thresh
 
     try:
         watchdog_thresh = readSymbol("watchdog_thresh")
@@ -142,7 +150,7 @@ def get_rq_behind():
             watchdog_thresh = 10
             softlockup_thresh = 20
 
-    return behind_by_cpu, watchdog_thresh, softlockup_thresh
+    return behind_by_cpu, nr_running_by_cpu, watchdog_thresh, softlockup_thresh
 
 
 def get_base_khz():
@@ -214,11 +222,18 @@ def get_jiffies_age_sec(last_update_jiffies):
 
 def get_measured_khz(cpu, base_khz):
     """
-    Return (khz, age_sec) for a CPU using the kernel's own APERF/MPERF samples.
-    This is driver-agnostic: it is updated from scale_freq_tick() on every
-    scheduler tick regardless of the active cpufreq driver.
+    Return (value, age_sec, source) for a CPU using the kernel's own
+    APERF/MPERF samples.  This is driver-agnostic: it is updated from
+    scale_freq_tick() on every scheduler tick regardless of the active cpufreq
+    driver.
 
-    Returns (None, -1) when no APERF/MPERF sample is available.
+    source is one of:
+      'aperf_khz'   - measured kHz read directly (older kernels)
+      'aperf_delta' - measured kHz derived from acnt/mcnt deltas
+      'freq_scale'  - only the arch_freq_scale ratio was available; value is a
+                      NEGATIVE scale (relative to 1024).  A value of -1024 is
+                      the untouched default and means NO real measurement.
+      None          - nothing available (value is None)
     """
     # RHEL7/8-era: per_cpu(samples) is 'struct aperfmperf_sample' whose .khz
     # field already holds the last measured effective frequency.  We do not try
@@ -232,7 +247,7 @@ def get_measured_khz(cpu, base_khz):
             s = readSU("struct aperfmperf_sample", addrs[cpu])
             khz = int(s.khz)
             if khz:
-                return khz, -1.0
+                return khz, -1.0, 'aperf_khz'
         except Exception:
             pass
 
@@ -249,7 +264,7 @@ def get_measured_khz(cpu, base_khz):
                 age = -1.0
                 if member_offset("struct aperfmperf", "last_update") >= 0:
                     age = get_jiffies_age_sec(s.last_update)
-                return khz, age
+                return khz, age, 'aperf_delta'
         except Exception:
             pass
 
@@ -262,11 +277,11 @@ def get_measured_khz(cpu, base_khz):
             scale = int(readULong(addrs[cpu]))
             # Encode as a negative sentinel so the caller knows this is a scale
             # (relative to 1024), not an absolute kHz value.
-            return -scale, -1.0
+            return -scale, -1.0, 'freq_scale'
         except Exception:
             pass
 
-    return None, -1.0
+    return None, -1.0, None
 
 
 def get_throttle_count(cpu):
@@ -318,6 +333,99 @@ def get_pstate_by_cpu():
     return pstate
 
 
+HYPERVISOR_NAMES = {
+    0: "native (bare metal)",
+    1: "VMware",
+    2: "Hyper-V",
+    3: "Xen PV",
+    4: "Xen HVM",
+    5: "KVM",
+    6: "Jailhouse",
+    7: "ACRN",
+}
+
+
+def get_hypervisor():
+    """
+    Return (name, is_virt).  Uses x86_hyper_type when present, otherwise the
+    X86_FEATURE_HYPERVISOR bit in boot_cpu_data.
+    """
+    if symbol_exists("x86_hyper_type"):
+        try:
+            val = int(readSymbol("x86_hyper_type"))
+            name = HYPERVISOR_NAMES.get(val, "type %d" % val)
+            return name, (val != 0)
+        except Exception:
+            pass
+
+    # X86_FEATURE_HYPERVISOR = word 4, bit 31
+    try:
+        boot_cpu_data = readSymbol("boot_cpu_data")
+        if (boot_cpu_data.x86_capability[4] >> 31) & 1:
+            return "hypervisor present", True
+    except Exception:
+        pass
+    return "native (bare metal)", False
+
+
+def get_steal_accounting_enabled():
+    """
+    Return True/False when the paravirt steal-time static key is present,
+    else None.  When this is False the guest is NOT accumulating steal time,
+    so a zero steal value means 'not measured', not 'no steal'.
+    """
+    if not symbol_exists("paravirt_steal_enabled"):
+        return None
+    try:
+        key = readSymbol("paravirt_steal_enabled")
+        return int(key.enabled.counter) > 0
+    except Exception:
+        return None
+
+
+def get_steal_index():
+    """Index of CPUTIME_STEAL in the kcpustat cpustat[] array (fallback 7)."""
+    try:
+        return int(EnumInfo("enum cpu_usage_stat")["CPUTIME_STEAL"])
+    except Exception:
+        return 7
+
+
+def get_steal_by_cpu():
+    """
+    Return dict cpu -> (steal_ns, total_ns) from per-CPU kernel_cpustat.
+    total_ns is the sum of every cpustat[] bucket, so steal% = steal/total.
+    Empty dict when kernel_cpustat is unavailable.
+    """
+    steal = {}
+    if not symbol_exists("kernel_cpustat"):
+        return steal
+    idx = get_steal_index()
+    try:
+        addrs = percpu.get_cpu_var("kernel_cpustat")
+    except Exception:
+        return steal
+    for cpu, addr in enumerate(addrs):
+        try:
+            kcs = readSU("struct kernel_cpustat", addr)
+            buckets = [int(x) for x in kcs.cpustat]
+            if idx < len(buckets):
+                steal[cpu] = (buckets[idx], sum(buckets))
+        except Exception:
+            continue
+    return steal
+
+
+def get_loadavg():
+    """Return (load1, load5, load15) from avenrun, or None."""
+    try:
+        avenrun = readSymbol("avenrun")
+        # fixed-point with FSHIFT=11 (FIXED_1 = 2048)
+        return tuple(int(avenrun[i]) / 2048.0 for i in range(3))
+    except Exception:
+        return None
+
+
 # A CPU running below this fraction of its maximum is treated as "slow".
 SLOW_FRACTION = 0.60
 # APERF/MPERF samples older than this many seconds are treated as not
@@ -342,13 +450,19 @@ def show_cpu_speed(options):
     base_khz = get_base_khz()
     max_khz_by_cpu = get_max_khz_by_cpu()
     pstate_by_cpu = get_pstate_by_cpu()
-    behind_by_cpu, watchdog_thresh, softlockup_thresh = get_rq_behind()
+    (behind_by_cpu, nr_running_by_cpu,
+     watchdog_thresh, softlockup_thresh) = get_rq_behind()
+    steal_by_cpu = get_steal_by_cpu()
+    hyper_name, is_virt = get_hypervisor()
+    steal_enabled = get_steal_accounting_enabled()
+    loadavg = get_loadavg()
 
     online_cpus = get_cpumask_bits("__cpu_online_mask")
     if not online_cpus:
         online_cpus = get_cpumask_bits("cpu_online_map")
     if not online_cpus:
         online_cpus = set(range(sys_info.CPUS))
+    online_n = len(online_cpus)
 
     crashcolor.set_color(crashcolor.LIGHTCYAN)
     print("Base frequency = %s MHz, kernel.watchdog_thresh = %d "
@@ -356,26 +470,55 @@ def show_cpu_speed(options):
           (("%.0f" % (base_khz / 1000.0)) if base_khz else "n/a",
            watchdog_thresh, softlockup_thresh))
     print("Effective frequency is measured from APERF/MPERF "
-          "(driver-agnostic, updated on each scheduler tick)\n")
+          "(driver-agnostic, updated on each scheduler tick)")
     crashcolor.set_color(crashcolor.RESET)
 
-    hdr = "%4s %10s %10s %6s %9s %9s %8s %s" % (
-        "CPU", "eff.MHz", "max.MHz", "%max", "sample", "behind", "throttle",
-        "note")
+    # ------------------------------------------------------------------
+    # Virtualization context.  APERF/MPERF only advances while the vCPU is
+    # actually scheduled by the hypervisor, so effective frequency CANNOT
+    # reveal CPU steal / host overcommit.  Make that explicit.
+    # ------------------------------------------------------------------
+    if is_virt:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\nVirtualization : guest under %s" % hyper_name)
+        print("  APERF/MPERF measures speed only while the vCPU is running; it "
+              "CANNOT see CPU")
+        print("  steal (hypervisor descheduling the vCPU). A normal effective "
+              "frequency does")
+        print("  NOT rule out host CPU overcommit.")
+        if steal_enabled is False:
+            print("  Steal-time accounting is DISABLED on this guest "
+                  "(paravirt_steal_enabled=0),")
+            print("  so per-CPU steal reads 0 even under heavy overcommit "
+                  "(typical on VMware).")
+            print("  Rely on run-queue depth, load average and ballooning "
+                  "('vminfo') instead.")
+        crashcolor.set_color(crashcolor.RESET)
+    print("")
+
+    hdr = "%4s %9s %9s %5s %7s %5s %8s %8s %s" % (
+        "CPU", "eff.MHz", "max.MHz", "%max", "steal%", "runq", "sample",
+        "behind", "note")
     print(hdr)
     print("-" * len(hdr))
 
     any_suspect = False
+    unmeasured_count = 0
     for cpu in sorted(online_cpus):
         max_khz = max_khz_by_cpu.get(cpu, base_khz)
-        khz, age = get_measured_khz(cpu, base_khz)
+        khz, age, source = get_measured_khz(cpu, base_khz)
+
+        # 'freq_scale' with the untouched default (-1024) means APERF/MPERF was
+        # never sampled on this CPU -> report it as unmeasured rather than
+        # implying a healthy 100%.
+        unmeasured = (source == 'freq_scale' and khz == -1024)
 
         # arch_freq_scale fallback comes back as a negative "scale/1024" value.
         if khz is not None and khz < 0 and max_khz:
             khz = max_khz * (-khz) // 1024
 
-        if khz is None or khz <= 0:
-            eff_mhz_str = "n/a"
+        if unmeasured or khz is None or khz <= 0:
+            eff_mhz_str = "unmeas." if unmeasured else "n/a"
             pct = None
         else:
             eff_mhz_str = "%.0f" % (khz / 1000.0)
@@ -391,65 +534,124 @@ def show_cpu_speed(options):
         behind = behind_by_cpu.get(cpu)
         behind_str = ("%.1fs" % behind) if behind is not None else "n/a"
 
-        core_thr, pkg_thr = get_throttle_count(cpu)
-        if core_thr is None and pkg_thr is None:
-            thr_str = "n/a"
-            throttled = False
+        nr_run = nr_running_by_cpu.get(cpu)
+        runq_str = ("%d" % nr_run) if nr_run is not None else "n/a"
+
+        # steal% of this CPU's total accounted time
+        steal_pct = None
+        if cpu in steal_by_cpu:
+            steal_ns, total_ns = steal_by_cpu[cpu]
+            if total_ns:
+                steal_pct = 100.0 * steal_ns / total_ns
+        if steal_enabled is False:
+            steal_str = "off"
+        elif steal_pct is not None:
+            steal_str = "%.1f%%" % steal_pct
         else:
-            thr_str = "%d/%d" % (core_thr or 0, pkg_thr or 0)
-            throttled = bool((core_thr or 0) or (pkg_thr or 0))
+            steal_str = "n/a"
+
+        core_thr, pkg_thr = get_throttle_count(cpu)
+        throttled = bool((core_thr or 0) or (pkg_thr or 0))
 
         notes = []
         stale = (age is not None and age >= 0 and age > STALE_SAMPLE_SEC)
         slow = (pct is not None and pct < SLOW_FRACTION * 100)
         is_behind = (behind is not None and watchdog_thresh > 0
                      and behind >= watchdog_thresh)
+        high_steal = (steal_pct is not None and steal_pct >= 5.0)
+        deep_runq = (nr_run is not None and nr_run >= 8)
 
+        if unmeasured:
+            unmeasured_count += 1
         if pstate_by_cpu.get(cpu):
             cur_ps, max_ps = pstate_by_cpu[cpu]
             notes.append("pstate %d/%d" % (cur_ps, max_ps))
         if throttled:
-            notes.append("THROTTLED")
+            notes.append("THROTTLED %d/%d" % (core_thr or 0, pkg_thr or 0))
         if stale:
             notes.append("sample stale (>%ds; not representative)"
                          % int(STALE_SAMPLE_SEC))
+        if high_steal:
+            notes.append("high steal")
 
         color = crashcolor.RESET
-        # SUSPECT: measurably slow, the sample is fresh enough to trust, and
-        # the CPU is behind on scheduling -> slowness plausibly caused a stall.
+        # SUSPECT (bare-metal path): measurably slow, sample fresh enough to
+        # trust, and behind on scheduling -> slowness plausibly caused a stall.
         if slow and not stale and is_behind:
             notes.insert(0, "SUSPECT: slow while behind")
             color = crashcolor.RED
             any_suspect = True
+        elif high_steal:
+            color = crashcolor.LIGHTRED
         elif throttled and slow:
             color = crashcolor.LIGHTRED
-        elif slow or throttled:
+        elif slow or throttled or deep_runq:
             color = crashcolor.YELLOW
 
         crashcolor.set_color(color)
-        print("%4d %10s %10s %6s %9s %9s %8s %s" %
-              (cpu, eff_mhz_str, max_mhz_str, pct_str, age_str, behind_str,
-               thr_str, ", ".join(notes)))
+        print("%4d %9s %9s %5s %7s %5s %8s %8s %s" %
+              (cpu, eff_mhz_str, max_mhz_str, pct_str, steal_str, runq_str,
+               age_str, behind_str, ", ".join(notes)))
         crashcolor.set_color(crashcolor.RESET)
+
+    # ------------------------------------------------------------------
+    # System-wide overcommit summary.
+    # ------------------------------------------------------------------
+    print("")
+    max_runq = max(nr_running_by_cpu.values()) if nr_running_by_cpu else 0
+    load1 = loadavg[0] if loadavg else None
+    overcommit = (load1 is not None and online_n > 0
+                  and load1 > online_n * 1.25)
+
+    if loadavg:
+        color = crashcolor.RED if overcommit else crashcolor.RESET
+        crashcolor.set_color(color)
+        print("Load average : %.2f / %.2f / %.2f (1/5/15 min) over %d online "
+              "CPUs  ->  %.2fx" %
+              (loadavg[0], loadavg[1], loadavg[2], online_n,
+               loadavg[0] / online_n if online_n else 0.0))
+        crashcolor.set_color(crashcolor.RESET)
+    if max_runq:
+        print("Deepest run-queue : %d runnable tasks on a single CPU" % max_runq)
+    if unmeasured_count:
+        print("APERF/MPERF frequency was not sampled on %d/%d CPUs "
+              "(shown as 'unmeas.')" % (unmeasured_count, online_n))
 
     print("")
     if any_suspect:
         crashcolor.set_color(crashcolor.RED)
-        print("One or more CPUs were running well below their maximum "
-              "frequency while also")
-        print("falling behind on scheduling. A sustained low frequency can "
-              "stretch a normal")
-        print("operation past the %d sec soft-lockup threshold. Cross-check "
-              "with 'lockup' and" % softlockup_thresh)
-        print("the backtrace of the stuck task ('bt' on the CPU's current "
-              "task).")
+        print("A CPU was running well below its maximum frequency while also "
+              "falling behind on")
+        print("scheduling. A sustained low frequency can stretch a normal "
+              "operation past the")
+        print("%d sec soft-lockup threshold. Cross-check with 'lockup' and the "
+              "stuck task's" % softlockup_thresh)
+        print("backtrace.")
+        crashcolor.set_color(crashcolor.RESET)
+    elif is_virt and (overcommit or max_runq >= 8
+                      or any(s >= 5.0 for s in
+                             [100.0 * st / tt for (st, tt) in
+                              steal_by_cpu.values() if tt])):
+        crashcolor.set_color(crashcolor.RED)
+        print("Effective frequency looks fine, but this is a %s guest showing "
+              "CPU pressure" % hyper_name)
+        print("(high load / deep run-queues%s). Frequency cannot detect "
+              "hypervisor CPU steal," %
+              ("" if steal_enabled is not False else " / steal accounting off"))
+        print("so a clean speed reading does NOT exclude host overcommit. "
+              "Corroborate with:")
+        print("  - 'vminfo' / balloon usage (host memory pressure)")
+        print("  - run-queue depth above and load average vs online CPUs")
+        print("  - task on-CPU time from 'lockup'/'ps -m' (long runtime with "
+              "little progress)")
         crashcolor.set_color(crashcolor.RESET)
     else:
-        print("No CPU is both slow and behind. If a soft lockup occurred, the "
-              "cause is more")
-        print("likely software (spin loops, lock contention, IRQ storms) than "
-              "CPU frequency;")
-        print("use 'lockup' and the stuck task's backtrace to investigate.")
+        print("No CPU is both slow and behind, and no virtualization CPU "
+              "pressure was detected.")
+        print("If a soft lockup occurred, the cause is more likely software "
+              "(spin loops, lock")
+        print("contention, IRQ storms); use 'lockup' and the stuck task's "
+              "backtrace.")
 
     if base_khz == 0:
         print("\nNOTE: base frequency (cpu_khz/tsc_khz) was unavailable; "

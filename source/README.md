@@ -689,20 +689,22 @@ crash> cpuinfo --cpuid
         For details, run 'cpuinfo_x86  <address>'
 ```
 
-`cpuinfo --speed` shows the *measured* effective frequency of each CPU using the kernel's own APERF/MPERF samples, so it works regardless of the active cpufreq driver (acpi-cpufreq, intel_pstate, HWP, etc.). It is aimed at soft-lockup analysis: a CPU that is running well below its maximum frequency while also falling behind on scheduling is flagged as a `SUSPECT`, because a sustained low frequency can stretch a normally quick operation past the soft-lockup threshold. Thermal-throttle counts (`throttle` column, core/package) are direct evidence the hardware capped the frequency.
+`cpuinfo --speed` shows the *measured* effective frequency of each CPU using the kernel's own APERF/MPERF samples, so it works regardless of the active cpufreq driver (acpi-cpufreq, intel_pstate, HWP, etc.). It is aimed at soft-lockup analysis. On bare metal, a CPU running well below its maximum frequency while also falling behind on scheduling is flagged as a `SUSPECT`, because a sustained low frequency can stretch a normally quick operation past the soft-lockup threshold. Thermal-throttle counts (core/package) are direct evidence the hardware capped the frequency.
 
 ```
 crash> cpuinfo --speed
 Base frequency = 2400 MHz, kernel.watchdog_thresh = 10 (soft lockup at 20 sec)
 Effective frequency is measured from APERF/MPERF (driver-agnostic, updated on each scheduler tick)
 
- CPU    eff.MHz    max.MHz   %max    sample    behind throttle note
-------------------------------------------------------------------------
-   0       2394       2400   100%      0.0s      0.0s      0/0 pstate 24/24
-   1        412       2400    17%      0.0s     21.3s     14/9 SUSPECT: slow while behind, pstate 4/24, THROTTLED
-   2       2390       2400   100%      0.0s      0.1s      0/0 pstate 24/24
+ CPU   eff.MHz   max.MHz  %max  steal%  runq   sample   behind note
+-------------------------------------------------------------------
+   0      2394      2400  100%    0.0%     1      0.0s     0.0s pstate 24/24
+   1       412      2400   17%    0.0%     3      0.0s    21.3s SUSPECT: slow while behind, pstate 4/24, THROTTLED 14/9
+   2      2390      2400  100%    0.0%     0      0.0s     0.1s pstate 24/24
 ...
 ```
+
+**Virtualization awareness.** APERF/MPERF only advances while the vCPU is actually scheduled by the hypervisor, so effective frequency *cannot* detect CPU steal (the hypervisor descheduling the vCPU) — the signature of host CPU overcommit. When the guest is virtualized, `cpuinfo --speed` says so, reports per-CPU steal time, and — because some hypervisors (notably VMware) do not export steal to the guest (`paravirt_steal_enabled=0`, steal shown as `off`) — pivots to the signals that remain visible: per-CPU run-queue depth, load average vs online CPUs, and memory ballooning (`vminfo`). A "normal" effective frequency on a virtual machine does **not** rule out host overcommit, and the tool now flags that overcommit case instead of giving a false all-clear. When APERF/MPERF was never sampled (common on VMware guests), the frequency is shown as `unmeas.` rather than a misleading `100%`.
 
 The values are last-sample snapshots. If the stuck CPU had interrupts disabled the sample predates the lockup and is marked `sample stale (...)`; in that case the frequency is not representative and the tool says so. Frequency is usually a contributing factor rather than the sole cause, so cross-check with `lockup` and the backtrace of the stuck task.
 
