@@ -3492,6 +3492,65 @@ def show_slub_debug_user(options):
 
 function_name_dict = {}
 
+_text_ranges = None
+
+
+def build_text_ranges():
+    """
+    Collect [start, end) ranges of resolvable text: the kernel plus every
+    loaded module (core and, when still present, init).  Recorded stack
+    entries can point into discarded module .init.text or unloaded/JIT
+    text; 'sym' cannot resolve those and prints 'sym: invalid address'
+    on the console for each attempt.
+    """
+    global _text_ranges
+
+    ranges = []
+    try:
+        ranges.append((sym2addr("_stext"), sym2addr("_etext")))
+    except Exception:
+        pass
+    try:
+        for module in readSUListFromHead(sym2addr("modules"),
+                                         "list", "struct module"):
+            try:
+                base = int(module.core_layout.base)
+                size = int(module.core_layout.size)
+            except Exception:
+                try:
+                    base = int(module.module_core)
+                    size = int(module.core_size)
+                except Exception:
+                    base = size = 0
+            if base and size:
+                ranges.append((base, base + size))
+
+            try:
+                ibase = int(module.init_layout.base)
+                isize = int(module.init_layout.size)
+            except Exception:
+                try:
+                    ibase = int(module.module_init)
+                    isize = int(module.init_size)
+                except Exception:
+                    ibase = isize = 0
+            if ibase and isize:
+                ranges.append((ibase, ibase + isize))
+    except Exception:
+        pass
+
+    _text_ranges = ranges
+
+
+def addr_in_text_range(addr):
+    if _text_ranges is None:
+        build_text_ranges()
+    for start, end in _text_ranges:
+        if start <= addr < end:
+            return True
+    return False
+
+
 def get_function_name(addr):
     global function_name_dict
 
@@ -3499,6 +3558,13 @@ def get_function_name(addr):
         return None
     if addr in function_name_dict:
         return function_name_dict[addr]
+    if not addr_in_text_range(addr):
+        # Common in page_owner stacks: return addresses in discarded module
+        # .init.text or unloaded/JIT text.  Keep the format 'addr (?) label'
+        # so callers stripping the first two words are left with the label.
+        sym_name = "%x (?) [freed init/unloaded text]" % (addr)
+        function_name_dict[addr] = sym_name
+        return sym_name
     sym_name = exec_crash_command("sym 0x%x" % (addr))
     words = sym_name.split()
     if len(words) == 5:
@@ -4311,13 +4377,35 @@ def get_stack_entries(handle):
     return (entry_len, entries)
 
 
+# Millions of pages share a few thousand unique depot handles, so decode
+# each handle and format each unique trace only once.
+_po_trace_mode = None
+stack_entries_cache = {}
+trace_format_cache = {}
+
+
 def get_trace_entries(page_owner):
+    global _po_trace_mode
+
     try:
-        if member_offset("struct page_owner", "nr_entries") > -1:
+        if _po_trace_mode is None:
+            if member_offset("struct page_owner", "nr_entries") > -1:
+                _po_trace_mode = "inline"
+            elif member_offset("struct page_owner", "handle") > -1:
+                _po_trace_mode = "handle"
+            else:
+                _po_trace_mode = "none"
+
+        if _po_trace_mode == "inline":
             nr_entries = page_owner.nr_entries
             trace_entries = page_owner.trace_entries
-        elif member_offset("struct page_owner", "handle") > -1:
-            nr_entries, trace_entries = get_stack_entries(page_owner.handle)
+        elif _po_trace_mode == "handle":
+            handle = int(page_owner.handle)
+            cached = stack_entries_cache.get(handle)
+            if cached is None:
+                cached = get_stack_entries(handle)
+                stack_entries_cache[handle] = cached
+            nr_entries, trace_entries = cached
         else:
             nr_entries = 0
             trace_entries = []
@@ -4334,28 +4422,45 @@ def save_page_owner(page_owner, nr_entries, trace_entries):
     global alloc_type_dict
     global alloc_module_dict
     global nr_free_areas
+    global _has_page_owner_pid
 
     by_whom = ""
     mod_name = ""
     by_type = ""
 
-    if member_offset("struct page_owner", "pid") >= 0:
+    if _has_page_owner_pid is None:
+        _has_page_owner_pid = member_offset("struct page_owner", "pid") > -1
+
+    if _has_page_owner_pid:
         by_type = "%d (%s)" % (page_owner.pid, page_owner.comm)
 
+    # Identical traces are shared by many pages; format each one only once.
     try:
-        for i in range(nr_entries):
-            trace_entry = trace_entries[i]
-            if trace_entry == -1 or trace_entry == minus_one_addr:
-                break
-            trace_name = ' '.join(get_function_name(trace_entry).split()[2:])
-            words = trace_name.split()
-            if "[" in words[-1] and mod_name == "":
-                mod_name = words[-1][1:-1]
+        trace_key = tuple(int(trace_entries[i]) for i in range(nr_entries))
+    except Exception:
+        trace_key = None
 
-            by_whom = by_whom + ("\n\t  [<%x>] %s" % (trace_entry,\
-                      ' '.join(get_function_name(trace_entry).split()[2:])))
-    except:
-        pass
+    cached = trace_format_cache.get(trace_key) \
+            if trace_key is not None else None
+    if cached is not None:
+        by_whom, mod_name = cached
+    else:
+        try:
+            for i in range(nr_entries):
+                trace_entry = trace_entries[i]
+                if trace_entry == -1 or trace_entry == minus_one_addr:
+                    break
+                trace_name = ' '.join(get_function_name(trace_entry).split()[2:])
+                words = trace_name.split()
+                if "[" in words[-1] and mod_name == "":
+                    mod_name = words[-1][1:-1]
+
+                by_whom = by_whom + ("\n\t  [<%x>] %s" % (trace_entry,\
+                          ' '.join(get_function_name(trace_entry).split()[2:])))
+        except:
+            pass
+        if trace_key is not None:
+            trace_format_cache[trace_key] = (by_whom, mod_name)
 
     size = (2 ** page_owner.order)
     if by_whom != "":
