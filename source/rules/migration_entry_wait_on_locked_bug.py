@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+autocheck rule: detects system hang in migration_entry_wait_on_locked().
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 import sys
 import ntpath
 import operator

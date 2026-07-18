@@ -2,7 +2,7 @@
 # --------------------------------------------------------------------
 # (C) Copyright 2018-2019 Red Hat, Inc.
 #
-# Author: Daniel Sungju Kwon <dkwon@redhat.com>
+# Author: Sungju Kwon <sungju.kwon@gmail.com>
 #
 # This provides ANSI features such as color output and cursor manipulation.
 #

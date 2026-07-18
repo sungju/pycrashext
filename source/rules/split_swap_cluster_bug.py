@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+autocheck rule: detects split_swap_cluster() crash.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 import sys
 import ntpath
 import operator

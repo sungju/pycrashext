@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'vminfo' command: virtual-machine info, ballooning and hypervisor overcommit analysis.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

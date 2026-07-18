@@ -1,3 +1,8 @@
+"""
+Helper for 'edis': requests source-level disassembly from the remoteapi /api/disasm endpoint.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
+"""
 
 import sys
 import base64

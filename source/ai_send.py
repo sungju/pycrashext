@@ -1,3 +1,9 @@
+"""
+Helper for the 'ai' command: sends collected data to the remoteapi /api/ai endpoint and renders the reply.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
+"""
+
 import json
 import sys
 import base64

@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+Registers the pycrashext commands in crash from config.json.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from crash import register_epython_prog as rprog

@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'schedinfo' command: scheduler information (classes, RT, worker pools).
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

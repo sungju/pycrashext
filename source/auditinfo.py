@@ -1,11 +1,9 @@
 """
-auditinfo
-=========
+'auditinfo' command: kernel audit subsystem state (rules, backlog, status).
 
-Show 'audit' related information.
-
- Written by Daniel Sungju Kwon
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from pykdump.API import *
 
 import crashcolor

@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'ai' command: analyse a crash command's output with an AI model through the remoteapi server.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+'traceinfo' command: ftrace and BPF tracing information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from pykdump.API import *
 
 from LinuxDump import Tasks

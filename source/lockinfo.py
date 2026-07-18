@@ -1,6 +1,9 @@
 """
- Written by Sungju Kwon <sungju.kwon@gmail.com>
+'lockinfo' command: spinlock and MCS-lock information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from pykdump.API import *
 
 from LinuxDump import Tasks

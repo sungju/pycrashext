@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'edis' command: enhanced disassembly with source lines, jump graphs and call graphs.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

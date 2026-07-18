@@ -1,7 +1,7 @@
 """
- Written by Amit Kumar Das
- Date Sep 2020
- py3 tool to verify selinux status in crash utility
+'selinuxinfo' command: SELinux status and policy information.
+
+Written by Amit Kumar Das
 """
 
 from pykdump.API import *

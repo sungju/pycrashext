@@ -1,3 +1,9 @@
+"""
+Development helper to preview code / markdown color themes.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
+"""
+
 from rich.console import Console
 from rich.markdown import Markdown
 from pygments.styles import get_all_styles

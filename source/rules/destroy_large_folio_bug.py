@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+autocheck rule: detects list corruption during large-folio migration.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 import sys
 import ntpath
 import operator

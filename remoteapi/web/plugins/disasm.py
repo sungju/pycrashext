@@ -1,9 +1,9 @@
 """
-Written by Daniel Sungju Kwon
+remoteapi plugin: /api/disasm and /api/setgit source-level disassembly endpoints.
 
-It provides additional information into the disassembled code
-Currently it provides source lines if the proper source can be found
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from flask import Flask
 from flask import request
 import re

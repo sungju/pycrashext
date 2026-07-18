@@ -1,7 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+'git' command: run git log/show in remote kernel source repositories through the remoteapi server.
 
-Execute git log/show commands on remote source server
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

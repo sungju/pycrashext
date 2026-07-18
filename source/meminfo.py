@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'meminfo' command: memory information (slab, buddy, NUMA, page_owner, OOM, swap and more).
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

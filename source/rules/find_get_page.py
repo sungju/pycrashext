@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+autocheck rule: detects find_get_page() softlockup.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 import sys
 import ntpath
 import operator

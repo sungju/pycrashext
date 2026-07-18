@@ -1,5 +1,7 @@
 """
- Written by Jay Shin, Skeleton is written by Daniel Sungju Kwon
+Hyper-V (dm_balloon) memory ballooning information.
+
+Written by Jay Shin, skeleton by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

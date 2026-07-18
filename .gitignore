@@ -103,3 +103,5 @@ ENV/
 # remoteapi
 remoteapi/web/bin/*
 remoteapi/web/pyvenv.cfg
+.omc/
+.DS_Store

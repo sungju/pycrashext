@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'timeinfo' command: time and clock-source information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

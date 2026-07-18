@@ -1,8 +1,9 @@
 """
-Written by Daniel Sungju Kwon
+remoteapi plugin: /api/ai endpoint that forwards data to an AI engine (ollama / podman).
 
-It gets some help from specified AI engine for the remote data
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from flask import Flask, request, jsonify
 import requests
 import threading

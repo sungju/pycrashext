@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'psinfo' command: ps-style process information and stack search.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

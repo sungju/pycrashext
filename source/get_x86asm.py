@@ -2,8 +2,10 @@
 # --------------------------------------------------------------------
 # (C) Copyright 2020
 #
-# Author: Daniel Sungju Kwon <sungju.kwon@gmail.com>
+# Author: Sungju Kwon <sungju.kwon@gmail.com>
 #
+# Utility that scrapes x86 instruction documentation to build the
+# x86asm.data reference table used by 'revs' / 'edis'.
 #
 # Contributors:
 # --------------------------------------------------------------------

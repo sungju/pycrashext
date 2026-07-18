@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'cginfo' command: cgroup information for v1, v2 and hybrid hierarchies.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

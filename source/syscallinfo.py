@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'syscallinfo' command: system call table listing and modification checks.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

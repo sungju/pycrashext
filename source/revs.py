@@ -1,10 +1,8 @@
 """
-Helper tool for reverse engineering steps
+'revs' command: reverse-engineering helper (argument registers and instruction reference).
 
- Written by Daniel Sungju Kwon
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
-
-
 
 from pykdump.API import *
 

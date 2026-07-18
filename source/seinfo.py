@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'seinfo' command: SELinux sidtab information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

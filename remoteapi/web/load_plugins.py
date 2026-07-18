@@ -1,7 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+Dynamically loads the remoteapi route plugins under ./plugins.
 
-This is loading extra plugins which can be added at runtime
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 import os

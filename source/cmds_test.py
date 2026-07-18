@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+Development helper for exercising and registering commands during testing.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

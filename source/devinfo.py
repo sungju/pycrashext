@@ -1,6 +1,9 @@
 """
- Written by Daniel Sungju Kwon
+'devinfo' command: block/char device, IOMMU and request information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
+
 from pykdump.API import *
 
 from LinuxDump.fs import *

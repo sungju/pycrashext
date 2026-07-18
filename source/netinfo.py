@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'netinfo' command: networking information (interfaces, sockets, protocols, nftables).
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

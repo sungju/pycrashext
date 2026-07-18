@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'insights' command: runs Red Hat Insights rules against data collected from the vmcore via remoteapi.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

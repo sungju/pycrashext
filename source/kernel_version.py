@@ -1,10 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+Helper for parsing and comparing kernel version strings.
 
-Utility functions for parsing and comparing RHEL kernel version strings.
-
-Kernel version format: <major>.<minor>.<patch>-<release>.el<N>.<arch>
-Example: 5.14.0-123.el9.x86_64
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 import re

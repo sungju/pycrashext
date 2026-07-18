@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'fsinfo' command: mounted filesystem details, freeze state and dumpe2fs-style output.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

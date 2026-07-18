@@ -1,7 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+remoteapi plugin: /api/git endpoint running git log/show in kernel source repositories.
 
-Server-side plugin for executing git log/show commands in kernel source repositories
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from flask import Flask, request

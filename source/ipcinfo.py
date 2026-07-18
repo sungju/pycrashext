@@ -1,5 +1,7 @@
 """
- Written by Daniel Sungju Kwon
+'ipcinfo' command: System V IPC (shared memory and friends) information.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *

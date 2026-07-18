@@ -1,9 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+Flask application entry point for the remoteapi backend server.
 
-This provides interface to work with client crash extension
-which can be used to do the job 'pykdump extension' cannot do
-due to limited libraries.
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 import os

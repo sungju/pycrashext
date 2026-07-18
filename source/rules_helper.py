@@ -1,3 +1,8 @@
+"""
+Shared helpers for the autocheck detection rules under ./rules.
+
+Written by Sungju Kwon <sungju.kwon@gmail.com>
+"""
 
 from pykdump.API import *
 

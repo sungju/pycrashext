@@ -1,7 +1,7 @@
 """
-Written by Daniel Sungju Kwon
+'autocheck' command: runs the detection rules under ./rules to flag known issues.
 
-This is running extra rules to detect known issues.
+Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 import os
