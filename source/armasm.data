@@ -63,4 +63,374 @@ Remember that in AArch64 the stack-pointer must be 128-bit aligned.
 END_INSTRUCTION: STP LDP
 
 
+
+# ----------------------------------------------------------------
+# AArch64 / ARM64 instruction reference (common in kernel disasm).
+# Semantics from the Arm Architecture Reference Manual (Arm ARM).
+# ----------------------------------------------------------------
+
+INSTRUCTION: mov movz movk movn
+Move a register, or build a wide immediate.
+
+  mov  Xd, Xn/Wn         - copy a register (alias of ORR Xd, XZR, Xn)
+  mov  Xd, #imm          - load an immediate (assembler picks the form)
+  movz Xd, #imm{, LSL #s}- move wide with Zero: put a 16-bit immediate in
+                           one halfword (s = 0/16/32/48) and zero the rest
+  movk Xd, #imm{, LSL #s}- move wide with Keep: put a 16-bit immediate in
+                           one halfword, leaving the other bits unchanged
+  movn Xd, #imm{, LSL #s}- move wide with NOT: like movz but stores ~value
+
+Note
+  A 64-bit constant is built with one MOVZ and up to three MOVK, e.g.
+    movz x0, #0x1234
+    movk x0, #0x5678, lsl #16
+  Wn is the 32-bit view of a register, Xn the 64-bit view.
+END_INSTRUCTION: mov movz movk movn
+
+INSTRUCTION: mvn
+Bitwise NOT: Xd = ~(shifted Xm). Alias of ORN Xd, XZR, Xm.
+END_INSTRUCTION: mvn
+
+INSTRUCTION: add adds
+Add. ADDS also updates the NZCV condition flags.
+
+  add Xd, Xn, Xm{, shift}        - Xd = Xn + shifted(Xm)
+  add Xd, Xn, #imm{, LSL #12}    - Xd = Xn + imm (12-bit, optional <<12)
+  add Xd, Xn, Wm, {sxtw|uxtw} #s - extended-register form used for array
+                                   indexing (extend Wm, shift, then add)
+
+CMN is an alias of ADDS with the result discarded.
+END_INSTRUCTION: add adds
+
+INSTRUCTION: sub subs
+Subtract. SUBS also updates the NZCV condition flags.
+
+  sub Xd, Xn, Xm{, shift}
+  sub Xd, Xn, #imm{, LSL #12}
+
+CMP is an alias of SUBS with the result discarded; NEG/NEGS are aliases
+of SUB/SUBS from XZR.
+END_INSTRUCTION: sub subs
+
+INSTRUCTION: neg negs
+Negate: Xd = -(shifted Xm). Alias of SUB Xd, XZR, Xm; NEGS also sets
+the NZCV flags.
+END_INSTRUCTION: neg negs
+
+INSTRUCTION: cmp cmn
+Compare, setting the NZCV flags for a following conditional branch or
+select. The result is discarded.
+
+  cmp Xn, Xm/#imm  - flags from (Xn - operand); alias of SUBS XZR, ...
+  cmn Xn, Xm/#imm  - flags from (Xn + operand); alias of ADDS XZR, ...
+END_INSTRUCTION: cmp cmn
+
+INSTRUCTION: tst
+Test bits: set the N and Z flags from (Xn AND operand), discarding the
+result. Alias of ANDS XZR, Xn, operand. Commonly precedes b.eq / b.ne.
+END_INSTRUCTION: tst
+
+INSTRUCTION: and ands
+Bitwise AND. ANDS also updates the N and Z flags (TST is ANDS with the
+result discarded).
+END_INSTRUCTION: and ands
+
+INSTRUCTION: orr orn
+Bitwise OR / OR-NOT (orn ORs with the inverted operand). MOV (register)
+is an alias of ORR Xd, XZR, Xm.
+END_INSTRUCTION: orr orn
+
+INSTRUCTION: eor eon
+Bitwise exclusive-OR / exclusive-OR-NOT (eon XORs with the inverted
+operand).
+END_INSTRUCTION: eor eon
+
+INSTRUCTION: bic bics
+Bit clear: Xd = Xn AND NOT(shifted Xm). BICS also updates the N and Z
+flags.
+END_INSTRUCTION: bic bics
+
+INSTRUCTION: lsl lsr asr ror
+Shift and rotate (register or immediate forms).
+
+  lsl - logical shift left   (fills with zeros)
+  lsr - logical shift right  (fills with zeros)
+  asr - arithmetic shift right (sign-preserving)
+  ror - rotate right
+
+The immediate forms are assembler aliases of the bitfield moves
+UBFM/SBFM (and EXTR for ROR).
+END_INSTRUCTION: lsl lsr asr ror
+
+INSTRUCTION: mul madd msub mneg
+Multiply (low 64/32 bits of the product).
+
+  mul  Xd, Xn, Xm      - Xd = Xn * Xm          (alias of MADD ...,XZR)
+  madd Xd, Xn, Xm, Xa  - Xd = Xa + (Xn * Xm)
+  msub Xd, Xn, Xm, Xa  - Xd = Xa - (Xn * Xm)   (used to get a remainder)
+  mneg Xd, Xn, Xm      - Xd = -(Xn * Xm)       (alias of MSUB ...,XZR)
+END_INSTRUCTION: mul madd msub mneg
+
+INSTRUCTION: smull umull smulh umulh smaddl umaddl
+Long / high multiply.
+
+  smull/umull Xd, Wn, Wm    - signed/unsigned 32x32 -> 64-bit product
+  smulh/umulh Xd, Xn, Xm    - high 64 bits of a signed/unsigned 64x64
+  smaddl/umaddl Xd,Wn,Wm,Xa - Xd = Xa + (Wn * Wm) widened to 64 bits
+END_INSTRUCTION: smull umull smulh umulh smaddl umaddl
+
+INSTRUCTION: sdiv udiv
+Signed / unsigned divide: Xd = Xn / Xm, truncated toward zero. There is
+no remainder register; compute it with  msub Xrem, Xquot, Xm, Xn.
+Division by zero produces 0 and does not trap.
+END_INSTRUCTION: sdiv udiv
+
+INSTRUCTION: sxtb sxth sxtw uxtb uxth
+Sign- or zero-extend a byte / halfword / word into a wider register
+(aliases of SBFM/UBFM). E.g.  sxtw Xd, Wn  sign-extends a 32-bit value
+to 64 bits; uxtb Wd, Wn keeps the low byte and zeros the rest.
+END_INSTRUCTION: sxtb sxth sxtw uxtb uxth
+
+INSTRUCTION: sbfx ubfx sbfiz ubfiz bfi bfxil
+Bitfield operations (aliases of SBFM/UBFM/BFM).
+
+  ubfx/sbfx  Xd, Xn, #lsb, #width - extract a zero/sign-extended field
+  ubfiz/sbfiz Xd, Xn, #lsb, #width- extract, then shift left into zeros
+  bfi   Xd, Xn, #lsb, #width - insert a field, other bits unchanged
+  bfxil Xd, Xn, #lsb, #width - insert low bits, top bits unchanged
+END_INSTRUCTION: sbfx ubfx sbfiz ubfiz bfi bfxil
+
+INSTRUCTION: ldr ldrb ldrh ldrsb ldrsh ldrsw
+Load a value from memory into a register.
+
+  ldr   Xt/Wt, [addr] - load 8 bytes (Xt) or 4 bytes (Wt)
+  ldrb  Wt, [addr]    - load 1 byte,  zero-extended
+  ldrh  Wt, [addr]    - load 2 bytes, zero-extended
+  ldrsb/ldrsh/ldrsw   - load 1/2/4 bytes, sign-extended into Xt
+
+Addressing forms
+  [Xn, #imm]          offset
+  [Xn, #imm]!         pre-index  (update Xn, then access)
+  [Xn], #imm          post-index (access, then update Xn)
+  [Xn, Xm{, LSL #s}]  register offset (array indexing)
+  ldr Xt, label       PC-relative literal load
+END_INSTRUCTION: ldr ldrb ldrh ldrsb ldrsh ldrsw
+
+INSTRUCTION: str strb strh
+Store a register to memory; STRB/STRH store the low 1 / 2 bytes. Uses
+the same addressing forms as LDR (offset, pre-/post-index, register
+offset).
+END_INSTRUCTION: str strb strh
+
+INSTRUCTION: ldur stur ldurb sturb ldurh sturh
+Load / store using an unscaled 9-bit signed byte offset: [Xn, #simm]
+only, with no indexing. The assembler emits these when the offset is not
+a scaled multiple of the access size.
+END_INSTRUCTION: ldur stur ldurb sturb ldurh sturh
+
+INSTRUCTION: ldar stlr ldapr
+Load-acquire / store-release: ordered single-copy-atomic accesses used
+to implement locks and smp_load_acquire() / smp_store_release().
+LDAR orders later accesses after it; STLR orders earlier accesses before
+it.
+END_INSTRUCTION: ldar stlr ldapr
+
+INSTRUCTION: ldxr stxr ldaxr stlxr ldxrb stxrb ldaxrb stlxrb
+Exclusive load / store (load-linked / store-conditional) used to build
+atomics and spinlocks.
+
+  ldxr/ldaxr Xt, [Xn]     - load-exclusive (ldaxr also acquires)
+  stxr/stlxr Ws, Xt, [Xn] - store-exclusive; Ws = 0 success, 1 fail
+
+The code retries the sequence until the store succeeds. On CPUs with
+LSE, the single-instruction atomics below replace this loop.
+END_INSTRUCTION: ldxr stxr ldaxr stlxr ldxrb stxrb ldaxrb stlxrb
+
+INSTRUCTION: cas casb cash casp ldadd ldset ldclr ldeor swp stadd
+LSE atomics (ARMv8.1, single-instruction atomics):
+
+  cas   - atomic compare-and-swap
+  ldadd - atomic fetch-and-add        stadd - atomic add (no result)
+  ldset - atomic fetch-and-OR
+  ldclr - atomic fetch-and-bit-clear (AND NOT)
+  ldeor - atomic fetch-and-XOR
+  swp   - atomic swap
+
+Suffixes: a / l / al add acquire / release ordering; b / h operate on a
+byte / halfword. The kernel uses these for atomic_t and locks when the
+CPU supports LSE.
+END_INSTRUCTION: cas casb cash casp ldadd ldset ldclr ldeor swp stadd
+
+INSTRUCTION: adr adrp
+Form a PC-relative address.
+
+  adr  Xd, label - Xd = PC + signed offset (+/-1 MB range)
+  adrp Xd, label - Xd = (PC & ~0xfff) + (offset << 12): the 4 KB *page*
+                   base, +/-4 GB range. Usually followed by
+                   add Xd, Xd, #:lo12:label  to add the low 12 bits and
+                   form the full address.
+END_INSTRUCTION: adr adrp
+
+INSTRUCTION: b br
+Unconditional branch (goto).
+
+  b  label - branch to a PC-relative label (+/-128 MB)
+  br Xn    - branch to the address in Xn (jump tables, tail calls)
+END_INSTRUCTION: b br
+
+INSTRUCTION: bl blr
+Branch with link (function call): the return address is saved in x30
+(the link register, LR).
+
+  bl  label - call a PC-relative target
+  blr Xn    - call the address in Xn (indirect / function-pointer call)
+END_INSTRUCTION: bl blr
+
+INSTRUCTION: ret
+Return from a function by branching to the address in the link register
+(x30 by default, or the register named). Counterpart to BL/BLR.
+END_INSTRUCTION: ret
+
+INSTRUCTION: cbz cbnz
+Compare with zero and branch, without changing the condition flags.
+
+  cbz  Xn, label - branch if Xn == 0
+  cbnz Xn, label - branch if Xn != 0
+END_INSTRUCTION: cbz cbnz
+
+INSTRUCTION: tbz tbnz
+Test one bit and branch, without changing the condition flags.
+
+  tbz  Xn, #bit, label - branch if that bit is 0
+  tbnz Xn, #bit, label - branch if that bit is 1
+END_INSTRUCTION: tbz tbnz
+
+INSTRUCTION: b.eq b.ne b.cs b.hs b.cc b.lo b.mi b.pl b.vs b.vc b.hi b.ls b.ge b.lt b.gt b.le b.al
+Conditional branch: taken when the NZCV flags (set by a prior
+CMP/CMN/TST/SUBS/ADDS/CCMP) satisfy the condition.
+
+  eq / ne        equal / not equal                 (Z)
+  hs(cs) / lo(cc) unsigned >= / unsigned <          (C)
+  hi / ls        unsigned > / unsigned <=
+  ge / lt        signed >= / signed <
+  gt / le        signed > / signed <=
+  mi / pl        negative / non-negative           (N)
+  vs / vc        overflow set / clear              (V)
+  al             always
+END_INSTRUCTION: b.eq b.ne b.cs b.hs b.cc b.lo b.mi b.pl b.vs b.vc b.hi b.ls b.ge b.lt b.gt b.le b.al
+
+INSTRUCTION: csel cset csetm csinc csinv csneg cinc cinv cneg
+Conditional select family: choose a value from the flags instead of
+branching (branchless code).
+
+  csel  Xd, Xn, Xm, cond - Xd = cond ? Xn : Xm
+  cset  Xd, cond         - Xd = cond ? 1 : 0
+  csetm Xd, cond         - Xd = cond ? ~0 : 0
+  csinc/csinv/csneg      - when cond is false the second source becomes
+                           Xm+1 / ~Xm / -Xm
+  cinc/cinv/cneg         - single-source aliases of the above
+END_INSTRUCTION: csel cset csetm csinc csinv csneg cinc cinv cneg
+
+INSTRUCTION: ccmp ccmn
+Conditional compare: if the current condition holds, compare and set
+NZCV; otherwise load NZCV from the given #nzcv immediate. Used to build
+compound conditions (a && b, a || b) without branches.
+END_INSTRUCTION: ccmp ccmn
+
+INSTRUCTION: nop
+No operation (a HINT-space encoding). Used for alignment padding and for
+patchable call sites - the kernel patches NOP <-> BL for ftrace and
+static calls.
+END_INSTRUCTION: nop
+
+INSTRUCTION: mrs msr
+Move to / from a system register.
+
+  mrs Xt, <sysreg>        - read a system register (e.g. mrs x0, sp_el0)
+  msr <sysreg>, Xt        - write a system register
+  msr <pstatefield>, #imm - set a PSTATE field, e.g. msr daifset, #2 to
+                            mask IRQs (DAIF bits D=8 A=4 I=2 F=1)
+END_INSTRUCTION: mrs msr
+
+INSTRUCTION: svc hvc smc
+Synchronous exception-generating calls.
+
+  svc #imm - supervisor call: user -> kernel (EL1) syscall entry
+  hvc #imm - hypervisor call: -> EL2
+  smc #imm - secure monitor call: -> EL3 firmware (PSCI, e.g. CPU on/off)
+END_INSTRUCTION: svc hvc smc
+
+INSTRUCTION: wfe wfi sev sevl yield
+Low-power and spin-loop hints.
+
+  wfe  - wait for event (spinlock waiters sleep here until an SEV)
+  wfi  - wait for interrupt (used by cpu_do_idle)
+  sev / sevl - signal an event to wake WFE waiters
+  yield - hint that this is a spin-loop iteration
+END_INSTRUCTION: wfe wfi sev sevl yield
+
+INSTRUCTION: dmb dsb isb
+Barriers.
+
+  dmb <opt> - data memory barrier: order memory accesses (e.g. dmb ish)
+  dsb <opt> - data synchronization barrier: order + wait for completion
+  isb       - instruction sync barrier: flush the pipeline after changing
+              system state
+
+Common domains: ish (inner shareable), sy (full system), plus ld/st
+variants such as ishld / ishst.
+END_INSTRUCTION: dmb dsb isb
+
+INSTRUCTION: eret
+Exception return: restore PC from ELR_ELx and PSTATE from SPSR_ELx,
+returning from an exception handler to the interrupted context.
+END_INSTRUCTION: eret
+
+INSTRUCTION: brk hlt
+Software breakpoint / halt. AArch64 BUG(), WARN() and kprobes are built
+on BRK #imm, which raises a synchronous debug exception; the kernel
+decodes the reason from the immediate.
+END_INSTRUCTION: brk hlt
+
+INSTRUCTION: clz cls rbit rev rev16 rev32
+Bit / byte manipulation.
+
+  clz  - count leading zeros
+  cls  - count leading sign bits
+  rbit - reverse the bit order
+  rev  - byte-reverse a whole register (endianness swap)
+  rev16/rev32 - byte-reverse within each 16- / 32-bit element
+END_INSTRUCTION: clz cls rbit rev rev16 rev32
+
+INSTRUCTION: extr
+Extract: read a register-width field spanning a pair of registers at a
+bit offset, Xd = (Xn:Xm) >> #lsb. ROR is the special case Xn == Xm.
+END_INSTRUCTION: extr
+
+INSTRUCTION: paciasp pacibsp autiasp autibsp pacia pacib autia autib xpaclri
+Pointer Authentication (ARMv8.3, CONFIG_ARM64_PTR_AUTH). Signs and
+authenticates return addresses to defend against ROP.
+
+  paciasp - sign LR (x30) using SP as context (function prologue)
+  autiasp - authenticate LR before RET (epilogue); a tampered LR faults
+            when it is used
+  xpaclri - strip the PAC bits from LR (used when unwinding / printing)
+
+These live in the HINT space, so they execute as NOPs on CPUs without
+pointer authentication.
+END_INSTRUCTION: paciasp pacibsp autiasp autibsp pacia pacib autia autib xpaclri
+
+INSTRUCTION: bti
+Branch Target Identification (ARMv8.5, CONFIG_ARM64_BTI): a landing pad
+at a legal indirect-branch target. An indirect branch to a location
+without a matching BTI / PACIASP raises a Branch Target exception.
+Encoded in the HINT space, so it is a NOP on older CPUs.
+END_INSTRUCTION: bti
+
+INSTRUCTION: hint
+Hint instruction: the encoding space behind NOP, YIELD, WFE/WFI, SEV and
+the pointer-auth / BTI mnemonics. An unrecognized hint executes as a
+NOP.
+END_INSTRUCTION: hint
+
 END_ARCHITECTURE: arm aarch64
