@@ -87,6 +87,178 @@ r15      stack-pointer                              saved
 Useful debugging information from kerne.org:
 https://www.kernel.org/doc/Documentation/s390/Debugging390.txt
 END_REGISTERS: s390
+
+INSTRUCTION: lgr lr lgfr llgfr
+Copy a register.
+  lgr   %rd,%rs - copy the full 64-bit register (grande)
+  lr    %rd,%rs - copy the low 32 bits
+  lgfr  %rd,%rs - copy 32 bits, sign-extended to 64
+  llgfr %rd,%rs - copy 32 bits, zero-extended to 64
+Note: a 'g' in an s390 mnemonic denotes a 64-bit operation.
+END_INSTRUCTION: lgr lr lgfr llgfr
+
+INSTRUCTION: lg l lgf llgf lgh llgc llgh
+Load from memory. Addresses are written Displacement(Base) or
+Displacement(indeX,Base).
+  lg   %r,D(X,B) - load 64 bits
+  l    %r,D(X,B) - load the low 32 bits
+  lgf  %r,D(X,B) - load 32 bits, sign-extended to 64
+  llgf %r,D(X,B) - load 32 bits, zero-extended to 64
+  llgc/llgh      - load a byte/halfword, zero-extended
+END_INSTRUCTION: lg l lgf llgf lgh llgc llgh
+
+INSTRUCTION: la lay
+Load Address: %r = D(X,B) (compute an address; no memory is read).
+lay allows a 20-bit signed displacement (long form).
+END_INSTRUCTION: la lay
+
+INSTRUCTION: larl
+Load Address Relative Long: %r = the address of a PC-relative label.
+This is the usual way s390 code reaches globals, literals and other
+functions.
+END_INSTRUCTION: larl
+
+INSTRUCTION: lgrl lrl llgfrl lghrl
+Load Relative Long: load a value from a PC-relative address (a signed
+halfword offset scaled by 2). lgrl = 64-bit, lrl = 32-bit.
+END_INSTRUCTION: lgrl lrl llgfrl lghrl
+
+INSTRUCTION: lghi lhi lgfi
+Load Immediate.
+  lghi %r,imm - load a signed 16-bit immediate into a 64-bit register
+  lhi  %r,imm - the same into the low 32 bits
+  lgfi %r,imm - load a signed 32-bit immediate into a 64-bit register
+END_INSTRUCTION: lghi lhi lgfi
+
+INSTRUCTION: stg st sty strl stgrl
+Store a register to memory.
+  stg %r,D(X,B) - store 64 bits
+  st  %r,D(X,B) - store the low 32 bits
+  strl/stgrl    - store to a PC-relative address
+END_INSTRUCTION: stg st sty strl stgrl
+
+INSTRUCTION: stmg lmg stm lm
+Store / Load Multiple: save or restore a contiguous range of registers
+in one instruction.
+  stmg %r6,%r15,48(%r15) - save r6..r15 to the stack (prologue)
+  lmg  %r6,%r15,208(%r15) - restore them (epilogue)
+END_INSTRUCTION: stmg lmg stm lm
+
+INSTRUCTION: agr ar agfr algr alr
+Add register. agr = 64-bit, ar = low 32-bit, agfr = add a 32-bit
+sign-extended value; the al* forms are unsigned (logical) adds.
+END_INSTRUCTION: agr ar agfr algr alr
+
+INSTRUCTION: ag a agf alg al
+Add from memory (ag = 64-bit, a = 32-bit; agf sign-extends a 32-bit
+operand; alg/al are unsigned).
+END_INSTRUCTION: ag a agf alg al
+
+INSTRUCTION: aghi ahi agfi afi alfi algfi
+Add Immediate. aghi/ahi add a signed 16-bit immediate; agfi/afi add a
+32-bit immediate. 'aghi %r15,-160' is a typical stack-frame allocation.
+END_INSTRUCTION: aghi ahi agfi afi alfi algfi
+
+INSTRUCTION: sgr sr sg s slgr slr
+Subtract. sgr = 64-bit register, sr = low 32-bit; sg/s subtract from
+memory; the sl* forms are unsigned (logical).
+END_INSTRUCTION: sgr sr sg s slgr slr
+
+INSTRUCTION: msgr msr msgfr mghi msfi msgfi
+Multiply. msgr = 64-bit register multiply, msr = 32-bit, mghi = by a
+16-bit immediate, msgfi = by a 32-bit immediate.
+END_INSTRUCTION: msgr msr msgfr mghi msfi msgfi
+
+INSTRUCTION: ngr nr ng n ogr or og o xgr xr xg x
+Bitwise AND / OR / XOR (n* = AND, o* = OR, x* = XOR; 'g' = 64-bit).
+'xgr %r1,%r1' is the idiom for zeroing a register.
+END_INSTRUCTION: ngr nr ng n ogr or og o xgr xr xg x
+
+INSTRUCTION: cgr cr cg c cghi chi cgfi cfi
+Compare (signed) and set the condition code for a following jump.
+cgr/cr compare registers, cg/c compare against memory, cghi/chi/cgfi/cfi
+compare against an immediate.
+END_INSTRUCTION: cgr cr cg c cghi chi cgfi cfi
+
+INSTRUCTION: clgr clr clg cl clfi clgfi clc
+Compare Logical (unsigned). clc compares two storage operands byte by
+byte (up to 256 bytes).
+END_INSTRUCTION: clgr clr clg cl clfi clgfi clc
+
+INSTRUCTION: ltgr ltr ltg lt
+Load and Test: load a value and set the condition code from its sign
+(used to test a value for zero / negative). 'ltgr %r,%r' just tests.
+END_INSTRUCTION: ltgr ltr ltg lt
+
+INSTRUCTION: sllg srlg slag srag sll srl sla sra
+Shift. The *g forms operate on 64 bits: sllg/srlg = logical left/right,
+slag/srag = arithmetic left/right. sll/srl/sla/sra are the 32-bit forms.
+END_INSTRUCTION: sllg srlg slag srag sll srl sla sra
+
+INSTRUCTION: risbg risbgn rnsbg rosbg rxsbg
+Rotate Then Insert Selected Bits: a combined rotate plus bitfield insert
+used for masking and field extraction in optimized code.
+END_INSTRUCTION: risbg risbgn rnsbg rosbg rxsbg
+
+INSTRUCTION: tm tmll tmlh tmhl tmhh tmy
+Test under Mask: AND a field with a mask and set the condition code,
+leaving the register unchanged.
+END_INSTRUCTION: tm tmll tmlh tmhl tmhh tmy
+
+INSTRUCTION: br bcr basr bassm
+Branch via a register.
+  br  %r14     - return from a function (branch to the address in r14)
+  bcr mask,%r  - conditional branch to a register
+  basr %r14,%r - call the address in %r, saving the return addr in r14
+END_INSTRUCTION: br bcr basr bassm
+
+INSTRUCTION: bras brasl bal balr
+Branch Relative And Save: the standard call. 'brasl %r14,func' calls
+func (relative long) and leaves the return address in %r14.
+END_INSTRUCTION: bras brasl bal balr
+
+INSTRUCTION: brc brcl j jg je jne jl jh jle jhe jnl jnh jz jnz jo jno jm jp
+Branch Relative on Condition. j / jg are unconditional (short / long);
+the others are condition-code aliases set by a prior compare or test:
+  je/jne  equal / not equal        jl/jh   lower / higher (A<B / A>B)
+  jnl/jnh not lower / not higher    jle/jhe less-or-eq / higher-or-eq
+  jz/jnz  cc zero / non-zero        jm/jp   minus / plus
+The 'g' variants (jg, jgne, ...) are the long-displacement forms.
+END_INSTRUCTION: brc brcl j jg je jne jl jh jle jhe jnl jnh jz jnz jo jno jm jp
+
+INSTRUCTION: nop nopr
+No operation (a masked branch: bc 0,... / bcr 0,%r0). Also used as a
+patchable slot for ftrace / jump labels.
+END_INSTRUCTION: nop nopr
+
+INSTRUCTION: svc
+Supervisor Call: the system-call instruction. 'svc imm' traps into the
+kernel.
+END_INSTRUCTION: svc
+
+INSTRUCTION: lpswe lpsw
+Load PSW (Extended): load a new Program Status Word - i.e. return from an
+interrupt or exception to the saved context.
+END_INSTRUCTION: lpswe lpsw
+
+INSTRUCTION: mvc mvi mvghi mvhi xc nc oc
+Storage-to-storage operations.
+  mvc D(len,B1),D(B2) - copy up to 256 bytes (memcpy)
+  mvi D(B),imm        - store an immediate byte
+  xc  a,a             - zero a storage area (exclusive-or with itself)
+  nc / oc             - AND / OR two storage operands
+END_INSTRUCTION: mvc mvi mvghi mvhi xc nc oc
+
+INSTRUCTION: ipm
+Insert Program Mask: copy the condition code and program mask into a
+register (used to capture the CC as a value).
+END_INSTRUCTION: ipm
+
+INSTRUCTION: ex exrl
+Execute: run a single target instruction whose low byte is OR-ed from a
+register; used to implement variable-length mvc / clc.
+END_INSTRUCTION: ex exrl
+
 END_ARCHITECTURE: s390
 
 ARCHITECTURE: ppc
@@ -122,6 +294,158 @@ crash> rd 0xc000002542703b68
 c000002542703b68:  c000003b387cf6e8                    ...;8|..
 
 END_REGISTERS: ppc
+
+INSTRUCTION: mr mr.
+Move Register: 'mr rA,rS' copies rS to rA (an alias of 'or rA,rS,rS').
+The 'mr.' form also updates condition register field CR0.
+END_INSTRUCTION: mr mr.
+
+INSTRUCTION: li lis
+Load Immediate.
+  li  rD,imm - load a signed 16-bit immediate (alias of addi rD,0,imm)
+  lis rD,imm - load imm into the high 16 bits (alias of addis rD,0,imm)
+A 32-bit constant is built with lis followed by ori.
+END_INSTRUCTION: li lis
+
+INSTRUCTION: ld ldx lwz lwzx lwa lbz lhz lha
+Loads.
+  ld   rD,ds(rA) - load doubleword (64 bits)
+  lwz  rD,d(rA)  - load word and zero (32 bits)
+  lwa  rD,ds(rA) - load word algebraic (32 bits, sign-extended to 64)
+  lbz/lhz        - load byte/halfword and zero
+  lha            - load halfword algebraic (sign-extended)
+The *x forms use an indexed address rA+rB.
+END_INSTRUCTION: ld ldx lwz lwzx lwa lbz lhz lha
+
+INSTRUCTION: std stdx stw stwx stb sth
+Stores: std = store doubleword (64), stw = store word (32),
+stb/sth = store byte/halfword. The *x forms use an indexed address.
+END_INSTRUCTION: std stdx stw stwx stb sth
+
+INSTRUCTION: stdu stwu ldu lwzu
+Load/store with update: the base register is updated with the computed
+address. 'stdu r1,-N(r1)' allocates a stack frame and sets the new stack
+pointer in one instruction.
+END_INSTRUCTION: stdu stwu ldu lwzu
+
+INSTRUCTION: add addi addis subf sub neg subfic
+Add / subtract.
+  addi rD,rA,imm - rD = rA + imm  (if rA is 0 this is 'li')
+  addis          - add an immediate shifted left 16
+  subf rD,rA,rB  - rD = rB - rA   (subtract-from)
+  neg  rD,rA     - rD = -rA
+A trailing '.' (e.g. add.) also updates CR0.
+END_INSTRUCTION: add addi addis subf sub neg subfic
+
+INSTRUCTION: mulld mullw mulhd mulhw mulli
+Multiply. mulld = 64-bit low product, mullw = 32-bit, mulhd/mulhw = the
+high half, mulli = multiply by an immediate.
+END_INSTRUCTION: mulld mullw mulhd mulhw mulli
+
+INSTRUCTION: divd divw divdu divwu
+Divide (d = doubleword/64, w = word/32; the 'u' forms are unsigned).
+The result is truncated toward zero.
+END_INSTRUCTION: divd divw divdu divwu
+
+INSTRUCTION: and andi. andis. or ori oris xor xori nand nor andc orc eqv
+Bitwise logic. andi. and andis. always update CR0. 'nop' is the alias
+'ori 0,0,0'.
+END_INSTRUCTION: and andi. andis. or ori oris xor xori nand nor andc orc eqv
+
+INSTRUCTION: rldicl rldicr rldic rldimi clrldi clrrdi sldi srdi extrdi insrdi
+Rotate Left Doubleword then mask (the RLDIC family). These implement
+64-bit shifts, masks and bitfield insert/extract; clrldi, sldi, srdi,
+extrdi and insrdi are common assembler aliases.
+END_INSTRUCTION: rldicl rldicr rldic rldimi clrldi clrrdi sldi srdi extrdi insrdi
+
+INSTRUCTION: rlwinm rlwimi rlwnm clrlwi extlwi slwi srwi
+Rotate Left Word then mask - the 32-bit counterparts of the RLDIC
+family (rlwinm rA,rS,SH,MB,ME rotates then masks bits MB..ME).
+END_INSTRUCTION: rlwinm rlwimi rlwnm clrlwi extlwi slwi srwi
+
+INSTRUCTION: sld srd srad sradi slw srw sraw srawi
+Shifts. srad / sraw are arithmetic (sign-preserving) right shifts; the
+*i forms take an immediate shift amount.
+END_INSTRUCTION: sld srd srad sradi slw srw sraw srawi
+
+INSTRUCTION: extsw extsb extsh
+Extend Sign of a word / byte / halfword into a full 64-bit register.
+END_INSTRUCTION: extsw extsb extsh
+
+INSTRUCTION: cmpd cmpw cmpdi cmpwi cmpld cmplw cmpldi cmplwi cmp cmpi cmpl cmpli
+Compare, writing the result into a CR field (cr0 unless one is named).
+cmp* are signed and cmpl* unsigned; *d = 64-bit, *w = 32-bit, and the *i
+forms compare against an immediate.
+END_INSTRUCTION: cmpd cmpw cmpdi cmpwi cmpld cmplw cmpldi cmplwi cmp cmpi cmpl cmpli
+
+INSTRUCTION: b ba bl bla
+Branch. 'b' is a relative branch; 'bl' is branch-and-link, i.e. a
+function call that saves the return address in the Link Register (LR).
+The 'a' forms use an absolute target address.
+END_INSTRUCTION: b ba bl bla
+
+INSTRUCTION: blr bctr blrl bctrl
+Branch to a special register.
+  blr   - return from a function (branch to LR)
+  bctr  - branch to CTR (indirect calls, jump tables)
+  blrl / bctrl - the same, also updating LR
+END_INSTRUCTION: blr bctr blrl bctrl
+
+INSTRUCTION: bc beq bne blt bgt ble bge bso bns bdnz bdz
+Conditional branch on the CR / CTR. beq/bne/blt/bgt/ble/bge test a CR
+field; bdnz decrements CTR and branches while it is non-zero (counted
+loops).
+END_INSTRUCTION: bc beq bne blt bgt ble bge bso bns bdnz bdz
+
+INSTRUCTION: mflr mtlr mfctr mtctr
+Move from / to the Link and Count registers. A prologue runs
+'mflr r0; std r0,16(r1)' to save the return address; the epilogue
+reloads it and does 'mtlr; blr'.
+END_INSTRUCTION: mflr mtlr mfctr mtctr
+
+INSTRUCTION: mfspr mtspr mfmsr mtmsrd mfcr mtcr mtcrf mtocrf
+Move from / to special-purpose, machine-state (MSR) and condition (CR)
+registers.
+END_INSTRUCTION: mfspr mtspr mfmsr mtmsrd mfcr mtcr mtcrf mtocrf
+
+INSTRUCTION: lwarx ldarx stwcx. stdcx.
+Load And Reserve / Store Conditional: the reservation primitives used to
+build atomics and locks. A loop retries until stwcx./stdcx. succeeds
+(which it signals by setting CR0.EQ).
+END_INSTRUCTION: lwarx ldarx stwcx. stdcx.
+
+INSTRUCTION: sync lwsync isync eieio ptesync
+Barriers. sync / lwsync order memory accesses (lwsync is the lighter
+acquire/release variant); isync orders instruction execution; eieio
+orders I/O accesses.
+END_INSTRUCTION: sync lwsync isync eieio ptesync
+
+INSTRUCTION: sc scv rfid hrfid
+System call / return from interrupt. 'sc' traps into the kernel
+(syscall); rfid returns from an interrupt to the saved state.
+END_INSTRUCTION: sc scv rfid hrfid
+
+INSTRUCTION: nop
+No operation (alias of 'ori 0,0,0'). Also emitted as a patchable slot,
+e.g. the TOC-restore slot after a bl, or ftrace call sites.
+END_INSTRUCTION: nop
+
+INSTRUCTION: tw twi td tdi trap
+Trap: compare two operands and raise a program interrupt if the
+condition holds. The kernel implements BUG()/WARN() with a trap word
+(e.g. 'twi 31,0,...').
+END_INSTRUCTION: tw twi td tdi trap
+
+INSTRUCTION: isel
+Integer Select: rD = (tested CR bit) ? rA : rB - a branchless
+conditional move.
+END_INSTRUCTION: isel
+
+INSTRUCTION: crand cror crxor crnand crnot mcrf
+Condition Register logical operations that combine individual CR bits
+(used to build compound conditions).
+END_INSTRUCTION: crand cror crxor crnand crnot mcrf
+
 END_ARCHITECTURE: ppc
 
 ARCHITECTURE: i386 i686 x86_64 athlon
