@@ -4123,6 +4123,10 @@ pool_index_bits = 21
 offset_bits = 10
 valid_bits = 1
 extra_bits = 5
+# Whether the kernel stores the pool index as (index + 1) in the handle.
+# stack_pools kernels (RHEL9.6+, RHEL10) do; stack_slabs kernels
+# (RHEL8, RHEL9 <= 9.5) index the array directly.  Set by get_stack_bits().
+pool_index_subtract_one = False
 
 DEPOT_STACK_ALIGN = 4
 
@@ -4247,9 +4251,12 @@ def get_stack_entries(handle):
     
     '''
     pool_index = extract_bits(handle, 0, pool_index_bits)
-    pool_index -= 1
-    if pool_index < 0:
-        pool_index = 0
+    # stack_pools kernels store the index as pool_index + 1 (0 = invalid);
+    # stack_slabs kernels store the raw index.  See get_stack_bits().
+    if pool_index_subtract_one:
+        pool_index -= 1
+        if pool_index < 0:
+            return (entry_len, entries)
 
     offset = extract_bits(handle,\
             pool_index_bits,\
@@ -4269,7 +4276,7 @@ def get_stack_entries(handle):
 
     try:
         pool = stack_pools[pool_index]
-        if pool == None:
+        if pool == None or pool == 0:
             return (entry_len, entries)
 
         stack_record_addr = pool + offset
@@ -4287,11 +4294,16 @@ def get_stack_entries(handle):
         print(stack_record)
         '''
 
-        for i in range(stack_record.size):
+        # Clamp to the maximum frame count (CONFIG_STACKDEPOT_MAX_FRAMES=64)
+        # so a corrupt/mis-decoded record cannot drive an unbounded loop.
+        size = int(stack_record.size)
+        if size <= 0 or size > 64:
+            return (entry_len, entries)
+        for i in range(size):
             entry_addr = Addr(stack_record) + stack_record_offset + (i * addr_size)
             func_addr = readULong(entry_addr)
             entries.append(func_addr)
-        entry_len = entries_len(entries, stack_record.size)
+        entry_len = entries_len(entries, size)
     except Exception as e:
         #print(e)
         pass
@@ -4564,6 +4576,26 @@ def print_page_owner_summary(options, file):
     print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file=file)
 
 
+def parse_handle_parts_layout():
+    """
+    Parse 'ptype union handle_parts' to get the bitfield layout as an ordered
+    list of (name, width).  DWARF is the only reliable source here:
+    member_offset() cannot see bitfields, and the layout changed repeatedly
+    across streams (21/10/1 on RHEL8 and RHEL9<=9.2, 16/10/1/5 around
+    RHEL9.3-9.5, 17/10/5 on RHEL9.6+ and RHEL10).
+    """
+    fields = []
+    try:
+        output = exec_crash_command("ptype union handle_parts")
+        for line in output.splitlines():
+            m = re.search(r"(\w+)\s*:\s*(\d+)\s*;", line)
+            if m and m.group(1) != "handle":
+                fields.append((m.group(1), int(m.group(2))))
+    except Exception:
+        pass
+    return fields
+
+
 def get_stack_bits():
     global stack_pools
     global stack_handle_version
@@ -4572,6 +4604,7 @@ def get_stack_bits():
     global valid_bits
     global extra_bits
     global addr_size
+    global pool_index_subtract_one
 
     addr_size = int(get_machine_symbol("bits")) // 8
 
@@ -4586,27 +4619,39 @@ def get_stack_bits():
             stack_pools.append(pool_addr)
 
         stack_handle_version = 2
-
-        if member_offset("union handle_parts", "valid_bits") > -1:
-            pool_index_bits = 16
-            offset_bits = 10
-            valid_bits = 1
-            extra_bits = 5
-        else:
-            pool_index_bits = 17
-            offset_bits = 10
-            valid_bits = 0
-            extra_bits = 5
+        # Every 'stack_pools' kernel stream (RHEL9.6+, RHEL10) stores the
+        # index as pool_index + 1 (0 = invalid handle) -- verified by
+        # disassembling depot_fetch_stack ('sub $0x1' before indexing),
+        # even where the field is still named 'pool_index'.
+        pool_index_subtract_one = True
+        default_layout = (17, 10, 0, 5)
     elif symbol_exists("stack_slabs"):
         stack_pools = readSymbol("stack_slabs")
         stack_handle_version = 1
-
-        pool_index_bits = 21
-        offset_bits = 10
-        valid_bits = 1
-        extra_bits = 0
+        # 'stack_slabs' kernels (RHEL8, RHEL9 <= 9.5) index the array
+        # directly with the handle's slabindex -- no +1 encoding
+        # (verified by disassembling stack_depot_fetch on 4.18.0-553).
+        pool_index_subtract_one = False
+        default_layout = (21, 10, 1, 0)
     else:
         stack_pools = None
+        return
+
+    # Prefer the real DWARF bitfield layout; fall back to the per-symbol
+    # default when ptype is unavailable.
+    fields = parse_handle_parts_layout()
+    if fields and fields[0][0] in ("slabindex", "pool_index",
+                                   "pool_index_plus_1"):
+        widths = dict(fields)
+        pool_index_bits = fields[0][1]
+        offset_bits = widths.get("offset", 10)
+        valid_bits = widths.get("valid", 0)
+        extra_bits = widths.get("extra", 0)
+        if fields[0][0] == "pool_index_plus_1":
+            pool_index_subtract_one = True
+    else:
+        (pool_index_bits, offset_bits,
+         valid_bits, extra_bits) = default_layout
 
 
 import gc
@@ -4794,8 +4839,10 @@ def show_page_owner_all(options):
         page_ext_size = readSymbol("page_ext_size")
     except:
         try:
+            # pre-5.4 kernels without the page_ext_size variable compute
+            # the entry size as sizeof(struct page_ext) + extra_mem
             extra_mem = readSymbol("extra_mem")
-            page_ext_size = extra_mem + member_offset("struct po_size_table", "page_ext")
+            page_ext_size = getSizeOf("struct page_ext") + extra_mem
         except:
             page_ext_size = -1 # use old RHEL7 method
 
@@ -4830,7 +4877,7 @@ def show_page_owner_all(options):
     interrupted = False
     try:
         while pfn < max_pfn:
-            if tty != None:
+            if tty != None and (pfn & 0xFFFF) == 0:
                 print(f"{pfn:,} out of {max_pfn:,} pages processed."
                             f"({(pfn / max_pfn) * 100:.2f}%)", end="\r", file=tty)
 
@@ -4866,6 +4913,11 @@ def show_page_owner_all(options):
 
                 except Exception as e:
                     print(e)
+
+                # All tail pages of this allocation carry the same
+                # page_owner data; jump straight past them.
+                pfn = pfn + (1 << page_owner.order)
+                continue
 
             except Exception:
                 # page_owner object is invalid or points to bad memory
