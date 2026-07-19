@@ -828,23 +828,87 @@ LOG_PATTERNS = {
 
 def oc_get_log_evidence():
     """
-    Return vmcore kernel-log lines that record historical stall symptoms.
+    Return (matches, contexts) for historical stall symptoms in the log.
 
     Log records widen the observation window beyond the final snapshot.  They
     remain supporting evidence because the same messages can have guest-local
-    causes.
+    causes.  contexts contains the matching line plus two surrounding lines so
+    detailed output does not have to print the entire kernel log.
     """
-    result = dict((name, []) for name in LOG_PATTERNS)
+    matches = dict((name, []) for name in LOG_PATTERNS)
+    contexts = dict((name, []) for name in LOG_PATTERNS)
     try:
         raw = exec_crash_command("log")
     except Exception:
-        return result
-    for line in raw.splitlines():
+        return matches, contexts
+    lines = raw.splitlines()
+    matched_indexes = dict((name, set()) for name in LOG_PATTERNS)
+    for index, line in enumerate(lines):
         lower = line.lower()
         for name, patterns in LOG_PATTERNS.items():
             if any(pattern in lower for pattern in patterns):
-                result[name].append(line)
-    return result
+                matches[name].append(line)
+                matched_indexes[name].add(index)
+    for name, indexes in matched_indexes.items():
+        shown = set()
+        for index in indexes:
+            shown.update(range(max(0, index - 2),
+                               min(len(lines), index + 3)))
+        previous = None
+        for index in sorted(shown):
+            if previous is not None and index > previous + 1:
+                contexts[name].append(("... unrelated log lines ...", False))
+            contexts[name].append((lines[index], index in indexes))
+            previous = index
+    return matches, contexts
+
+
+def oc_related_excerpt(raw, patterns, before=1, after=1):
+    """
+    Return (excerpt_rows, omitted), where excerpt_rows is [(line, matched)].
+
+    Matching is case-insensitive.  Overlapping context windows are merged.
+    """
+    lines = raw.splitlines()
+    lowered = tuple(pattern.lower() for pattern in patterns)
+    matched = set()
+    for index, line in enumerate(lines):
+        lower = line.lower()
+        if any(pattern in lower for pattern in lowered):
+            matched.add(index)
+    shown = set()
+    for index in matched:
+        shown.update(range(max(0, index - before),
+                           min(len(lines), index + after + 1)))
+    rows = []
+    previous = None
+    for index in sorted(shown):
+        if previous is not None and index > previous + 1:
+            rows.append(("... unrelated lines ...", False))
+        rows.append((lines[index], index in matched))
+        previous = index
+    return rows, max(0, len(lines) - len(shown))
+
+
+def oc_print_related_line(line, related=True, color=crashcolor.LIGHTRED):
+    """Print a raw/context line with a visible marker and optional color."""
+    print("=> " if related else "   ", end="")
+    if related:
+        crashcolor.set_color(color)
+    print(line)
+    crashcolor.set_color(crashcolor.RESET)
+
+
+def oc_print_excerpt(raw, patterns, before=1, after=1,
+                     color=crashcolor.LIGHTRED):
+    """Print only pattern matches and their surrounding source lines."""
+    rows, omitted = oc_related_excerpt(raw, patterns, before, after)
+    for line, related in rows:
+        oc_print_related_line(line, related, color)
+    if not rows:
+        print("   <no related lines>")
+    if omitted:
+        print("   ... %d unrelated line(s) omitted" % omitted)
 
 
 def oc_get_iowait_pct():
@@ -997,6 +1061,13 @@ def oc_get_inflight_requests():
 VCPU_CLOCK_LAG_SEC = 1.0
 # A run-queue at/above this depth is treated as a CPU-pressure hotspot.
 DEEP_RUNQ = 8
+# Detailed output is intentionally bounded: it is an evidence excerpt, not a
+# replacement for the underlying crash commands.
+DETAIL_CPU_LIMIT = 8
+DETAIL_TASK_LIMIT = 10
+DETAIL_REQUEST_LIMIT = 10
+DETAIL_BACKTRACE_LIMIT = 4
+DETAIL_LOG_LINE_LIMIT = 40
 
 
 def show_overcommit(options):
@@ -1069,7 +1140,7 @@ def show_overcommit(options):
     balloon = oc_get_balloon_pages()
     memory = oc_get_memory_snapshot(details)
     vm_events = oc_get_vm_events()
-    log_evidence = oc_get_log_evidence()
+    log_evidence, log_contexts = oc_get_log_evidence()
     scsi_hosts = oc_get_scsi_hosts()
     inflight, oldest_io, request_rows = oc_get_inflight_requests()
     iowait_pct = oc_get_iowait_pct()
@@ -1359,18 +1430,54 @@ def show_overcommit(options):
               "accounting is disabled.")
 
     if not details:
-        print("\nUse -d with --overcommit to show the raw counters, per-vCPU "
-              "clocks,")
-        print("task rows, balloon structure, block requests, and matched log "
-              "lines.")
+        print("\nUse -d with --overcommit to show related raw fields, nearby "
+              "context,")
+        print("and highlighted triggering values.")
         return
 
     # ------------------------------------------------------------------
-    # Raw source data.  Keep this separate from the assessment so the normal
-    # report stays compact while -d remains auditable.
+    # Evidence-focused source data.  Keep this separate from the assessment
+    # and show only implicated rows plus small context windows.
     # ------------------------------------------------------------------
-    print("\nRaw data (-d)")
-    print("=============")
+    print("\nRelated raw data (-d)")
+    print("=====================")
+    print("=> related/triggering data; unmarked lines are surrounding context")
+
+    direct_cpu_ids = set(
+        cpu for cpu, pct in steal_pct_by_cpu.items() if pct >= 5.0)
+    direct_cpu_ids.update(r["cpu"] for r in user_clock_lagged)
+    direct_cpu_ids.update(r["cpu"] for r, factor in user_violations)
+    all_related_cpu_ids = set(direct_cpu_ids)
+    all_related_cpu_ids.update(r["cpu"] for r in clock_lagged)
+    all_related_cpu_ids.update(r["cpu"] for r in deep)
+    all_related_cpu_ids.update(r["cpu"] for r in over_slice)
+    all_related_cpu_ids.update(
+        cpu for cpu, pct in steal_pct_by_cpu.items() if pct >= 1.0)
+    if not all_related_cpu_ids and cpu_supporting:
+        all_related_cpu_ids.update(
+            r["cpu"] for r in sorted(
+                rows, key=lambda row: row["nr_running"],
+                reverse=True)[:8])
+    row_by_cpu = dict((r["cpu"], r) for r in rows)
+    ranked_related_cpus = sorted(
+        all_related_cpu_ids,
+        key=lambda cpu: (
+            cpu in direct_cpu_ids,
+            row_by_cpu.get(cpu, {}).get("clock_lag", -1.0),
+            steal_pct_by_cpu.get(cpu, 0.0),
+            row_by_cpu.get(cpu, {}).get("nr_running", -1)),
+        reverse=True)
+    related_cpu_ids = set(ranked_related_cpus[:DETAIL_CPU_LIMIT])
+    related_cpu_overflow = max(
+        0, len(all_related_cpu_ids) - len(related_cpu_ids))
+    available_cpu_ids = set(r["cpu"] for r in rows)
+    context_cpu_ids = set()
+    for cpu in related_cpu_ids:
+        for neighbor in (cpu - 1, cpu + 1):
+            if neighbor in available_cpu_ids:
+                context_cpu_ids.add(neighbor)
+    context_cpu_ids.difference_update(all_related_cpu_ids)
+    shown_cpu_ids = related_cpu_ids | context_cpu_ids
 
     print("\n[VM identification]")
     print("detected=%s is_virtual=%s sys_info.CPUS=%d"
@@ -1382,100 +1489,229 @@ def show_overcommit(options):
             print("x86_hyper_type=<unavailable>")
     try:
         print("\n$ sys -i")
-        print(exec_crash_command("sys -i"))
+        sys_raw = exec_crash_command("sys -i")
+        oc_print_excerpt(
+            sys_raw,
+            ("DMI_SYS_VENDOR:", "DMI_PRODUCT_NAME:", "DMI_BIOS_VENDOR:",
+             "MACHINE:", "CPUS:"),
+            before=0, after=0, color=crashcolor.LIGHTCYAN)
     except Exception:
         print("$ sys -i: <unavailable>")
 
     print("\n[CPU load and steal]")
-    print("avenrun (raw, FSHIFT=11) = %s"
-          % (str(avenrun_raw) if avenrun_raw is not None else "unavailable"))
-    print("paravirt_steal_enabled = %s"
-          % (str(steal_enabled) if steal_enabled is not None
-             else "unavailable"))
+    load_line = "avenrun (raw, FSHIFT=11) = %s" % (
+        str(avenrun_raw) if avenrun_raw is not None else "unavailable")
+    oc_print_related_line(load_line, load_high, crashcolor.YELLOW)
+    steal_line = "paravirt_steal_enabled = %s" % (
+        str(steal_enabled) if steal_enabled is not None else "unavailable")
+    oc_print_related_line(
+        steal_line, steal_enabled is False, crashcolor.YELLOW)
     if steal_by_cpu:
-        print("%4s %20s %20s %9s"
-              % ("CPU", "CPUTIME_STEAL", "CPUTIME_TOTAL", "steal%"))
-        for cpu in sorted(steal_by_cpu):
+        shown_steal_cpus = [
+            cpu for cpu in sorted(steal_by_cpu)
+            if cpu in related_cpu_ids]
+        if shown_steal_cpus:
+            print("   %4s %20s %20s %9s"
+                  % ("CPU", "CPUTIME_STEAL", "CPUTIME_TOTAL", "steal%"))
+        for cpu in shown_steal_cpus:
             st, tt = steal_by_cpu[cpu]
-            print("%4d %20d %20d %8.3f%%"
-                  % (cpu, st, tt, steal_pct_by_cpu.get(cpu, 0.0)))
+            pct = steal_pct_by_cpu.get(cpu, 0.0)
+            line = "%4d %20d %20d %8.3f%%" % (cpu, st, tt, pct)
+            oc_print_related_line(
+                line, True,
+                crashcolor.LIGHTRED if pct >= 5.0 else crashcolor.YELLOW)
+        omitted = len(steal_by_cpu) - len(shown_steal_cpus)
+        if omitted:
+            print("   ... %d unselected CPU steal row(s) omitted" % omitted)
 
     print("\n[Per-vCPU runqueue fields; clocks are raw nanoseconds]")
-    print("%4s %5s %3s %16s %16s %16s %16s %9s %s"
+    print("   %4s %5s %3s %16s %16s %16s %16s %9s %s"
           % ("CPU", "runq", "POL", "rq.clock", "clock_task",
              "exec_start", "last_arrival", "lag(s)",
              "current(pid/task)"))
     for r in rows:
-        print("%4d %5d %3d %16d %16d %16d %16d %9.3f %s(%d/0x%x)"
-              % (r["cpu"], r["nr_running"], r["policy"], r["clock"],
-                 r["clock_task"], r["exec_start"], r["last_arrival"],
-                 r["clock_lag"], r["curr"], r["pid"], r["task"]))
+        if r["cpu"] not in shown_cpu_ids:
+            continue
+        line = (
+            "%4d %5d %3d %16d %16d %16d %16d %9.3f %s(%d/0x%x)"
+            % (r["cpu"], r["nr_running"], r["policy"], r["clock"],
+               r["clock_task"], r["exec_start"], r["last_arrival"],
+               r["clock_lag"], r["curr"], r["pid"], r["task"]))
+        if r["cpu"] in related_cpu_ids:
+            color = (crashcolor.LIGHTRED
+                     if r["cpu"] in direct_cpu_ids
+                     else crashcolor.YELLOW)
+            oc_print_related_line(line, True, color)
+        else:
+            oc_print_related_line(line, False)
+    if not shown_cpu_ids:
+        print("   <no per-vCPU row met an overcommit evidence threshold>")
+    if related_cpu_overflow:
+        print("   ... %d additional related CPU row(s) omitted"
+              % related_cpu_overflow)
+    unrelated_omitted = (
+        len(available_cpu_ids - shown_cpu_ids - all_related_cpu_ids))
+    if unrelated_omitted > 0:
+        print("   ... %d unrelated CPU row(s) omitted"
+              % unrelated_omitted)
     print("sysctl scheduler slice = %.3f ms" % slice_ms)
 
     if context_rows:
         print("\n[Backtraces used to classify clock-lag/slice task mode]")
-        for r in context_rows:
+        detail_context_rows = sorted(
+            context_rows,
+            key=lambda row: row["cpu"] in direct_cpu_ids,
+            reverse=True)[:DETAIL_BACKTRACE_LIMIT]
+        for r in detail_context_rows:
             mode, bt_raw = task_contexts.get(r["task"], ("?", ""))
             print("\n$ bt 0x%x  # CPU%d %s(%d), mode=%s"
                   % (r["task"], r["cpu"], r["curr"], r["pid"], mode))
-            print(bt_raw if bt_raw else "<unavailable>")
+            if bt_raw:
+                oc_print_excerpt(
+                    bt_raw,
+                    ("RIP:", "RSP:", "exception RIP", "PID:", "TASK:",
+                     "#0 ", "#1 ", "#2 "),
+                    before=0, after=1)
+            else:
+                print("   <unavailable>")
+        omitted = len(context_rows) - len(detail_context_rows)
+        if omitted:
+            print("   ... %d additional classification backtrace(s) omitted"
+                  % omitted)
 
     print("\n[Task-state rows]")
     print("total=%d running=%d uninterruptible=%d other=%d"
           % (task_states["total"], task_states["running"],
              task_states["uninterruptible"], task_states["other"]))
-    print("%18s %8s %10s %s" % ("TASK", "PID", "STATE", "COMM"))
-    for addr, pid, comm, state in (
-            task_states["running_rows"]
-            + task_states["uninterruptible_rows"]):
-        print("0x%016x %8d 0x%08x %s" % (addr, pid, state, comm))
+    related_task_addrs = set(r["task"] for r in context_rows)
+    selected_running = [
+        row for row in task_states["running_rows"]
+        if row[0] in related_task_addrs][:DETAIL_TASK_LIMIT]
+    selected_un = []
+    if storage_busy or load_high or task_states["uninterruptible"] > online_n:
+        remaining = max(0, DETAIL_TASK_LIMIT - len(selected_running))
+        selected_un = task_states["uninterruptible_rows"][
+            :remaining]
+    selected_tasks = selected_running + selected_un
+    if selected_tasks:
+        print("   %18s %8s %10s %s" % ("TASK", "PID", "STATE", "COMM"))
+    for addr, pid, comm, state in selected_tasks:
+        color = (crashcolor.LIGHTRED if addr in related_task_addrs
+                 else crashcolor.YELLOW)
+        oc_print_related_line(
+            "0x%016x %8d 0x%08x %s" % (addr, pid, state, comm),
+            True, color)
+    if not selected_tasks:
+        print("   <no task row directly related to the assessment>")
+    task_rows_total = (
+        len(task_states["running_rows"])
+        + len(task_states["uninterruptible_rows"]))
+    omitted = task_rows_total - len(selected_tasks)
+    if omitted > 0:
+        print("   ... %d unrelated runnable/D-state row(s) omitted" % omitted)
 
     print("\n[Memory symbols and VM events]")
-    print("totalram_pages=%d total_swap_pages=%d nr_swap_pages=%d"
-          % (memory["totalram_pages"], memory["swap_total_pages"],
-             memory["swap_free_pages"]))
-    for name in sorted(vm_events):
-        print("%-28s %d" % (name, vm_events[name]))
+    memory_line = "totalram_pages=%d total_swap_pages=%d nr_swap_pages=%d" % (
+        memory["totalram_pages"], memory["swap_total_pages"],
+        memory["swap_free_pages"])
+    oc_print_related_line(
+        memory_line, balloon_active or swap_heavy,
+        crashcolor.LIGHTRED if balloon_current else crashcolor.YELLOW)
+    nonzero_events = [
+        (name, vm_events[name]) for name in sorted(vm_events)
+        if vm_events[name] != 0]
+    for name, value in nonzero_events:
+        color = (crashcolor.LIGHTRED if name == "OOM_KILL" and value
+                 else crashcolor.YELLOW)
+        oc_print_related_line("%-28s %d" % (name, value), True, color)
+    zero_events = len(vm_events) - len(nonzero_events)
+    if zero_events:
+        print("   ... %d zero VM event counter(s) omitted" % zero_events)
     if balloon:
         print("\n$ %s" % balloon["raw_command"])
         try:
-            print(exec_crash_command(balloon["raw_command"]))
+            balloon_raw = exec_crash_command(balloon["raw_command"])
+            oc_print_excerpt(
+                balloon_raw,
+                ("size", "target", "current_pages", "target_pages",
+                 "num_pages_ballooned", "num_pages", "num_desired",
+                 "num_pfns", "refused", "retry", "rate_",
+                 "schedule_delay"),
+                before=1, after=1)
         except Exception as e:
             print("<unavailable: %s>" % str(e))
     if memory["kmem_raw"]:
         print("\n$ kmem -i")
-        print(memory["kmem_raw"])
+        oc_print_excerpt(
+            memory["kmem_raw"],
+            ("TOTAL MEM", "FREE", "TOTAL SWAP", "SWAP USED", "SWAP FREE"),
+            before=0, after=0,
+            color=(crashcolor.LIGHTRED if swap_heavy
+                   else crashcolor.LIGHTCYAN))
 
     print("\n[SCSI host fields]")
-    print("%-8s %8s %12s %12s %12s"
-          % ("HOST", "devices", "outstanding", "blocked", "failed"))
-    for name, ndev, busy, blocked, failed in scsi_hosts:
-        print("%-8s %8d %12d %12d %12d"
-              % (name, ndev, busy, blocked, failed))
+    related_hosts = [
+        host for host in scsi_hosts
+        if host[2] > 0 or host[3] > 0 or host[4] > 0]
+    if related_hosts:
+        print("   %-8s %8s %12s %12s %12s"
+              % ("HOST", "devices", "outstanding", "blocked", "failed"))
+    for name, ndev, busy, blocked, failed in related_hosts:
+        color = (crashcolor.LIGHTRED
+                 if failed > 0 or blocked > 0 or busy >= 8
+                 else crashcolor.YELLOW)
+        oc_print_related_line(
+            "%-8s %8d %12d %12d %12d"
+            % (name, ndev, busy, blocked, failed), True, color)
+    if not related_hosts:
+        print("   <no SCSI host has outstanding/blocked/failed commands>")
+    omitted = len(scsi_hosts) - len(related_hosts)
+    if omitted:
+        print("   ... %d idle SCSI host row(s) omitted" % omitted)
 
     print("\n[Block request fields]")
-    print("%18s %18s %-12s %s"
-          % ("REQUEST", "QUEUE", "STATE", "age(s)"))
-    for reqaddr, qaddr, state, age in request_rows:
-        print("0x%016x 0x%016x %-12s %.6f"
-              % (reqaddr, qaddr, state, age))
+    aged_requests = sorted(
+        [row for row in request_rows if row[3] >= 1.0],
+        key=lambda row: row[3], reverse=True)[:DETAIL_REQUEST_LIMIT]
+    if not aged_requests and inflight >= 16:
+        aged_requests = sorted(
+            request_rows, key=lambda row: row[3],
+            reverse=True)[:DETAIL_REQUEST_LIMIT]
+    if aged_requests:
+        print("   %18s %18s %-12s %s"
+              % ("REQUEST", "QUEUE", "STATE", "age(s)"))
+    for reqaddr, qaddr, state, age in aged_requests:
+        oc_print_related_line(
+            "0x%016x 0x%016x %-12s %.6f"
+            % (reqaddr, qaddr, state, age),
+            True,
+            crashcolor.LIGHTRED if age >= 1.0 else crashcolor.YELLOW)
+    if not aged_requests:
+        print("   <no request is at least 1s old>")
+    omitted = len(request_rows) - len(aged_requests)
+    if omitted:
+        print("   ... %d younger block request row(s) omitted" % omitted)
 
-    print("\n[Matched kernel log lines]")
+    print("\n[Kernel log matches with two surrounding lines]")
     for name in LOG_PATTERNS:
-        lines = log_evidence[name]
-        if not lines:
+        context = log_contexts[name]
+        if not context:
             continue
-        print("\n%s (%d)" % (name, len(lines)))
-        for line in lines:
-            print(line)
+        print("\n%s (%d match(es))" % (name, len(log_evidence[name])))
+        shown_context = context[-DETAIL_LOG_LINE_LIMIT:]
+        omitted = len(context) - len(shown_context)
+        if omitted:
+            print("   ... %d older context line(s) omitted" % omitted)
+        for line, related in shown_context:
+            oc_print_related_line(line, related)
 
 
 def vminfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
-                  help="Show details (with --overcommit, append raw source "
-                       "data)")
+                  help="Show details (with --overcommit, append related raw "
+                       "data and context)")
     op.add_option("-c", "--context", dest="show_context", default=0,
                   action="store_true",
                   help="Show VM Context")
