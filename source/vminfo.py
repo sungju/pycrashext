@@ -435,10 +435,13 @@ def oc_get_balloon_pages():
 
 def oc_collect_runqueues():
     """
-    Return a list of per-CPU dicts with cpu, nr_running, and tick_stall
-    (rq->clock_task - curr->se.exec_start, in seconds): the time the vCPU's
+    Return a list of per-CPU dicts with cpu, nr_running, tick_stall
+    (rq->clock_task - curr->se.exec_start, in seconds: how long the vCPU's
     timer tick appears to have been stalled, i.e. the hypervisor was likely
-    not scheduling this vCPU.
+    not scheduling this vCPU) and oncpu (rq clock - curr->sched_info.
+    last_arrival: how long the current task has been continuously on the
+    CPU).  A conservative note: on a tick-stalled vCPU the rq clock is
+    frozen too, so oncpu UNDER-estimates the real wall time.
     """
     rows = []
     try:
@@ -447,7 +450,7 @@ def oc_collect_runqueues():
         return rows
     for rq in rqs:
         row = {"cpu": rq.cpu, "nr_running": -1, "tick_stall": -1.0,
-               "curr": ""}
+               "curr": "", "pid": -1, "task": 0, "oncpu": -1.0}
         try:
             row["nr_running"] = int(rq.nr_running)
         except Exception:
@@ -468,11 +471,181 @@ def oc_collect_runqueues():
             pass
         try:
             row["curr"] = str(rq.curr.comm)
+            row["pid"] = int(rq.curr.pid)
+            row["task"] = int(rq.curr)
+        except Exception:
+            pass
+        try:
+            la = int(rq.curr.sched_info.last_arrival)
+            if la:
+                row["oncpu"] = (int(rq.clock) - la) / 1000000000.0
         except Exception:
             pass
         rows.append(row)
     rows.sort(key=lambda r: r["cpu"])
     return rows
+
+
+def oc_get_sched_slice_ms():
+    """CFS scheduling-latency target in ms (the upper bound for how long a
+    task may stay on-CPU when others are runnable)."""
+    for sym in ("sysctl_sched_latency", "sysctl_sched_base_slice",
+                "normalized_sysctl_sched_latency"):
+        try:
+            val = int(readSymbol(sym))
+            if val:
+                return val / 1000000.0
+        except Exception:
+            continue
+    return 24.0
+
+
+def oc_task_mode(task_addr):
+    """
+    Return 'user'/'kernel'/None: which side the task was executing when the
+    dump was taken.  The first register block in 'bt' output is the context
+    the dump NMI interrupted; a userspace RIP means the task was running
+    application code at that instant.
+    """
+    try:
+        out = exec_crash_command("bt 0x%x" % task_addr)
+    except Exception:
+        return None
+    for line in out.splitlines():
+        line = line.strip()
+        if line.startswith("RIP:"):
+            try:
+                rip = int(line.split()[1], 16)
+            except Exception:
+                return None
+            return "user" if rip < 0xffff800000000000 else "kernel"
+    return "kernel"
+
+
+def oc_get_iowait_pct():
+    """System-wide iowait as % of all accounted CPU time (since boot)."""
+    if not symbol_exists("kernel_cpustat"):
+        return None
+    idx = 6
+    try:
+        idx = int(EnumInfo("enum cpu_usage_stat")["CPUTIME_IOWAIT"])
+    except Exception:
+        pass
+    iowait = total = 0
+    try:
+        for cpu, addr in enumerate(percpu.get_cpu_var("kernel_cpustat")):
+            kcs = readSU("struct kernel_cpustat", addr)
+            buckets = [int(x) for x in kcs.cpustat]
+            if idx < len(buckets):
+                iowait += buckets[idx]
+                total += sum(buckets)
+    except Exception:
+        return None
+    if not total:
+        return None
+    return 100.0 * iowait / total
+
+
+def oc_get_scsi_hosts():
+    """
+    Best-effort walk of the SCSI hosts (shost_class) returning
+    [(name, ndev, busy, blocked, failed)].  'busy' is the number of commands
+    outstanding at the (virtual) HBA -- the modern equivalent of the removed
+    Scsi_Host.host_busy counter: per-device device_busy where the kernel
+    keeps it (RHEL8), else iorequest_cnt - iodone_cnt (RHEL9/10).
+    """
+    hosts = []
+    try:
+        sp = readSymbol("shost_class").p
+        shost_dev_off = member_offset("struct Scsi_Host", "shost_dev")
+        if shost_dev_off < 0:
+            return hosts
+        # knode_class lives in struct device up to 5.0 (RHEL8) and in
+        # struct device_private from 5.1 (RHEL9/10).
+        dev_knode_off = member_offset("struct device", "knode_class")
+        priv_knode_off = member_offset("struct device_private",
+                                       "knode_class")
+        if dev_knode_off < 0 and priv_knode_off < 0:
+            return hosts
+        has_sdev_busy = \
+            member_offset("struct scsi_device", "device_busy") >= 0
+        has_iocnt = \
+            (member_offset("struct scsi_device", "iorequest_cnt") >= 0 and
+             member_offset("struct scsi_device", "iodone_cnt") >= 0)
+        for knode in readSUListFromHead(sp.klist_devices.k_list, "n_node",
+                                        "struct klist_node"):
+            try:
+                if dev_knode_off >= 0:
+                    dev = readSU("struct device",
+                                 int(knode) - dev_knode_off)
+                else:
+                    dev_priv = readSU("struct device_private",
+                                      int(knode) - priv_knode_off)
+                    dev = dev_priv.device
+                shost = readSU("struct Scsi_Host",
+                               int(dev) - shost_dev_off)
+                busy = 0
+                ndev = 0
+                for sdev in readSUListFromHead(shost.__devices, "siblings",
+                                               "struct scsi_device"):
+                    ndev += 1
+                    if ndev > 4096:
+                        break
+                    try:
+                        if has_sdev_busy:
+                            busy += int(sdev.device_busy.counter)
+                        elif has_iocnt:
+                            busy += (int(sdev.iorequest_cnt.counter) -
+                                     int(sdev.iodone_cnt.counter))
+                    except Exception:
+                        pass
+                try:
+                    blocked = int(shost.host_blocked.counter)
+                except Exception:
+                    try:
+                        blocked = int(shost.host_blocked)
+                    except Exception:
+                        blocked = -1
+                try:
+                    failed = int(shost.host_failed)
+                except Exception:
+                    failed = -1
+                hosts.append(("host%d" % int(shost.host_no), ndev, busy,
+                              blocked, failed))
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return hosts
+
+
+def oc_get_inflight_requests():
+    """
+    Best-effort scan of the block layer for in-flight requests using
+    pykdump's LinuxDump.block helpers.  Returns (count, oldest_age_sec):
+    requests the guest submitted that the (host-backed) device has not
+    completed, and the age of the oldest one.
+    """
+    count = 0
+    oldest = 0.0
+    try:
+        from LinuxDump.block import get_all_request_queues, \
+                get_queue_requests
+        for rq in get_all_request_queues(""):
+            try:
+                for request in get_queue_requests(rq):
+                    count += 1
+                    try:
+                        age = -float(request._reqinfo_.rq_alloc)
+                        if age > oldest:
+                            oldest = age
+                    except Exception:
+                        pass
+            except Exception:
+                continue
+    except Exception:
+        return -1, -1.0
+    return count, oldest
 
 
 # A vCPU tick stalled longer than this (seconds) is treated as strong evidence
@@ -495,6 +668,7 @@ def show_overcommit(options):
     steal_enabled, steal_by_cpu = oc_get_steal_state()
     loadavg = oc_get_loadavg()
     rows = oc_collect_runqueues()
+    slice_ms = oc_get_sched_slice_ms()
     online_n = len(rows) if rows else sys_info.CPUS
 
     crashcolor.set_color(crashcolor.LIGHTCYAN)
@@ -578,6 +752,39 @@ def show_overcommit(options):
             print("  ... and %d more" % (len(stalled) - 12))
 
     # ------------------------------------------------------------------
+    # Long user-mode slices.  With other tasks queued, CFS preempts the
+    # running task within roughly the scheduling-latency target; user code
+    # has no way to block that.  A task observed on-CPU for wall-clock
+    # seconds in USER mode with waiters means the preemption tick was not
+    # delivered, i.e. the hypervisor was not running this vCPU.
+    # ------------------------------------------------------------------
+    oncpu_min_sec = max(0.5, slice_ms * 20 / 1000.0)
+    over_slice = sorted(
+        [r for r in rows
+         if r["oncpu"] >= oncpu_min_sec and r["nr_running"] >= 2
+         and not r["curr"].startswith("swapper")],
+        key=lambda r: r["oncpu"], reverse=True)
+    user_violations = []
+    if over_slice:
+        print("\nTasks on-CPU far beyond the scheduler slice "
+              "(CFS target ~%.0f ms):" % slice_ms)
+        print("  %4s %-16s %8s %10s %8s %6s %6s" %
+              ("CPU", "task", "pid", "on-CPU(s)", "x slice", "queue",
+               "mode"))
+        for r in over_slice[:8]:
+            mode = oc_task_mode(r["task"]) or "?"
+            factor = (r["oncpu"] * 1000.0 / slice_ms) if slice_ms else 0.0
+            if mode == "user":
+                user_violations.append((r, factor))
+                crashcolor.set_color(crashcolor.RED)
+            print("  %4d %-16s %8d %10.3f %7.0fx %6d %6s" %
+                  (r["cpu"], r["curr"][:16], r["pid"], r["oncpu"],
+                   factor, r["nr_running"], mode))
+            crashcolor.set_color(crashcolor.RESET)
+        print("  (kernel mode can legitimately delay preemption; USER mode "
+              "cannot)")
+
+    # ------------------------------------------------------------------
     # Memory pressure (ballooning)
     # ------------------------------------------------------------------
     balloon = oc_get_balloon_pages()
@@ -601,44 +808,181 @@ def show_overcommit(options):
         crashcolor.set_color(crashcolor.RESET)
 
     # ------------------------------------------------------------------
+    # Storage pressure: I/O the guest submitted but the host-backed device
+    # has not completed.
+    # ------------------------------------------------------------------
+    scsi_hosts = oc_get_scsi_hosts()
+    inflight, oldest_io = oc_get_inflight_requests()
+    iowait_pct = oc_get_iowait_pct()
+
+    print("\n-- Storage pressure --")
+    storage_busy = False
+    total_host_busy = 0
+    host_failed_total = 0
+    if scsi_hosts:
+        total_host_busy = sum(h[2] for h in scsi_hosts if h[2] > 0)
+        host_failed_total = sum(h[4] for h in scsi_hosts if h[4] > 0)
+        print("SCSI hosts     : %d found, outstanding commands (host_busy) "
+              "total = %d" % (len(scsi_hosts), total_host_busy))
+        for (name, ndev, busy, blocked, failed) in scsi_hosts:
+            if busy > 0 or blocked > 0 or failed > 0:
+                extra = ["%d device(s)" % ndev]
+                if busy > 0:
+                    extra.append("outstanding=%d" % busy)
+                if blocked > 0:
+                    extra.append("host_blocked=%d" % blocked)
+                if failed > 0:
+                    extra.append("host_failed=%d (in error recovery!)"
+                                 % failed)
+                print("                 %s: %s" % (name, ", ".join(extra)))
+    else:
+        print("SCSI hosts     : none found (or walk unsupported)")
+    if inflight >= 0:
+        stuck = (inflight >= 16 or oldest_io >= 1.0)
+        if stuck:
+            crashcolor.set_color(crashcolor.RED)
+        print("Block layer    : %d request(s) in flight, oldest waited "
+              "%.1fs" % (inflight, oldest_io))
+        crashcolor.set_color(crashcolor.RESET)
+        if stuck:
+            storage_busy = True
+    if iowait_pct is not None:
+        print("iowait         : %.1f%% of all CPU time (since boot)"
+              % iowait_pct)
+    if total_host_busy >= 8 or host_failed_total > 0:
+        storage_busy = True
+
+    # ------------------------------------------------------------------
     # Verdict
     # ------------------------------------------------------------------
     cpu_over = ((loadavg and online_n and loadavg[0] > online_n * 1.25)
                 or max_runq >= DEEP_RUNQ
                 or bool(stalled)
+                or bool(user_violations)
                 or max_steal_pct >= 5.0)
 
     print("\n== Verdict ==")
+    ev_n = [0]
+
+    def print_evidence(headline, why_lines):
+        ev_n[0] += 1
+        crashcolor.set_color(crashcolor.RED)
+        print(" [%d] %s" % (ev_n[0], headline))
+        crashcolor.set_color(crashcolor.RESET)
+        for wl in why_lines:
+            print("     %s" % wl)
+        print("")
+
     if cpu_over:
         crashcolor.set_color(crashcolor.RED)
-        print("LIKELY hypervisor CPU overcommit.")
+        print("LIKELY hypervisor CPU overcommit.  Evidence:\n")
         crashcolor.set_color(crashcolor.RESET)
-        reasons = []
-        if loadavg and online_n and loadavg[0] > online_n * 1.25:
-            reasons.append("load %.0f on %d CPUs (%.1fx)"
-                           % (loadavg[0], online_n, loadavg[0] / online_n))
-        if max_runq >= DEEP_RUNQ:
-            reasons.append("run-queues up to %d deep" % max_runq)
+
+        if user_violations:
+            r, factor = user_violations[0]
+            more = (", and %d more CPU(s) show the same"
+                    % (len(user_violations) - 1)
+                    if len(user_violations) > 1 else "")
+            print_evidence(
+                "'%s' (pid %d) ran USER-mode code on CPU %d for %.3fs in "
+                "one stretch" % (r["curr"], r["pid"], r["cpu"], r["oncpu"]) +
+                " (~%.0fx the ~%.0f ms CFS slice) with %d tasks queued%s"
+                % (factor, slice_ms, r["nr_running"], more),
+                ["Why: user code cannot block preemption -- the guest "
+                 "kernel preempts via the",
+                 "timer tick. A user task holding a CPU for wall-clock "
+                 "seconds while others",
+                 "queue means the vCPU (and its tick) was not being run by "
+                 "the hypervisor."])
+
         if stalled:
-            reasons.append("%d vCPU(s) with timer ticks stalled up to %.1fs"
-                           % (len(stalled), stalled[0]["tick_stall"]))
+            print_evidence(
+                "%d vCPU(s) had their timer tick frozen for up to %.1fs "
+                "(rq->clock_task vs" % (len(stalled),
+                                        stalled[0]["tick_stall"]) +
+                " curr->se.exec_start)",
+                ["Why: the tick fires every few ms whenever a vCPU runs. A "
+                 "multi-second gap in",
+                 "the tick means the hypervisor descheduled that vCPU for "
+                 "that long."])
+
+        if loadavg and online_n and loadavg[0] > online_n * 1.25:
+            recent = (loadavg[0] > loadavg[2] * 2 and loadavg[2] > 0)
+            print_evidence(
+                "load average %.2f vs %d CPUs (%.1fx oversubscribed), "
+                "run-queues up to %d deep"
+                % (loadavg[0], online_n, loadavg[0] / online_n, max_runq) +
+                ("; load1 >> load15 (recent pile-up)" if recent else ""),
+                ["Why: runnable work piled up because vCPUs stopped "
+                 "draining their queues --",
+                 "consistent with sudden host CPU starvation rather than a "
+                 "gradual load rise."])
+        elif max_runq >= DEEP_RUNQ:
+            print_evidence(
+                "run-queues up to %d tasks deep on single CPUs" % max_runq,
+                ["Why: tasks are runnable but not getting CPU time; with a "
+                 "healthy vCPU supply",
+                 "queues this deep drain in milliseconds."])
+
         if max_steal_pct >= 5.0:
-            reasons.append("steal up to %.0f%%" % max_steal_pct)
-        print("  Evidence: " + "; ".join(reasons) + ".")
+            print_evidence(
+                "CPU steal time up to %.0f%% of a CPU's accounted time"
+                % max_steal_pct,
+                ["Why: steal is time the hypervisor itself reports it "
+                 "withheld this vCPU --",
+                 "direct confirmation from the host side."])
+
         if steal_enabled is False:
-            print("  Note: steal is unaccounted on this guest, so the case is "
-                  "inferential; confirm")
-            print("        against the hypervisor host's CPU-ready / co-stop "
-                  "metrics.")
+            print("  Note: steal is unaccounted on this guest, so the case "
+                  "is inferential;")
+            print("        confirm against the hypervisor host's CPU-ready "
+                  "/ co-stop metrics.")
     elif is_virt:
         print("No clear CPU overcommit signature in this snapshot.")
+
+    if storage_busy:
+        crashcolor.set_color(crashcolor.RED)
+        print("\nHost STORAGE pressure.  Evidence:\n")
+        crashcolor.set_color(crashcolor.RESET)
+        head = []
+        if total_host_busy > 0:
+            head.append("SCSI host_busy total %d" % total_host_busy)
+        if host_failed_total > 0:
+            head.append("%d command(s) in SCSI error recovery"
+                        % host_failed_total)
+        if inflight > 0:
+            head.append("%d block request(s) in flight (oldest %.1fs)"
+                        % (inflight, oldest_io))
+        if iowait_pct is not None:
+            head.append("iowait %.1f%% since boot" % iowait_pct)
+        print_evidence(
+            "; ".join(head),
+            ["Why: these I/Os entered the guest I/O stack and are still "
+             "incomplete. Commands",
+             "outstanding at the virtual HBA point at a saturated host "
+             "storage path (shared",
+             "datastore); requests aged in the guest block layer with few "
+             "outstanding at the",
+             "HBA mean starved vCPUs could not even dispatch/complete them. "
+             "Both are faces",
+             "of host overcommit."])
+
     if balloon_pressure:
         crashcolor.set_color(crashcolor.RED)
-        print("Host MEMORY pressure present (balloon active) -- check for "
-              "co-occurring memory")
-        print("overcommit on the host.")
+        print("\nHost MEMORY pressure.  Evidence:\n")
         crashcolor.set_color(crashcolor.RESET)
-    if not cpu_over and not balloon_pressure and is_virt:
+        alloc, target, kind = balloon
+        gb = crash.PAGESIZE / 1024.0 / 1024.0 / 1024.0
+        print_evidence(
+            "%s balloon holds %.2f GB of guest memory%s"
+            % (kind, alloc * gb,
+               " (host wants more)" if target > alloc else " (at target)"),
+            ["Why: the balloon only inflates when the hypervisor is short "
+             "of physical",
+             "memory and reclaims it from guests -- the host is "
+             "overcommitted on memory."])
+
+    if not cpu_over and not balloon_pressure and not storage_busy and is_virt:
         print("No hypervisor overcommit evidence found.")
 
 
