@@ -1564,8 +1564,28 @@ def show_overcommit(options):
             reverse=True)[:DETAIL_BACKTRACE_LIMIT]
         for r in detail_context_rows:
             mode, bt_raw = task_contexts.get(r["task"], ("?", ""))
-            print("\n$ bt 0x%x  # CPU%d %s(%d), mode=%s"
-                  % (r["task"], r["cpu"], r["curr"], r["pid"], mode))
+            oncpu = ("%.6fs" % r["oncpu"]
+                     if r["oncpu"] >= 0 else "unavailable")
+            curr_runtime = (
+                "%.6fs" % r["curr_runtime"]
+                if r["curr_runtime"] >= 0 else "unavailable")
+            print("\n$ bt 0x%x  # CPU%d %s(%d), mode=%s, rq on-CPU=%s"
+                  % (r["task"], r["cpu"], r["curr"], r["pid"], mode,
+                     oncpu))
+            timing_color = (
+                crashcolor.LIGHTRED if r["cpu"] in direct_cpu_ids
+                else crashcolor.YELLOW)
+            oc_print_related_line(
+                "runqueue timing: depth=%d on-CPU=%s current-exec=%s "
+                "clock-lag=%.6fs"
+                % (r["nr_running"], oncpu, curr_runtime, r["clock_lag"]),
+                True, timing_color)
+            oc_print_related_line(
+                "raw: rq.clock=%d last_arrival=%d clock_task=%d "
+                "exec_start=%d"
+                % (r["clock"], r["last_arrival"], r["clock_task"],
+                   r["exec_start"]),
+                True, timing_color)
             if bt_raw:
                 oc_print_excerpt(
                     bt_raw,

@@ -1029,7 +1029,7 @@ CPU
                  20    3.426s    17  user    cssdmonitor(5678)
 ```
 
-The normal report leads with a compact per-domain assessment. Add `-d` (`vminfo --overcommit -d`) for a bounded, evidence-focused raw appendix. It shows the worst implicated CPU/task/request rows and relevant structure fields, includes nearby CPU, backtrace, structure, and kernel-log context, and marks triggering lines with `=>` plus terminal color. Omission counts make the filtering explicit.
+The normal report leads with a compact per-domain assessment. Add `-d` (`vminfo --overcommit -d`) for a bounded, evidence-focused raw appendix. It shows the worst implicated CPU/task/request rows and relevant structure fields, includes nearby CPU, backtrace, structure, and kernel-log context, and marks triggering lines with `=>` plus terminal color. Each candidate-task backtrace also includes its runqueue depth, scheduler-clock on-CPU/current-execution duration, clock lag, and the raw clock fields behind those calculations. Omission counts make the filtering explicit.
 
 The verdict remains inferential on hypervisors that hide steal, so confirm CPU findings against the host's own metrics (for example, VMware CPU-ready/co-stop). An inflated balloon is direct evidence of hypervisor-directed memory reclaim; storage queues and guest VM-pressure counters are supporting evidence only.
 
