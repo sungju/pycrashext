@@ -935,15 +935,36 @@ def oc_get_iowait_pct():
     return 100.0 * iowait / total
 
 
-def oc_get_scsi_hosts():
+def oc_get_scsi_hosts(request_rows=None):
     """
     Best-effort walk of the SCSI hosts (shost_class) returning
     [(name, ndev, busy, blocked, failed)].  'busy' is the number of commands
-    outstanding at the (virtual) HBA -- the modern equivalent of the removed
-    Scsi_Host.host_busy counter: per-device device_busy where the kernel
-    keeps it (RHEL8), else iorequest_cnt - iodone_cnt (RHEL9/10).
+    outstanding at the (virtual) HBA -- the equivalent of the removed
+    Scsi_Host.host_busy counter.  It is taken as the maximum of two sources:
+      - block requests on the host's device queues that are 'active'
+        (dispatched to the LLD) or 'softirq' (the LLD has completed them but
+        the completion softirq has not yet run to retire them) -- this is
+        what scsi_host_busy()/scsishow actually count on blk-mq kernels
+        (request_rows comes from oc_get_inflight_requests()). Verified
+        request-for-request against 'scsishow' on a live vmcore: 'queued'
+        requests are NOT yet dispatched and must be excluded, or idle hosts
+        with a deep queue backlog would be misreported as busy;
+      - the per-device device_busy counters, kept as a defensive fallback
+        for kernels where the block-layer walk above is unavailable (on the
+        RHEL8 kernel this was verified against, device_busy itself reads 0
+        even while scsishow shows commands outstanding, so it is NOT a
+        reliable primary source).
+    (iorequest_cnt - iodone_cnt is deliberately NOT used: the two counters
+    drift apart over uptime -- e.g. tens of thousands on a CD-ROM device --
+    so their difference does not measure outstanding commands.)
     """
     hosts = []
+    # requests dispatched to the LLD or awaiting completion softirq, i.e.
+    # commands the HBA itself considers outstanding, per request_queue.
+    active_by_queue = {}
+    for row in (request_rows or []):
+        if row[2] in ("active", "softirq"):
+            active_by_queue[row[1]] = active_by_queue.get(row[1], 0) + 1
     try:
         sp = readSymbol("shost_class").p
         shost_dev_off = member_offset("struct Scsi_Host", "shost_dev")
@@ -958,9 +979,6 @@ def oc_get_scsi_hosts():
             return hosts
         has_sdev_busy = \
             member_offset("struct scsi_device", "device_busy") >= 0
-        has_iocnt = \
-            (member_offset("struct scsi_device", "iorequest_cnt") >= 0 and
-             member_offset("struct scsi_device", "iodone_cnt") >= 0)
         for knode in readSUListFromHead(sp.klist_devices.k_list, "n_node",
                                         "struct klist_node"):
             try:
@@ -973,7 +991,8 @@ def oc_get_scsi_hosts():
                     dev = dev_priv.device
                 shost = readSU("struct Scsi_Host",
                                int(dev) - shost_dev_off)
-                busy = 0
+                member_busy = 0
+                active_busy = 0
                 ndev = 0
                 for sdev in readSUListFromHead(shost.__devices, "siblings",
                                                "struct scsi_device"):
@@ -982,12 +1001,16 @@ def oc_get_scsi_hosts():
                         break
                     try:
                         if has_sdev_busy:
-                            busy += int(sdev.device_busy.counter)
-                        elif has_iocnt:
-                            busy += (int(sdev.iorequest_cnt.counter) -
-                                     int(sdev.iodone_cnt.counter))
+                            member_busy += max(0, oc_counter_value(
+                                sdev.device_busy))
                     except Exception:
                         pass
+                    try:
+                        active_busy += active_by_queue.get(
+                            int(sdev.request_queue), 0)
+                    except Exception:
+                        pass
+                busy = max(member_busy, active_busy)
                 try:
                     blocked = int(shost.host_blocked.counter)
                 except Exception:
@@ -1141,8 +1164,8 @@ def show_overcommit(options):
     memory = oc_get_memory_snapshot(details)
     vm_events = oc_get_vm_events()
     log_evidence, log_contexts = oc_get_log_evidence()
-    scsi_hosts = oc_get_scsi_hosts()
     inflight, oldest_io, request_rows = oc_get_inflight_requests()
+    scsi_hosts = oc_get_scsi_hosts(request_rows)
     iowait_pct = oc_get_iowait_pct()
 
     total_host_busy = 0
