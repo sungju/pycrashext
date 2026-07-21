@@ -1146,6 +1146,62 @@ def get_memory_bar(percentage, width=20):
 
     return bar
 
+
+def get_module_usage_bar(module_usage_list, total_size, width=80):
+    if total_size == 0 or len(module_usage_list) == 0:
+        return ("", "")
+
+    symbols = ['█', '▓', '▒', '░', '▪', '▫',
+               '◆', '◇', '●', '○']
+
+    colors = [
+        crashcolor.RED,
+        crashcolor.GREEN,
+        crashcolor.YELLOW,
+        crashcolor.BLUE,
+        crashcolor.MAGENTA,
+        crashcolor.CYAN,
+        crashcolor.LIGHTRED,
+        crashcolor.LIGHTGREEN,
+        crashcolor.LIGHTYELLOW,
+        crashcolor.LIGHTCYAN,
+    ]
+
+    bar_content = ""
+    legend_lines = []
+    reset = crashcolor.get_color(crashcolor.RESET)
+
+    bar_length = 0
+    for idx, (mod_name, pages) in enumerate(module_usage_list):
+        if idx >= 10:
+            break
+
+        percentage = (pages * 100.0 / total_size)
+        chars = int((pages / total_size) * width)
+        bar_length += chars
+
+        symbol = symbols[idx % len(symbols)]
+        color = crashcolor.get_color(colors[idx % len(colors)])
+
+        bar_content += color + (symbol * chars) + reset
+
+        legend_lines.append("%s%s%s %s (%.1f%%)" % (color, symbol, reset, mod_name, percentage))
+
+    if bar_length < width:
+        dim_color = crashcolor.get_color(crashcolor.BLACK)
+        bar_content += dim_color + ("·" * (width - bar_length)) + reset
+
+    bar = "[" + bar_content + "]"
+
+    legend = "\nLegend:\n"
+    for i in range(0, len(legend_lines), 2):
+        left = legend_lines[i]
+        right = legend_lines[i + 1] if i + 1 < len(legend_lines) else ""
+        legend += "  %-50s  %s\n" % (left, right)
+
+    return (bar, legend)
+
+
 def get_pss_for_physical(paddr):
 #    print(paddr)
     result_lines = []
@@ -4185,7 +4241,23 @@ page_owner_dict = {}
 alloc_by_dict = {}
 alloc_type_dict = {}
 alloc_module_dict = {}
+alloc_slab_module_dict = {}
+alloc_slab_trace_dict = {}
 nr_free_areas = 11
+
+SLAB_KEYWORDS = (
+    'kmem_cache_alloc', '__kmalloc', 'kmalloc', 'kzalloc', 'kmemdup',
+    'slab_alloc', '__slab_alloc', 'new_slab', 'alloc_slab_page',
+    'cache_alloc_refill', '__do_kmalloc', 'kmem_cache_alloc_node',
+    'kmalloc_node', 'kzalloc_node',
+)
+
+
+def _is_slab_alloc(call_trace):
+    for kw in SLAB_KEYWORDS:
+        if kw in call_trace:
+            return True
+    return False
 
 pool_index_bits = 21
 offset_bits = 10
@@ -4423,6 +4495,8 @@ def save_page_owner(page_owner, nr_entries, trace_entries):
     global alloc_by_dict
     global alloc_type_dict
     global alloc_module_dict
+    global alloc_slab_module_dict
+    global alloc_slab_trace_dict
     global nr_free_areas
     global _has_page_owner_pid
 
@@ -4486,7 +4560,12 @@ def save_page_owner(page_owner, nr_entries, trace_entries):
 
         alloc_module_dict[mod_name] = pages
 
-
+    if by_whom != "" and _is_slab_alloc(by_whom):
+        slab_key = mod_name if mod_name != "" else "kernel"
+        alloc_slab_module_dict[slab_key] = (
+            alloc_slab_module_dict.get(slab_key, 0) + size)
+        alloc_slab_trace_dict[by_whom] = (
+            alloc_slab_trace_dict.get(by_whom, 0) + size)
 
 
 def show_page_owner(pfn, page_owner, pageblock_order,\
@@ -4544,6 +4623,8 @@ def print_page_owner_summary(options, file):
     global alloc_by_dict
     global alloc_type_dict
     global alloc_module_dict
+    global alloc_slab_module_dict
+    global alloc_slab_trace_dict
 
     if options.maxcount > 0:
         n_items = options.maxcount
@@ -4551,7 +4632,9 @@ def print_page_owner_summary(options, file):
         n_items = 10
     n_items = n_items - 1
 
-    if len(alloc_by_dict) > 0:
+    show_slab = getattr(options, 'po_slab', False)
+
+    if not show_slab and len(alloc_by_dict) > 0:
         print("By call trace", file=file)
         print("=============", file=file)
         sorted_usage = sorted(alloc_by_dict.items(),
@@ -4596,7 +4679,7 @@ def print_page_owner_summary(options, file):
                            '{:,.0f}'.format(sum_size * page_size / 1024)), file=file)
 
 
-    if len(alloc_module_dict) > 0:
+    if not show_slab and len(alloc_module_dict) > 0:
         print("\nBy allocated modules", file=file)
         print(  "====================", file=file)
         sorted_usage = sorted(alloc_module_dict.items(),
@@ -4640,8 +4723,17 @@ def print_page_owner_summary(options, file):
                               (get_size_str(sum_size * page_size),
                                '{:,.0f}'.format(sum_size * page_size / 1024)), file=file)
 
+            top_modules_sorted = sorted(alloc_module_dict.items(),
+                                        key=operator.itemgetter(1), reverse=True)
+            top_modules = top_modules_sorted[:min(10, len(top_modules_sorted))]
+            bar, legend = get_module_usage_bar(top_modules, sum_size, width=78)
+            if bar:
+                print("\nModule Usage Distribution:", file=file)
+                print(bar, file=file)
+                print(legend, file=file)
 
-    if len(alloc_type_dict) > 0:
+
+    if not show_slab and len(alloc_type_dict) > 0:
         print("\nBy allocation type", file=file)
         print(  "==================", file=file)
         sorted_usage = sorted(alloc_type_dict.items(),
@@ -4679,6 +4771,83 @@ def print_page_owner_summary(options, file):
                     skip_printed = True
 
             print_count = print_count + 1
+
+    if show_slab and len(alloc_slab_module_dict) > 0:
+        print("\nSlab allocations by module / kernel", file=file)
+        print(  "===================================", file=file)
+
+        sorted_slab = sorted(alloc_slab_module_dict.items(),
+                             key=operator.itemgetter(1), reverse=options.reverse)
+        slab_total = sum(p for _, p in sorted_slab)
+
+        mod_total_count = len(sorted_slab) - 1
+        if options.all:
+            mod_start, mod_end = 0, mod_total_count
+        elif options.reverse:
+            mod_start, mod_end = 0, min(mod_total_count, n_items)
+        else:
+            mod_start = max(0, mod_total_count - n_items)
+            mod_end = mod_total_count
+
+        mod_skip_printed = False
+        for midx, (slab_key, pages) in enumerate(sorted_slab):
+            pct = pages * 100.0 / slab_total if slab_total else 0
+            if mod_start <= midx <= mod_end:
+                print("%10s : %s  (%.1f%%)" % (
+                    get_size_str(pages * page_size), slab_key, pct), file=file)
+            elif not mod_skip_printed and len(sorted_slab) > n_items:
+                print("\n%15s %d %s" % (
+                    "... < skipped ", len(sorted_slab) - n_items,
+                    " items > ..."), file=file)
+                mod_skip_printed = True
+
+        print("\nTotal slab allocation : %s (%s kB)" % (
+            get_size_str(slab_total * page_size),
+            '{:,.0f}'.format(slab_total * page_size / 1024)), file=file)
+
+        top_slab = sorted(alloc_slab_module_dict.items(),
+                          key=operator.itemgetter(1), reverse=True)[:10]
+        bar, legend = get_module_usage_bar(top_slab, slab_total, width=78)
+        if bar:
+            print("\nSlab Module Usage Distribution:", file=file)
+            print(bar, file=file)
+            print(legend, file=file)
+
+        print("", file=file)
+        print("Slab call traces", file=file)
+        print("================", file=file)
+        sorted_traces = sorted(alloc_slab_trace_dict.items(),
+                               key=operator.itemgetter(1), reverse=options.reverse)
+        total_count = len(sorted_traces) - 1
+        if options.all:
+            print_start = 0
+            print_end = total_count
+        else:
+            if options.reverse:
+                print_start = 0
+                print_end = min(total_count, n_items)
+            else:
+                print_start = max(0, total_count - n_items)
+                print_end = total_count
+
+        skip_printed = False
+        print_count = 0
+        for trace, pages in sorted_traces:
+            if print_start <= print_count <= print_end:
+                print("\n%s : %s" % (
+                    get_size_str(pages * page_size), trace), file=file)
+            else:
+                if len(sorted_traces) > n_items and not skip_printed:
+                    print("\n%15s %d %s" % (
+                        "... < skipped ",
+                        len(sorted_traces) - n_items,
+                        " items > ..."), file=file)
+                    skip_printed = True
+            print_count += 1
+
+    elif show_slab:
+        print("\nNo slab allocations detected in this page_owner data.", file=file)
+        print("(Checked for: %s, ...)" % ", ".join(SLAB_KEYWORDS[:5]), file=file)
 
     print("\nNotes: Calculation was done with pagesize=%d" % (page_size), file=file)
 
@@ -4769,11 +4938,15 @@ def analyze_page_owner_file(filename, options):
     global alloc_by_dict
     global alloc_type_dict
     global alloc_module_dict
+    global alloc_slab_module_dict
+    global alloc_slab_trace_dict
     global page_size
 
     alloc_by_dict = {}
     alloc_type_dict = {}
     alloc_module_dict = {}
+    alloc_slab_module_dict = {}
+    alloc_slab_trace_dict = {}
 
     try:
         with open(filename) as f:
@@ -4781,6 +4954,8 @@ def analyze_page_owner_file(filename, options):
     except Exception as e:
         print("Error opening file '%s': %s" % (filename, e))
         return
+
+    total_lines = len(lines)
 
     # Try to recover page_size from the Notes line at the end of the file
     notes_re = re.compile(r'Notes: Calculation was done with pagesize=(\d+)')
@@ -4803,6 +4978,10 @@ def analyze_page_owner_file(filename, options):
     total_entries = 0
     while i < len(lines):
         line = lines[i].rstrip()
+
+        if total_lines > 0:
+            print("%6.2f %% of file %s has been completed" %
+                  ((i / total_lines) * 100, filename), end="\r")
 
         m8 = page_re_rhel8.search(line)
         if m8:
@@ -4852,8 +5031,16 @@ def analyze_page_owner_file(filename, options):
         if mod_name:
             alloc_module_dict[mod_name] = alloc_module_dict.get(mod_name, 0) + size
 
+        if by_whom and _is_slab_alloc(by_whom):
+            slab_key = mod_name if mod_name else "kernel"
+            alloc_slab_module_dict[slab_key] = (
+                alloc_slab_module_dict.get(slab_key, 0) + size)
+            alloc_slab_trace_dict[by_whom] = (
+                alloc_slab_trace_dict.get(by_whom, 0) + size)
+
         total_entries += 1
 
+    print(" " * 70, end="\r")
     print("Analyzed %d page allocations from '%s'" % (total_entries, filename))
     print_page_owner_summary(options, sys.stdout)
 
@@ -4862,6 +5049,8 @@ def show_page_owner_all(options):
     global alloc_by_dict
     global alloc_type_dict
     global alloc_module_dict
+    global alloc_slab_module_dict
+    global alloc_slab_trace_dict
 
     global stack_pools
     global stack_handle_version
@@ -4888,6 +5077,8 @@ def show_page_owner_all(options):
     alloc_by_dict = {}
     alloc_type_dict = {}
     alloc_module_dict = {}
+    alloc_slab_module_dict = {}
+    alloc_slab_trace_dict = {}
 
     kernel_start_addr = sym2addr("_stext")
     kernel_end_addr = sym2addr("_etext")
@@ -5776,6 +5967,9 @@ def meminfo():
     op.add_option("-o", "--page_owner", dest="page_owner", default=0,
                   action="store_true",
                   help="Show page_owner details")
+    op.add_option("--po-slab", dest="po_slab", default=False,
+                  action="store_true",
+                  help="Show slab-only allocations in page_owner mode (use with -o)")
     op.add_option("-O", "--OOM", dest="OOM", default=0,
                   action="store_true",
                   help="Analyse OOM messages in log")
