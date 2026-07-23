@@ -177,8 +177,73 @@ def find_best_match(commands, full_input):
     return max(matches, key=lambda x: len(x[0]))
 
 
-def ai_send(o, args, cmd_path_list):
+def ai_send_local(prompt_data, engine, model=""):
+    model_opt = ""
+    if model != "":
+        model_opt = " -m " + model
+
+    temp_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as fp:
+            fp.write(prompt_data.encode())
+            temp_path = fp.name
+    except Exception as e:
+        print("Error writing temp file:", e)
+        return
+
+    if engine == "claude":
+        cmd = "!cat %s | claude -p %s" % (temp_path, model_opt)
+    else:
+        cmd = "!cat %s | gemini -p 'Analyze the following' %s" % (temp_path, model_opt)
+
+    result_str = crashhelper.run_gdb_command(cmd)
+    try:
+        os.remove(temp_path)
+    except:
+        pass
+    print(result_str)
+
+
+def ai_send(o, args, cmd_path_list, local_engine=""):
     global question_dict
+
+    result_str = ""
+    cmd_str = ""
+    if o.cmd_str != "":
+        cmd_str = o.cmd_str
+        result_str = get_crash_command_output(cmd_str)
+        if "crash: command not found:" in result_str:
+            print("Cannot execute command '%s'" % cmd_str)
+            return
+
+        result_str = "\n\n~~~\n" + result_str + "\n~~~"
+        cmd_str = cmd_str.split()[0]
+    elif o.input_file != "":
+        try:
+            with open(o.input_file) as fp:
+                result_str = "".join(fp.readlines())
+        except Exception as e:
+            print(e)
+            pass
+
+    if o.cmd_str != "":
+        read_ai_questions()
+        matchset = find_best_match(question_dict, o.cmd_str)
+        key, match_question = matchset if matchset != None else ('', '')
+    else:
+        key = match_question = ""
+
+    if len(args) != 0:
+        result_str = " ".join(args) + "\n" + result_str
+    elif match_question != None:
+        result_str = match_question + "\n" + result_str
+    elif len(args) == 0:
+        result_str = "Analyse the below output from linux kernel vmcore" +\
+                result_str
+
+    if local_engine != "":
+        ai_send_local(result_str, local_engine, o.ai_model)
+        return
 
     path_list = cmd_path_list.split(':')
     ai_send_path = ""
@@ -191,7 +256,6 @@ def ai_send(o, args, cmd_path_list):
         print("Can't find ai_send.py in path")
         return
 
-    options = ""
     cmd_options = ""
     if o.ai_engine != "":
         cmd_options = cmd_options + " -e " + o.ai_engine
@@ -205,45 +269,9 @@ def ai_send(o, args, cmd_path_list):
     if o.reset:
         cmd_options = cmd_options + " -r "
 
-    result_str = ""
     python_list = { "python", "python3", "python2" }
     for python_cmd in python_list:
         if (is_command_exist(python_cmd)):
-            cmd_str = ""
-            if o.cmd_str != "":
-                cmd_str = o.cmd_str
-                result_str = get_crash_command_output(cmd_str)
-                if "crash: command not found:" in result_str:
-                    print("Cannot execute command '%s'" % cmd_str)
-                    return
-
-                result_str = "\n\n~~~\n" + result_str + "\n~~~"
-                cmd_str = cmd_str.split()[0]
-            elif o.input_file != "":
-                try:
-                    with open(o.input_file) as fp:
-                        result_str = "".join(fp.readlines())
-                except Exception as e:
-                    print(e)
-                    pass
-
-            if o.cmd_str != "":
-                read_ai_questions()
-                matchset = find_best_match(question_dict, o.cmd_str)
-                key, match_question  = matchset if matchset != None else ('', '')
-            else:
-                key = match_question = ""
-
-
-            if len(args) != 0:
-                result_str = " ".join(args) + "\n" + result_str
-            elif match_question != None:
-                result_str = match_question + "\n" + result_str
-            elif len(args) == 0:
-                result_str = "Analyse the below output from linux kernel vmcore" +\
-                        result_str
-            
-
             try:
                 with tempfile.NamedTemporaryFile(delete=False) as fp:
                     fp.write(result_str.encode())
@@ -260,6 +288,13 @@ def ai_send(o, args, cmd_path_list):
             break
 
 
+def detect_local_engine():
+    for engine in ["claude", "gemini"]:
+        if is_command_exist(engine):
+            return engine
+    return ""
+
+
 def ai():
     op = OptionParser()
 
@@ -267,10 +302,6 @@ def ai():
         encode_url = os.environ['CRASHEXT_SERVER'] + '/api/ai'
     except:
         encode_url = ""
-
-    if encode_url == None or encode_url == "":
-        print("No server to use AI is available")
-        return 
 
     op.add_option("-c", "--cmd",
                   action="store",
@@ -284,7 +315,7 @@ def ai():
                   type="string",
                   default="",
                   dest="ai_engine",
-                  help="Choose AI engine to use")
+                  help="Choose AI engine to use (claude, gemini, or remote engine)")
 
     op.add_option("-i", "--input",
                   action="store",
@@ -317,8 +348,21 @@ def ai():
     if o.taskid == "":
         o.taskid = get_taskid()
 
+    local_engine = ""
+    if o.ai_engine in ("claude", "gemini"):
+        if is_command_exist(o.ai_engine):
+            local_engine = o.ai_engine
+        else:
+            print("'%s' is not installed" % o.ai_engine)
+            return
+    elif encode_url == None or encode_url == "":
+        local_engine = detect_local_engine()
+        if local_engine == "":
+            print("No AI server or local CLI (claude, gemini) is available")
+            return
+
     if o.cmd_str != "" or len(args) != 0 or o.input_file != "":
-        ai_send(o, args, os.environ["PYKDUMPPATH"])
+        ai_send(o, args, os.environ["PYKDUMPPATH"], local_engine)
     else:
         print("ERROR> ai needs an instruction to run before send data.\n",
               "\ti.e) ai -c \"bt -a\"")
