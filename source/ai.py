@@ -208,9 +208,44 @@ def print_rich_result(result_str):
         code_theme = os.environ.get('CODE_THEME', 'tango')
         console = Console(color_system="truecolor")
         console.print(Markdown(result_str, code_theme=code_theme))
+        return
+    except:
+        pass
+
+    data_path = ""
+    script_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.txt') as fp:
+            fp.write(result_str.encode())
+            data_path = fp.name
+
+        script = """import sys, os
+fpath = sys.argv[1]
+data = open(fpath).read()
+os.remove(fpath)
+try:
+    from rich.console import Console
+    from rich.markdown import Markdown
+    code_theme = os.environ.get('CODE_THEME', 'tango')
+    Console(color_system='truecolor').print(Markdown(data, code_theme=code_theme))
+except:
+    print(data)
+    print('\\nNotes) pip install rich can enhance the output', end='')
+"""
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.py') as fp:
+            fp.write(script.encode())
+            script_path = fp.name
+
+        rendered = crashhelper.run_gdb_command("!python3 %s %s" % \
+                                               (script_path, data_path))
+        print(rendered)
     except:
         print(result_str)
-        print("\nNotes) 'pip install rich' can enhance the output", end='')
+    finally:
+        try:
+            os.remove(script_path)
+        except:
+            pass
 
 
 def ai_send_local(prompt_data, engine, model=""):
