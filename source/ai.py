@@ -216,7 +216,16 @@ def ai_send_local(prompt_data, engine, model=""):
         os.remove(temp_path)
     except:
         pass
-    print(result_str)
+
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+        code_theme = os.environ.get('CODE_THEME', 'tango')
+        console = Console(color_system="truecolor")
+        console.print(Markdown(result_str, code_theme=code_theme))
+    except:
+        print(result_str)
+        print("\nNotes) 'pip install rich' can enhance the output", end='')
 
 
 def ai_send(o, args, cmd_path_list, local_engine=""):
