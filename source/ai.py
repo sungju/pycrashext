@@ -190,12 +190,39 @@ def truncate_content(data, limit=MAX_CONTENT_SIZE):
             (len(truncated), len(data)) + truncated
 
 
+RESPONSE_START_MARKER = "---AI_RESPONSE_START---"
+RESPONSE_END_MARKER = "---AI_RESPONSE_END---"
+
+def extract_response(result_str):
+    start_idx = result_str.find(RESPONSE_START_MARKER)
+    end_idx = result_str.find(RESPONSE_END_MARKER)
+    if start_idx >= 0 and end_idx > start_idx:
+        return result_str[start_idx + len(RESPONSE_START_MARKER):end_idx].strip()
+    return result_str
+
+
+def print_rich_result(result_str):
+    try:
+        from rich.console import Console
+        from rich.markdown import Markdown
+        code_theme = os.environ.get('CODE_THEME', 'tango')
+        console = Console(color_system="truecolor")
+        console.print(Markdown(result_str, code_theme=code_theme))
+    except:
+        print(result_str)
+        print("\nNotes) 'pip install rich' can enhance the output", end='')
+
+
 def ai_send_local(prompt_data, engine, model=""):
     model_opt = ""
     if model != "":
         model_opt = " -m " + model
 
     prompt_data = truncate_content(prompt_data)
+    prompt_data = prompt_data + \
+            "\n\nIMPORTANT: Start your response with exactly '" + \
+            RESPONSE_START_MARKER + "' on its own line and end with " + \
+            "exactly '" + RESPONSE_END_MARKER + "' on its own line."
 
     temp_path = ""
     try:
@@ -207,9 +234,9 @@ def ai_send_local(prompt_data, engine, model=""):
         return
 
     if engine == "claude":
-        cmd = "!cat %s | claude -p %s" % (temp_path, model_opt)
+        cmd = "!cat %s | claude -p %s 2>/dev/null" % (temp_path, model_opt)
     else:
-        cmd = "!cat %s | gemini --skip-trust -p 'Analyze the following' %s" % (temp_path, model_opt)
+        cmd = "!cat %s | gemini --skip-trust -p 'Analyze the following' %s 2>/dev/null" % (temp_path, model_opt)
 
     result_str = crashhelper.run_gdb_command(cmd)
     try:
@@ -217,15 +244,8 @@ def ai_send_local(prompt_data, engine, model=""):
     except:
         pass
 
-    try:
-        from rich.console import Console
-        from rich.markdown import Markdown
-        code_theme = os.environ.get('CODE_THEME', 'tango')
-        console = Console(color_system="truecolor")
-        console.print(Markdown(result_str, code_theme=code_theme))
-    except:
-        print(result_str)
-        print("\nNotes) 'pip install rich' can enhance the output", end='')
+    result_str = extract_response(result_str)
+    print_rich_result(result_str)
 
 
 def ai_send(o, args, cmd_path_list, local_engine=""):
