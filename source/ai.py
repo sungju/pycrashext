@@ -435,9 +435,9 @@ def ai():
         else:
             print("'%s' is not installed" % o.ai_engine)
             return
-    elif encode_url == None or encode_url == "":
+    elif o.ai_engine == "":
         local_engine = detect_local_engine()
-        if local_engine == "":
+        if local_engine == "" and (encode_url == None or encode_url == ""):
             print("No AI server or local CLI (claude, gemini) is available")
             return
 
