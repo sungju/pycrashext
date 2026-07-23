@@ -322,8 +322,15 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
                 result_str
 
     if local_engine != "":
+        print("[AI engine: %s (local)]" % local_engine)
         ai_send_local(result_str, local_engine, o.ai_model)
         return
+
+    try:
+        server = os.environ['CRASHEXT_SERVER']
+        print("[AI engine: remote (%s)]" % server)
+    except:
+        pass
 
     path_list = cmd_path_list.split(':')
     ai_send_path = ""
