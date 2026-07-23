@@ -194,7 +194,7 @@ def ai_send_local(prompt_data, engine, model=""):
     if engine == "claude":
         cmd = "!cat %s | claude -p %s" % (temp_path, model_opt)
     else:
-        cmd = "!cat %s | gemini -p 'Analyze the following' %s" % (temp_path, model_opt)
+        cmd = "!cat %s | gemini --skip-trust -p 'Analyze the following' %s" % (temp_path, model_opt)
 
     result_str = crashhelper.run_gdb_command(cmd)
     try:
