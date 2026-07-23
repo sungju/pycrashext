@@ -224,15 +224,14 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
 
     result_str = ""
     cmd_str = ""
-    if o.cmd_str != "":
-        cmd_str = o.cmd_str
-        result_str = get_crash_command_output(cmd_str)
-        if "crash: command not found:" in result_str:
-            print("Cannot execute command '%s'" % cmd_str)
-            return
-
-        result_str = "\n\n~~~\n" + result_str + "\n~~~"
-        cmd_str = cmd_str.split()[0]
+    if len(o.cmd_list) > 0:
+        for c in o.cmd_list:
+            output = get_crash_command_output(c)
+            if "crash: command not found:" in output:
+                print("Cannot execute command '%s'" % c)
+                return
+            result_str = result_str + "\n\n~~~\n" + output + "\n~~~"
+        cmd_str = o.cmd_list[0].split()[0]
     elif o.input_file != "":
         try:
             with open(o.input_file) as fp:
@@ -241,9 +240,9 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
             print(e)
             pass
 
-    if o.cmd_str != "":
+    if len(o.cmd_list) > 0:
         read_ai_questions()
-        matchset = find_best_match(question_dict, o.cmd_str)
+        matchset = find_best_match(question_dict, o.cmd_list[0])
         key, match_question = matchset if matchset != None else ('', '')
     else:
         key = match_question = ""
@@ -319,11 +318,11 @@ def ai():
         encode_url = ""
 
     op.add_option("-c", "--cmd",
-                  action="store",
+                  action="append",
                   type="string",
-                  default="",
-                  dest="cmd_str",
-                  help="The output of this command will be anlaysed")
+                  default=[],
+                  dest="cmd_list",
+                  help="The output of this command will be analysed (repeatable)")
 
     op.add_option("-e", "--engine",
                   action="store",
@@ -376,7 +375,7 @@ def ai():
             print("No AI server or local CLI (claude, gemini) is available")
             return
 
-    if o.cmd_str != "" or len(args) != 0 or o.input_file != "":
+    if len(o.cmd_list) > 0 or len(args) != 0 or o.input_file != "":
         ai_send(o, args, os.environ["PYKDUMPPATH"], local_engine)
     else:
         print("ERROR> ai needs an instruction to run before send data.\n",
