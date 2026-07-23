@@ -179,10 +179,10 @@ def find_best_match(commands, full_input):
 
 MAX_CONTENT_SIZE = 100000
 
-def truncate_content(data):
-    if len(data) <= MAX_CONTENT_SIZE:
+def truncate_content(data, limit=MAX_CONTENT_SIZE):
+    if len(data) <= limit:
         return data
-    truncated = data[-MAX_CONTENT_SIZE:]
+    truncated = data[-limit:]
     newline_pos = truncated.find('\n')
     if newline_pos >= 0:
         truncated = truncated[newline_pos + 1:]
@@ -225,11 +225,13 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
     result_str = ""
     cmd_str = ""
     if len(o.cmd_list) > 0:
+        per_cmd_limit = MAX_CONTENT_SIZE // len(o.cmd_list)
         for c in o.cmd_list:
             output = get_crash_command_output(c)
             if "crash: command not found:" in output:
                 print("Cannot execute command '%s'" % c)
                 return
+            output = truncate_content(output, per_cmd_limit)
             result_str = result_str + "\n\n~~~\n" + output + "\n~~~"
         cmd_str = o.cmd_list[0].split()[0]
     elif o.input_file != "":
