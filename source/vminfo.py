@@ -1102,7 +1102,8 @@ def show_overcommit(options):
     clocks and ballooning) with supporting symptoms (load/runqueues, task
     states, storage queues, VM reclaim counters and historical kernel logs).
     """
-    details = bool(getattr(options, "show_details", False))
+    show_all = bool(getattr(options, "show_all", False))
+    details = bool(getattr(options, "show_details", False)) or show_all
     hyper_name, is_virt = oc_get_hypervisor()
     steal_enabled, steal_by_cpu = oc_get_steal_state()
     loadavg = oc_get_loadavg()
@@ -1147,6 +1148,12 @@ def show_overcommit(options):
             continue
         seen_tasks.add(r["task"])
         context_rows.append(r)
+    if show_all:
+        for r in rows:
+            if r["task"] in seen_tasks:
+                continue
+            seen_tasks.add(r["task"])
+            context_rows.append(r)
     for r in context_rows:
         mode, bt_raw = oc_task_context(r["task"])
         task_contexts[r["task"]] = (mode or "?", bt_raw)
@@ -1456,6 +1463,8 @@ def show_overcommit(options):
         print("\nUse -d with --overcommit to show related raw fields, nearby "
               "context,")
         print("and highlighted triggering values.")
+        print("Use -a with --overcommit to show full details for all "
+              "runqueues.")
         return
 
     # ------------------------------------------------------------------
@@ -1553,7 +1562,7 @@ def show_overcommit(options):
              "exec_start", "last_arrival", "lag(s)",
              "current(pid/task)"))
     for r in rows:
-        if r["cpu"] not in shown_cpu_ids:
+        if not show_all and r["cpu"] not in shown_cpu_ids:
             continue
         line = (
             "%4d %5d %3d %16d %16d %16d %16d %9.3f %s(%d/0x%x)"
@@ -1580,11 +1589,18 @@ def show_overcommit(options):
     print("sysctl scheduler slice = %.3f ms" % slice_ms)
 
     if context_rows:
-        print("\n[Backtraces used to classify clock-lag/slice task mode]")
-        detail_context_rows = sorted(
-            context_rows,
-            key=lambda row: row["cpu"] in direct_cpu_ids,
-            reverse=True)[:DETAIL_BACKTRACE_LIMIT]
+        if show_all:
+            print("\n[Backtraces for all runqueues]")
+        else:
+            print("\n[Backtraces used to classify clock-lag/slice task mode]")
+        if show_all:
+            detail_context_rows = sorted(
+                context_rows, key=lambda row: row["cpu"])
+        else:
+            detail_context_rows = sorted(
+                context_rows,
+                key=lambda row: row["cpu"] in direct_cpu_ids,
+                reverse=True)[:DETAIL_BACKTRACE_LIMIT]
         for r in detail_context_rows:
             mode, bt_raw = task_contexts.get(r["task"], ("?", ""))
             oncpu = ("%.6fs" % r["oncpu"]
@@ -1617,10 +1633,11 @@ def show_overcommit(options):
                     before=0, after=1)
             else:
                 print("   <unavailable>")
-        omitted = len(context_rows) - len(detail_context_rows)
-        if omitted:
-            print("   ... %d additional classification backtrace(s) omitted"
-                  % omitted)
+        if not show_all:
+            omitted = len(context_rows) - len(detail_context_rows)
+            if omitted:
+                print("   ... %d additional classification backtrace(s) omitted"
+                      % omitted)
 
     print("\n[Task-state rows]")
     print("total=%d running=%d uninterruptible=%d other=%d"
@@ -1755,6 +1772,9 @@ def vminfo():
                   action="store_true",
                   help="Show details (with --overcommit, append related raw "
                        "data and context)")
+    op.add_option("-a", "--all", dest="show_all", default=0,
+                  action="store_true",
+                  help="Show full details for all runqueues (implies -d)")
     op.add_option("-c", "--context", dest="show_context", default=0,
                   action="store_true",
                   help="Show VM Context")
