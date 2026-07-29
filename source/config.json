@@ -181,6 +181,12 @@
 			"help"    : "Using AI model to check the command output"
 		},
 		{
+			"command" : "rcuinfo",
+			"desc"    : "RCU information",
+			"options" : "-h   - list available options",
+			"help"    : "RCU (Read-Copy-Update) related information\n\n -s   - RCU stall analysis\n -g   - Grace period details\n -n   - RCU node tree\n -c   - Per-CPU callback info\n -t   - Tasks in RCU critical sections\n -a   - Show all"
+		},
+		{
 			"command" : "git",
 			"desc"    : "Execute git log/show on remote source server",
 			"options" : "-h   - list available options",
