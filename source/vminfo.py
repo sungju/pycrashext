@@ -1556,6 +1556,29 @@ def show_overcommit(options):
         if omitted:
             print("   ... %d unselected CPU steal row(s) omitted" % omitted)
 
+    print("\n[How to extract runqueue timing data manually]")
+    print("  For a given CPU N and its current task:")
+    print("    crash> runq -c N                                "
+          "# runqueue summary for CPU N")
+    print("    crash> struct rq.clock,clock_task <rq_addr>     "
+          "# rq clock fields (nanoseconds)")
+    print("    crash> p ((struct rq *)&runqueues+N)->clock      "
+          "# alternative: rq.clock directly")
+    print("    crash> struct task_struct.se <task_addr>         "
+          "# scheduler entity (exec_start)")
+    print("    crash> struct sched_info.last_arrival <task_addr>"
+          "# when task was placed on-CPU")
+    print("    crash> bt <task_addr>                            "
+          "# backtrace of current task")
+    print("  Derived fields:")
+    print("    on-CPU       = (rq.clock - curr->sched_info.last_arrival) "
+          "/ 1e9  seconds")
+    print("    current-exec = (rq.clock_task - curr->se.exec_start)     "
+          "/ 1e9  seconds")
+    print("    clock-lag    = (max(all rq.Timestamp) - this rq.Timestamp)"
+          " / 1e9  seconds")
+    print("    depth        = rq.nr_running")
+
     print("\n[Per-vCPU runqueue fields; clocks are raw nanoseconds]")
     print("   %4s %5s %3s %16s %16s %16s %16s %9s %s"
           % ("CPU", "runq", "POL", "rq.clock", "clock_task",
