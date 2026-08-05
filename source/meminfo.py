@@ -4772,7 +4772,7 @@ def print_page_owner_summary(options, file):
 
             print_count = print_count + 1
 
-    if show_slab and len(alloc_slab_module_dict) > 0:
+    if len(alloc_slab_module_dict) > 0:
         print("\nSlab allocations by module / kernel", file=file)
         print(  "===================================", file=file)
 
