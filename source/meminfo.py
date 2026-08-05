@@ -4634,9 +4634,12 @@ def print_page_owner_summary(options, file):
 
     show_slab = getattr(options, 'po_slab', False)
 
+    color_header = crashcolor.get_color(crashcolor.CYAN)
+    color_reset = crashcolor.get_color(crashcolor.RESET)
+
     if not show_slab and len(alloc_by_dict) > 0:
-        print("By call trace", file=file)
-        print("=============", file=file)
+        print("%sBy call trace%s" % (color_header, color_reset), file=file)
+        print("%s=============%s" % (color_header, color_reset), file=file)
         sorted_usage = sorted(alloc_by_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -4680,8 +4683,8 @@ def print_page_owner_summary(options, file):
 
 
     if not show_slab and len(alloc_module_dict) > 0:
-        print("\nBy allocated modules", file=file)
-        print(  "====================", file=file)
+        print("\n%sBy allocated modules%s" % (color_header, color_reset), file=file)
+        print(  "%s====================%s" % (color_header, color_reset), file=file)
         sorted_usage = sorted(alloc_module_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -4734,8 +4737,8 @@ def print_page_owner_summary(options, file):
 
 
     if not show_slab and len(alloc_type_dict) > 0:
-        print("\nBy allocation type", file=file)
-        print(  "==================", file=file)
+        print("\n%sBy allocation type%s" % (color_header, color_reset), file=file)
+        print(  "%s==================%s" % (color_header, color_reset), file=file)
         sorted_usage = sorted(alloc_type_dict.items(),
                 key=operator.itemgetter(1), reverse=options.reverse)
 
@@ -4773,8 +4776,8 @@ def print_page_owner_summary(options, file):
             print_count = print_count + 1
 
     if len(alloc_slab_module_dict) > 0:
-        print("\nSlab allocations by module / kernel", file=file)
-        print(  "===================================", file=file)
+        print("\n%sSlab allocations by module / kernel%s" % (color_header, color_reset), file=file)
+        print(  "%s===================================%s" % (color_header, color_reset), file=file)
 
         sorted_slab = sorted(alloc_slab_module_dict.items(),
                              key=operator.itemgetter(1), reverse=options.reverse)
@@ -4814,8 +4817,8 @@ def print_page_owner_summary(options, file):
             print(legend, file=file)
 
         print("", file=file)
-        print("Slab call traces", file=file)
-        print("================", file=file)
+        print("%sSlab call traces%s" % (color_header, color_reset), file=file)
+        print("%s================%s" % (color_header, color_reset), file=file)
         sorted_traces = sorted(alloc_slab_trace_dict.items(),
                                key=operator.itemgetter(1), reverse=options.reverse)
         total_count = len(sorted_traces) - 1
