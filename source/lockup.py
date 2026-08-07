@@ -231,11 +231,17 @@ def lockup_display(reverse_sort, show_tasks, options):
             watchdog_thresh = -1
 
     for rq in rqsorted:
-        if options.compact and rq.curr.comm.startswith("swapper/"):
+        try:
+            curr = rq.curr
+            test = curr.comm
+        except:
             continue
-        prio = rq.curr.prio
-        if (rq.curr.policy != 0):
-            prio = rq.curr.rt_priority
+
+        if options.compact and curr.comm.startswith("swapper/"):
+            continue
+        prio = curr.prio
+        if (curr.policy != 0):
+            prio = curr.rt_priority
 
         delayed_time = (now - rq.Timestamp) // 1000000000
         if watchdog_thresh > 0:
@@ -247,10 +253,10 @@ def lockup_display(reverse_sort, show_tasks, options):
         print ("CPU %3d: %10.2f sec behind by "
                "0x%x, %s [%s:%3d] (%d in queue)" %
                (rq.cpu, delayed_time,
-                rq.curr, rq.curr.comm,
-                get_task_policy_str(rq.curr.policy), prio, rq.nr_running))
+                curr, curr.comm,
+                get_task_policy_str(curr.policy), prio, rq.nr_running))
 
-        task_pid = rq.curr
+        task_pid = curr
         if options.details:
             task_time = exec_crash_command("ps -m 0x%x" % (task_pid)).splitlines()[0]
             task_time = task_time.split("]")[0][1:]
@@ -269,7 +275,7 @@ def lockup_display(reverse_sort, show_tasks, options):
                 crashcolor.set_color(crashcolor.YELLOW)
             else:
                 crashcolor.set_color(crashcolor.RESET)
-            print(" └──> ps -m %-8s : %s" % (rq.curr.pid, task_time))
+            print(" └──> ps -m %-8s : %s" % (curr.pid, task_time))
             crashcolor.set_color(crashcolor.RESET)
 
         if options.backtrace:
