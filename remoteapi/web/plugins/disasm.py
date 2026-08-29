@@ -176,7 +176,13 @@ def setgit(asm_str):
 Check if the line ends properly to make one statement
 """
 def is_end_of_one_statement(a_line):
-    my_line = re.sub(r"/\*.*\*/", "\"\"", a_line).strip()
+    # Strip inline/trailing comments so a code line that ends with a comment
+    # (e.g. "x = foo();  /* done */") is still recognized as a statement end.
+    my_line = re.sub(r"/\*.*?\*/", "", a_line)
+    my_line = re.sub(r"//.*$", "", my_line)
+    my_line = my_line.strip()
+    if my_line == "":
+        return False
     if my_line.endswith(';') or \
        my_line.endswith(':') or \
        my_line.endswith('{') or \
@@ -185,6 +191,67 @@ def is_end_of_one_statement(a_line):
         return True
 
     return False
+
+
+"""
+Check if a line is blank or a (block/line) comment body.
+
+Used when walking backwards to find the start of a C statement so the scan
+stops at comment blocks and blank lines instead of pulling in unrelated
+preceding source lines.
+"""
+def is_blank_or_comment_line(a_line):
+    s = a_line.strip()
+    if s == "":
+        return True
+    if s.startswith("//"):
+        return True
+    if s.startswith("/*"):
+        return True
+    if s.endswith("*/"):
+        return True
+    # kernel-doc / block-comment body line: " * ..." (but not a "*ptr = ..."
+    # style pointer statement, which we treat as real code).
+    if s.startswith("*") and not s.endswith(";") and "=" not in s:
+        return True
+    return False
+
+
+def find_statement_start(file_lines, target_index):
+    """
+    Walk backwards from the line preceding target_index to find the first
+    line of the C statement that target_index belongs to.
+
+    The scan stops at a statement boundary: the previous statement's end,
+    a blank line, or a comment line. A hard look-back limit guards against
+    runaway scans (and negative-index wraparound) when no boundary is found.
+
+    Args:
+        file_lines: list of source lines (0-based)
+        target_index: 0-based index of the line the instruction maps to
+
+    Returns:
+        int: 0-based index of the first line of the statement
+    """
+    MAX_LOOKBACK = 40
+    prev = target_index - 1
+    steps = 0
+    while prev >= 0 and steps < MAX_LOOKBACK:
+        prev_line = file_lines[prev]
+        # A boundary means the current statement starts at prev + 1.
+        if is_blank_or_comment_line(prev_line) or is_end_of_one_statement(prev_line):
+            break
+        # Otherwise prev is a continuation of the current statement.
+        prev = prev - 1
+        steps = steps + 1
+
+    start_index = prev + 1
+
+    # Skip any leading blank lines forward to the first real line.
+    while start_index < target_index and file_lines[start_index].strip() == "":
+        start_index = start_index + 1
+
+    return start_index
 
 def is_function_header(a_line):
     a_line = a_line.strip()
@@ -266,45 +333,43 @@ def read_source_line(source_line, has_header):
         return ""
 
 
-    if line_number > len(file_lines):
+    if line_number <= 0 or line_number > len(file_lines):
         return "file_lines {}".format(len(file_lines))
 
-    source_line = ""
     result = ""
-    if is_assembly_source(source_file) == True and has_header == False:
-        has_header = True # Assembly doesn't require to check prototype
-        result = result + '%8d %s' % (line_number -1, file_lines[line_number - 2])
 
+    # Assembly source: one statement per line, so just show the exact line
+    # the instruction maps to. No C-style header/statement reconstruction.
+    if is_assembly_source(source_file):
+        return '%8d %s' % (line_number, file_lines[line_number - 1])
+
+    # C/C++ source.
     if has_header == False and end_line_number == 0:
         header_lines, open_brace, close_brace = read_a_function_header(file_lines, line_number - 1)
         result = result + header_lines
-        '''
-        for i in range(line_number - 1, 0, -1):
-            if "(" in file_lines[i]:
-                for j in range(i, line_number - 1):
-                    result = result + '%8d %s' % (j + 1, file_lines[j])
-                break
-        '''
 
+    target_index = line_number - 1  # 0-based index of the mapped line
 
-    if is_assembly_source(source_file) == False:
-        prev_line_number = line_number - 2
-        if has_header == True:
-            source_line = file_lines[prev_line_number]
-            while not is_end_of_one_statement(source_line):
-                prev_line_number = prev_line_number - 1
-                source_line = file_lines[prev_line_number]
-            while file_lines[prev_line_number + 1].strip() == "":
-                prev_line_number = prev_line_number + 1
+    # Determine where the statement containing the target line begins.
+    # For the first line we only show the target line (the header was already
+    # emitted above); for subsequent lines we reconstruct the full statement.
+    if has_header == True:
+        start_index = find_statement_start(file_lines, target_index)
+    else:
+        start_index = target_index
 
-        for i in range(prev_line_number + 1, line_number):
-            source_line = file_lines[i]
-            result = result + '%8d %s' % (i + 1, source_line)
+    # Emit from the statement start through the target line.
+    source_line = file_lines[target_index]
+    for i in range(start_index, line_number):
+        source_line = file_lines[i]
+        result = result + '%8d %s' % (i + 1, source_line)
 
-        while not is_end_of_one_statement(source_line):
-            source_line = file_lines[line_number]
-            line_number = line_number + 1
-            result = result + '%8d %s' % (line_number, source_line)
+    # Extend forward to complete a multi-line statement, bounded by file size.
+    idx = line_number  # 0-based index of the next line to consider
+    while not is_end_of_one_statement(source_line) and idx < len(file_lines):
+        source_line = file_lines[idx]
+        result = result + '%8d %s' % (idx + 1, source_line)
+        idx = idx + 1
 
     return result
 
