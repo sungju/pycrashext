@@ -100,8 +100,10 @@ ENV/
 # mypy
 .mypy_cache/
 
-# remoteapi
+# remoteapi (virtualenv artifacts - not source)
 remoteapi/web/bin/*
 remoteapi/web/pyvenv.cfg
+remoteapi/web/lib64
+remoteapi/web/pip-selfcheck.json
 .omc/
 .DS_Store
