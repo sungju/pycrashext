@@ -3842,10 +3842,28 @@ def get_source_highlighter():
     return _source_highlighter
 
 
-def highlight_source_code(text, width=0):
+def is_source_path_header(text):
     """
-    Return the C source line `text` syntax-highlighted with the theme's
-    background applied, matching the look of 'edis -f'.
+    True when `text` is the "<path>: <lineno>" header the server prints before
+    each source region (e.g. '/usr/src/debug/.../swap_state.c: 333').
+
+    Such a header is not C code and must not be run through the C lexer, which
+    would otherwise colorize the version numbers in the path as numeric
+    literals. Real source lines are prefixed with a right-justified line number,
+    so they start with a digit rather than '/'.
+    """
+    s = text.strip()
+    if s.startswith("/") and re.search(r":\s*\d+$", s):
+        return True
+    return False
+
+
+def highlight_source_code(text, width=0, highlight_syntax=True):
+    """
+    Return the source line `text` with the theme's background applied, matching
+    the look of 'edis -f'. When `highlight_syntax` is True the text is run
+    through the C lexer; when False (used for path headers) only the background
+    band is applied so non-code text is not mis-colorized.
 
     The theme background is kept alive across pygments' full-reset sequences
     and, when `width` is given, the line is padded so the background band
@@ -3862,15 +3880,18 @@ def highlight_source_code(text, width=0):
     text = text.expandtabs()
 
     highlight, lexer, formatter, bg_ansi = hl
-    try:
-        body = highlight(text, lexer, formatter)
-    except Exception:
-        return text
+    if highlight_syntax:
+        try:
+            body = highlight(text, lexer, formatter)
+        except Exception:
+            return text
 
-    # pygments may append a trailing newline; drop it so the caller's print()
-    # controls line breaks.
-    if body.endswith("\n") and not text.endswith("\n"):
-        body = body[:-1]
+        # pygments may append a trailing newline; drop it so the caller's
+        # print() controls line breaks.
+        if body.endswith("\n") and not text.endswith("\n"):
+            body = body[:-1]
+    else:
+        body = text
 
     if not bg_ansi:
         return body
@@ -4031,7 +4052,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
         # column 0, matching 'edis -f'.
         if is_disasm_line == False and graph.strip() == "":
             crashcolor.set_color(crashcolor.RESET)
-            print(highlight_source_code(one_line, term_width))
+            print(highlight_source_code(
+                one_line, term_width,
+                highlight_syntax=not is_source_path_header(one_line)))
             crashcolor.set_color(crashcolor.RESET)
             continue
 
@@ -4065,7 +4088,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
         # background spanning the remaining width.
         if is_disasm_line == False:
             crashcolor.set_color(crashcolor.RESET)
-            print(highlight_source_code(line, term_width - len(graph)))
+            print(highlight_source_code(
+                line, term_width - len(graph),
+                highlight_syntax=not is_source_path_header(line)))
             crashcolor.set_color(crashcolor.RESET)
             continue
 
