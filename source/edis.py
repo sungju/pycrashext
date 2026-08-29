@@ -4029,6 +4029,18 @@ def disasm(ins_addr, o, args, cmd_path_list):
             line = one_line[idx:]
             graph = one_line[:idx]
             is_disasm_line = True
+        elif is_source_path_header(one_line):
+            # "<path>: <lineno>" header. The path itself often embeds digits
+            # (e.g. a kernel version like ".../kernel-3.10.0-1160.../..."),
+            # so the line-number search below would latch onto the first
+            # digit inside the path instead of the real line number at the
+            # end, splitting most of the path into an uncolored 'graph'
+            # prefix and C-highlighting the leftover fragment. Treat the
+            # header as a single unit so it always takes the column-0
+            # background band below, with syntax highlighting skipped.
+            line = one_line
+            graph = ""
+            is_disasm_line = False
         else: # source line
             prog = re.compile(r"(?P<line_number>[0-9]+)")
             m = prog.search(one_line)
