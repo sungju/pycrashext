@@ -3784,11 +3784,28 @@ def find_symbol(str):
 
 
 # Lazily-initialized pygments highlighter used to pretty-print the C source
-# lines that are interleaved with disassembly, matching the theme used by
-# 'edis -f'. Stored as (highlight_fn, lexer, formatter) or None if pygments
-# is not available in this environment.
+# lines that are interleaved with disassembly, matching the theme (and its
+# background) used by 'edis -f'. Stored as
+# (highlight_fn, lexer, formatter, bg_ansi) or None if pygments is missing.
 _source_highlighter = None
 _source_highlighter_ready = False
+
+
+def _hex_to_bg_ansi(hex_color):
+    """Convert a '#rrggbb' style background color into a truecolor background
+    ANSI escape, or "" if it can't be parsed."""
+    if not hex_color:
+        return ""
+    h = hex_color.lstrip('#')
+    if len(h) != 6:
+        return ""
+    try:
+        r = int(h[0:2], 16)
+        g = int(h[2:4], 16)
+        b = int(h[4:6], 16)
+    except Exception:
+        return ""
+    return "\x1b[48;2;%d;%d;%dm" % (r, g, b)
 
 
 def get_source_highlighter():
@@ -3802,46 +3819,72 @@ def get_source_highlighter():
         from pygments import highlight
         from pygments.lexers import CLexer
         from pygments.formatters import TerminalTrueColorFormatter
+        from pygments.styles import get_style_by_name
 
         code_theme = os.environ.get('CODE_THEME', 'tango')
         try:
             formatter = TerminalTrueColorFormatter(style=code_theme)
+            style = get_style_by_name(code_theme)
         except Exception:
             # Fall back to the same default 'edis -f' uses if the theme is
             # unknown to this pygments version.
             formatter = TerminalTrueColorFormatter(style='tango')
+            style = get_style_by_name('tango')
+
+        bg_ansi = _hex_to_bg_ansi(getattr(style, 'background_color', None))
 
         # ensurenl=False keeps us from adding stray newlines; we print them.
         lexer = CLexer(stripnl=False, ensurenl=False)
-        _source_highlighter = (highlight, lexer, formatter)
+        _source_highlighter = (highlight, lexer, formatter, bg_ansi)
     except Exception:
         _source_highlighter = None
 
     return _source_highlighter
 
 
-def highlight_source_code(text):
+def highlight_source_code(text, width=0):
     """
-    Return the C source line `text` with syntax-highlighting ANSI codes,
-    matching the theme used by 'edis -f'.
+    Return the C source line `text` syntax-highlighted with the theme's
+    background applied, matching the look of 'edis -f'.
 
-    Falls back to the original text unchanged if pygments is not available
-    or highlighting fails for any reason.
+    The theme background is kept alive across pygments' full-reset sequences
+    and, when `width` is given, the line is padded so the background band
+    spans the full width like a code block. Falls back to the original text
+    unchanged if pygments is not available or highlighting fails.
     """
     hl = get_source_highlighter()
     if hl is None:
         return text
 
-    highlight, lexer, formatter = hl
+    # Expand tabs so len(text) matches the number of terminal columns; kernel
+    # source is tab-indented and a raw '\t' would otherwise under-count the
+    # width and make the padded background band wrap onto the next line.
+    text = text.expandtabs()
+
+    highlight, lexer, formatter, bg_ansi = hl
     try:
-        result = highlight(text, lexer, formatter)
-        # pygments may append a trailing newline; drop it so the caller's
-        # print() controls line breaks.
-        if result.endswith("\n") and not text.endswith("\n"):
-            result = result[:-1]
-        return result
+        body = highlight(text, lexer, formatter)
     except Exception:
         return text
+
+    # pygments may append a trailing newline; drop it so the caller's print()
+    # controls line breaks.
+    if body.endswith("\n") and not text.endswith("\n"):
+        body = body[:-1]
+
+    if not bg_ansi:
+        return body
+
+    # pygments emits a full reset ("\x1b[39;00m") after bold tokens, which also
+    # clears the background. Turn bold off (22) and restore the default
+    # foreground (39) without clearing the background, then re-assert it.
+    body = body.replace("\x1b[39;00m", "\x1b[22;39m" + bg_ansi)
+
+    pad = width - len(text)
+    if pad < 0:
+        pad = 0
+
+    return bg_ansi + body + (" " * pad) + "\x1b[0m"
 
 
 def disasm(ins_addr, o, args, cmd_path_list):
@@ -3944,6 +3987,21 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
     set_asm_colors()
     crashcolor.set_color(crashcolor.RESET)
+
+    # Terminal width, used to pad the highlighted source background band so it
+    # spans the line like the code block rendered by 'edis -f'.
+    try:
+        term_width = os.get_terminal_size(1).columns
+    except Exception:
+        term_width = 0
+    if term_width <= 0:
+        try:
+            term_width = int(os.environ.get("COLUMNS", "0"))
+        except Exception:
+            term_width = 0
+    if term_width <= 0:
+        term_width = 80
+
     for one_line in result_str.splitlines():
         idx = one_line.find("0x")
         if idx >= 0:
@@ -3966,6 +4024,16 @@ def disasm(ins_addr, o, args, cmd_path_list):
             line = one_line[idx:]
             graph = one_line[:idx]
             is_disasm_line = False
+
+        # Source lines with no jump-graph prefix (the common case, e.g.
+        # 'edis -lr'): render the whole line (indent + line number + code) as
+        # one syntax-highlighted band so the theme background spans from
+        # column 0, matching 'edis -f'.
+        if is_disasm_line == False and graph.strip() == "":
+            crashcolor.set_color(crashcolor.RESET)
+            print(highlight_source_code(one_line, term_width))
+            crashcolor.set_color(crashcolor.RESET)
+            continue
 
         idx = 2
         default_color = crashcolor.RESET
@@ -3992,11 +4060,12 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if idx == 7: # For black background situation
                 idx = idx + 1
 
-        # Source lines: pretty-print with the same syntax highlighting as
-        # 'edis -f' and skip the assembly operand-coloring path below.
+        # Source lines that carry a jump-graph prefix: keep the prefix
+        # coloring above, then highlight the code portion with the theme
+        # background spanning the remaining width.
         if is_disasm_line == False:
             crashcolor.set_color(crashcolor.RESET)
-            print(highlight_source_code(line))
+            print(highlight_source_code(line, term_width - len(graph)))
             crashcolor.set_color(crashcolor.RESET)
             continue
 
