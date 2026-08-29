@@ -3783,6 +3783,67 @@ def find_symbol(str):
     return ""
 
 
+# Lazily-initialized pygments highlighter used to pretty-print the C source
+# lines that are interleaved with disassembly, matching the theme used by
+# 'edis -f'. Stored as (highlight_fn, lexer, formatter) or None if pygments
+# is not available in this environment.
+_source_highlighter = None
+_source_highlighter_ready = False
+
+
+def get_source_highlighter():
+    global _source_highlighter, _source_highlighter_ready
+
+    if _source_highlighter_ready:
+        return _source_highlighter
+
+    _source_highlighter_ready = True
+    try:
+        from pygments import highlight
+        from pygments.lexers import CLexer
+        from pygments.formatters import TerminalTrueColorFormatter
+
+        code_theme = os.environ.get('CODE_THEME', 'tango')
+        try:
+            formatter = TerminalTrueColorFormatter(style=code_theme)
+        except Exception:
+            # Fall back to the same default 'edis -f' uses if the theme is
+            # unknown to this pygments version.
+            formatter = TerminalTrueColorFormatter(style='tango')
+
+        # ensurenl=False keeps us from adding stray newlines; we print them.
+        lexer = CLexer(stripnl=False, ensurenl=False)
+        _source_highlighter = (highlight, lexer, formatter)
+    except Exception:
+        _source_highlighter = None
+
+    return _source_highlighter
+
+
+def highlight_source_code(text):
+    """
+    Return the C source line `text` with syntax-highlighting ANSI codes,
+    matching the theme used by 'edis -f'.
+
+    Falls back to the original text unchanged if pygments is not available
+    or highlighting fails for any reason.
+    """
+    hl = get_source_highlighter()
+    if hl is None:
+        return text
+
+    highlight, lexer, formatter = hl
+    try:
+        result = highlight(text, lexer, formatter)
+        # pygments may append a trailing newline; drop it so the caller's
+        # print() controls line breaks.
+        if result.endswith("\n") and not text.endswith("\n"):
+            result = result[:-1]
+        return result
+    except Exception:
+        return text
+
+
 def disasm(ins_addr, o, args, cmd_path_list):
     global asm_color_dict
 
@@ -3930,6 +3991,14 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 idx = 2
             if idx == 7: # For black background situation
                 idx = idx + 1
+
+        # Source lines: pretty-print with the same syntax highlighting as
+        # 'edis -f' and skip the assembly operand-coloring path below.
+        if is_disasm_line == False:
+            crashcolor.set_color(crashcolor.RESET)
+            print(highlight_source_code(line))
+            crashcolor.set_color(crashcolor.RESET)
+            continue
 
         if is_disasm_line == True:
             line = interpret_one_line(line) # Retreive stack data if possible
