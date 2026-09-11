@@ -752,11 +752,16 @@ def show_task_cgroup_info(task):
             nr_cpus = get_nr_cpus()
             if nr_cpus > 0:
                 pct = cores / nr_cpus * 100
+                bar = fsinfo.get_memory_bar(pct, width=20)
                 print("cpu quota        : %.2f core%s (%.2f%% of %d CPU%s in system)" %
                       (cores, "" if cores == 1 else "s", pct, nr_cpus,
                        "" if nr_cpus == 1 else "s"))
+                print("%s%s" % (" " * 19, bar))
+                crashcolor.set_color(crashcolor.RESET)
             else:
+                crashcolor.set_color(crashcolor.CYAN)
                 print("cpu quota        : %.2f cores" % (cores))
+                crashcolor.set_color(crashcolor.RESET)
         if bw["burst_us"] is not None:
             print("cfs_burst_us     : %d" % (bw["burst_us"]))
         if bw["nr_periods"] is not None:
