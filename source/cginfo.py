@@ -747,6 +747,274 @@ def _mem_cgroup_usage(cgrp):
     return usage, limit
 
 
+def _find_subsys_id(names_exact, names_contains=None, exclude_contains=None):
+    """Resolve a cgroup_subsys_id by exact enum name, falling back to substring match."""
+    for sid, sname in cgroup_subsys_id_list.items():
+        if sname in names_exact:
+            return sid
+    if names_contains:
+        for sid, sname in cgroup_subsys_id_list.items():
+            if exclude_contains and any(ex in sname for ex in exclude_contains):
+                continue
+            if any(nc in sname for nc in names_contains):
+                return sid
+    return None
+
+
+def _get_nr_cpus():
+    try:
+        return int(sys_info.CPUS)
+    except Exception:
+        return 0
+
+
+CFS_RUNTIME_INF = 0xFFFFFFFFFFFFFFFF  # (u64)~0ULL - cfs_bandwidth.quota "no limit" sentinel
+
+
+def _cpu_bandwidth_from_cgroup(cgrp):
+    """Read CFS quota/period/shares for the cpu controller of a given cgroup."""
+    cpu_id = _find_subsys_id(["cpu_cgrp_id", "cpu_subsys_id"],
+                              names_contains=["cpu"],
+                              exclude_contains=["cpuacct", "cpuset"])
+    if cpu_id is None:
+        return None
+    try:
+        css = cgrp.subsys[cpu_id]
+        if not css or int(css) == 0:
+            return None
+
+        css_off = member_offset("struct task_group", "css")
+        if css_off < 0:
+            return None
+        tg = readSU("struct task_group", int(css) - css_off)
+
+        cfs_b = tg.cfs_bandwidth
+        try:
+            period = int(cfs_b.period.tv64)
+        except Exception:
+            period = int(cfs_b.period)
+
+        quota = int(cfs_b.quota)
+        unlimited = (quota < 0 or quota == CFS_RUNTIME_INF)
+
+        info = {
+            "period_us": period // 1000,
+            "quota_us": -1 if unlimited else quota // 1000,
+        }
+
+        try:
+            info["shares"] = int(tg.shares)
+        except Exception:
+            info["shares"] = None
+
+        try:
+            info["nr_throttled"] = int(cfs_b.nr_throttled)
+        except Exception:
+            info["nr_throttled"] = None
+
+        try:
+            info["throttled_time_sec"] = int(cfs_b.throttled_time) // 1000000000
+        except Exception:
+            info["throttled_time_sec"] = None
+
+        return info
+    except Exception:
+        return None
+
+
+def _pids_quota_from_cgroup(cgrp):
+    """Read pids.current/pids.max for the pids controller of a given cgroup."""
+    pids_id = _find_subsys_id(["pids_cgrp_id", "pids_subsys_id"],
+                               names_contains=["pids"])
+    if pids_id is None:
+        return None
+    try:
+        css = cgrp.subsys[pids_id]
+        if not css or int(css) == 0:
+            return None
+
+        css_off = member_offset("struct pids_cgroup", "css")
+        if css_off < 0:
+            return None
+        pids_cg = readSU("struct pids_cgroup", int(css) - css_off)
+
+        return {
+            "current": int(pids_cg.counter.counter),
+            "max": int(pids_cg.limit.counter),
+        }
+    except Exception:
+        return None
+
+
+def _parse_subsys_filter(filter_str):
+    """'cpu,cpuset' -> ['cpu', 'cpuset']; '' -> []."""
+    return [s.strip().lower() for s in (filter_str or "").split(",") if s.strip()]
+
+
+def _is_cpu_bandwidth_subsys(token):
+    return token == "cpu" or \
+        (token.startswith("cpu") and "acct" not in token and "set" not in token)
+
+
+def _wants_memory(requested):
+    return not requested or any("mem" in r for r in requested)
+
+
+def _wants_cpu_bandwidth(requested):
+    return any(_is_cpu_bandwidth_subsys(r) for r in requested)
+
+
+def _wants_pids(requested):
+    return any("pids" in r for r in requested)
+
+
+def _wants_cpuset(requested):
+    return any("cpuset" in r for r in requested)
+
+
+def _sz_bytes(b):
+    if b >= 1 << 30: return "%.1f GiB" % (b / (1 << 30))
+    if b >= 1 << 20: return "%.1f MiB" % (b / (1 << 20))
+    return "%.1f KiB" % (b / 1024)
+
+
+def _cpumask_bits_to_set(mask, total=None):
+    """Read a struct cpumask/nodemask_t's .bits[] into a python set of set bit indices."""
+    cpu_set = set()
+    try:
+        bits = mask.bits
+        bits_per_long = 64 if sys_info.pointersize == 8 else 32
+        if total is None:
+            total = len(bits) * bits_per_long
+        for i in range(total):
+            word_idx = i // bits_per_long
+            bit_idx = i % bits_per_long
+            if (bits[word_idx] >> bit_idx) & 1:
+                cpu_set.add(i)
+    except Exception:
+        pass
+    return cpu_set
+
+
+def _int_set_to_range_str(int_set):
+    if not int_set:
+        return "<none>"
+    nums = sorted(int_set)
+    ranges = []
+    start = prev = nums[0]
+    for n in nums[1:]:
+        if n == prev + 1:
+            prev = n
+            continue
+        ranges.append("%d" % start if start == prev else "%d-%d" % (start, prev))
+        start = prev = n
+    ranges.append("%d" % start if start == prev else "%d-%d" % (start, prev))
+    return ",".join(ranges)
+
+
+def _cpuset_info_from_cgroup(cgrp):
+    """Read cpus/mems masks for the cpuset controller of a given cgroup."""
+    cpuset_id = _find_subsys_id(["cpuset_cgrp_id", "cpuset_subsys_id"],
+                                 names_contains=["cpuset"])
+    if cpuset_id is None:
+        return None
+    try:
+        css = cgrp.subsys[cpuset_id]
+        if not css or int(css) == 0:
+            return None
+
+        css_off = member_offset("struct cpuset", "css")
+        if css_off < 0:
+            return None
+        cs = readSU("struct cpuset", int(css) - css_off)
+
+        def first_mask(names, total=None):
+            for name in names:
+                if member_offset("struct cpuset", name) < 0:
+                    continue
+                try:
+                    return _cpumask_bits_to_set(getattr(cs, name), total)
+                except Exception:
+                    continue
+            return None
+
+        cpus = first_mask(["effective_cpus", "cpus_allowed"], _get_nr_cpus() or None)
+        mems = first_mask(["effective_mems", "mems_allowed"])
+
+        return {"cpus": cpus, "mems": mems}
+    except Exception:
+        return None
+
+
+def _print_cgroup_quota_detail(options, cgrp, prefix):
+    """Print quota/limit info for a cgroup, scoped to -s's subsystem filter(s) (if any)."""
+    requested = _parse_subsys_filter(getattr(options, "filter_subsys", ""))
+
+    if _wants_memory(requested):
+        usage, limit = _mem_cgroup_usage(cgrp)
+        if usage >= 0:
+            lim_str = _sz_bytes(limit) if limit > 0 else "unlimited"
+            crashcolor.set_color(crashcolor.CYAN)
+            print("%smemory: current=%s max=%s" % (prefix, _sz_bytes(usage), lim_str))
+            crashcolor.set_color(crashcolor.RESET)
+
+    if requested and _wants_cpu_bandwidth(requested):
+        bw = _cpu_bandwidth_from_cgroup(cgrp)
+        if bw is not None:
+            quota_us = bw["quota_us"]
+            period_us = bw["period_us"]
+            quota_str = "max" if quota_us < 0 else "%d us" % (quota_us)
+            line = "%scpu: quota=%s period=%d us" % (prefix, quota_str, period_us)
+            if quota_us >= 0 and period_us > 0:
+                cores = quota_us / float(period_us)
+                nr_cpus = _get_nr_cpus()
+                if nr_cpus > 0:
+                    pct = cores / nr_cpus * 100
+                    line = line + "  (%.2f cores, %.2f%% of %d CPUs)" % (cores, pct, nr_cpus)
+                else:
+                    line = line + "  (%.2f cores)" % (cores)
+            if bw.get("shares") is not None:
+                line = line + "  shares=%d" % (bw["shares"])
+            crashcolor.set_color(crashcolor.CYAN)
+            print(line)
+            if bw.get("nr_throttled"):
+                print("%s     nr_throttled=%d, throttled_time=%ss" %
+                      (prefix, bw["nr_throttled"], bw.get("throttled_time_sec")))
+            crashcolor.set_color(crashcolor.RESET)
+
+    if requested and _wants_pids(requested):
+        pq = _pids_quota_from_cgroup(cgrp)
+        if pq is not None:
+            max_str = "unlimited" if pq["max"] >= (1 << 60) else "%d" % (pq["max"])
+            crashcolor.set_color(crashcolor.CYAN)
+            print("%spids: current=%d max=%s" % (prefix, pq["current"], max_str))
+            crashcolor.set_color(crashcolor.RESET)
+
+    if requested and _wants_cpuset(requested):
+        cs = _cpuset_info_from_cgroup(cgrp)
+        if cs is not None:
+            cpus_str = _int_set_to_range_str(cs["cpus"]) if cs["cpus"] is not None else "n/a"
+            mems_str = _int_set_to_range_str(cs["mems"]) if cs["mems"] is not None else "n/a"
+            crashcolor.set_color(crashcolor.CYAN)
+            print("%scpuset: cpus=%s mems=%s" % (prefix, cpus_str, mems_str))
+            crashcolor.set_color(crashcolor.RESET)
+
+
+def _subsys_legend_lines(requested):
+    """One-line explanation per selected subsystem, for the -s header."""
+    lines = []
+    if _wants_memory(requested):
+        lines.append("memory : current/max usage in bytes")
+    if _wants_cpu_bandwidth(requested):
+        lines.append("cpu    : quota/period = CFS bandwidth limit; cores/%% = same limit as "
+                      "CPU cores and %% of system; shares = relative CPU weight (default 1024)")
+    if _wants_pids(requested):
+        lines.append("pids   : current/max number of tasks in the cgroup")
+    if _wants_cpuset(requested):
+        lines.append("cpuset : cpus/mems = allowed CPU and NUMA node IDs")
+    return lines
+
+
 def _collect_cgroup_mem_info(cgrp, results, max_depth=0, depth=0):
     """Recursively collect (path, usage, limit) for cgroups with memory data."""
     if depth > 64:
@@ -986,16 +1254,7 @@ def _compact_tree_node(options, cgrp, idx, full_path,
     print("%s%s%s  (%d tasks)" % (prefix, connector, label, task_cnt))
 
     if options.show_detail:
-        usage, limit = _mem_cgroup_usage(cgrp)
-        if usage >= 0:
-            def _sz(b):
-                if b >= 1<<30: return "%.1f GiB" % (b/(1<<30))
-                if b >= 1<<20: return "%.1f MiB" % (b/(1<<20))
-                return "%.1f KiB" % (b/1024)
-            lim_str = _sz(limit) if limit > 0 else "unlimited"
-            crashcolor.set_color(crashcolor.CYAN)
-            print("%smemory: %s / %s" % (mem_pfx, _sz(usage), lim_str))
-            crashcolor.set_color(crashcolor.RESET)
+        _print_cgroup_quota_detail(options, cgrp, mem_pfx)
 
     crashcolor.set_color(crashcolor.RESET)
 
@@ -1016,18 +1275,28 @@ def _compact_tree_node(options, cgrp, idx, full_path,
 def show_subsystem_info(options):
     """
     Show an overview of a specific cgroup subsystem.
-    Without -d: compact tree (name + task count per cgroup).
-    With    -d: tree with resource usage/limits AND task list per cgroup.
+    Always shows the subsystem's quota/usage (cpu.max/shares, memory.max, pids.max, ...).
+    With -d: also lists the tasks in each cgroup.
     """
     # -d implies task list when used with -s
     if options.show_detail:
         options.task_list = True
 
-    subsys_filter = options.filter_subsys.lower()
+    # -s always shows quota/usage detail for the selected subsystem, regardless of -d
+    options.show_detail = True
+
+    requested = _parse_subsys_filter(options.filter_subsys)
+    subsys_filter = ", ".join(requested)
 
     print("=" * 66)
     print("Cgroup Subsystem: %s" % subsys_filter)
     print("=" * 66)
+
+    crashcolor.set_color(crashcolor.YELLOW)
+    for legend_line in _subsys_legend_lines(requested):
+        print("  %s" % (legend_line))
+    crashcolor.set_color(crashcolor.RESET)
+    print("")
 
     found = False
 
@@ -1036,7 +1305,7 @@ def show_subsystem_info(options):
         try:
             dfl = readSymbol("cgrp_dfl_root")
             v2_ctrl = _subsys_names_from_mask(int(dfl.cgrp.subtree_control))
-            matching = [c for c in v2_ctrl if subsys_filter in c.lower()]
+            matching = [c for c in v2_ctrl if any(r in c.lower() for r in requested)]
             if matching or _quick_count_cgroups(dfl.cgrp) > 1:
                 found = True
                 crashcolor.set_color(crashcolor.LIGHTBLUE)
@@ -1068,7 +1337,7 @@ def show_subsystem_info(options):
                     subsys_names = _subsys_names_from_mask(int(root.subsys_mask))
                 except Exception:
                     pass
-                if not any(subsys_filter in n.lower() for n in subsys_names):
+                if not any(any(r in n.lower() for r in requested) for n in subsys_names):
                     continue
                 found = True
                 crashcolor.set_color(crashcolor.LIGHTBLUE)
@@ -2031,7 +2300,9 @@ def cgroupinfo():
 
     op.add_option("-s", "--subsys", dest="filter_subsys", default="",
                   action="store", type="string",
-                  help="Show overview for a specific subsystem/controller (e.g. memory, cpu, io)")
+                  help="Show overview and quota/usage detail for one or more subsystems/"
+                       "controllers, comma-separated (e.g. cpu, memory, pids, cpuset, "
+                       "cpu,cpuset)")
 
     # --- Tree options ---
     op.add_option("-t", "--tree", dest="cgroup_tree", default=0,

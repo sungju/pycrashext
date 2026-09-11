@@ -15,6 +15,7 @@ import signal
 import crashcolor
 import pstree
 import crashhelper
+import cginfo
 from datetime import datetime, timedelta
 
 
@@ -586,6 +587,204 @@ def get_pid_namespace(task):
 
 PIDNS_ADDING=(1<<31)
 
+RUNTIME_INF = 0xFFFFFFFFFFFFFFFF  # (u64)~0ULL - cfs_bandwidth.quota "no limit" sentinel
+QUOTA_UNLIMITED_THRESHOLD = 1 << 60  # PAGE_COUNTER_MAX / LONG_MAX-ish sentinels
+
+
+def fmt_quota_val(val, unit=""):
+    if val is None:
+        return "n/a"
+    if val < 0 or val >= QUOTA_UNLIMITED_THRESHOLD:
+        return "max"
+    return "%d%s" % (val, unit)
+
+
+def get_nr_cpus():
+    try:
+        return int(sys_info.CPUS)
+    except Exception:
+        return 0
+
+
+def get_task_group_cgroup(task_group):
+    try:
+        css = readSU('struct cgroup_subsys_state', task_group.css)
+        if css == 0:
+            return None
+        cgroup_addr = css.cgroup
+        if cgroup_addr == 0 or cgroup_addr is None:
+            return None
+        return readSU("struct cgroup", cgroup_addr)
+    except Exception:
+        return None
+
+
+def get_cfs_bandwidth_info(task_group):
+    cfs_b = task_group.cfs_bandwidth
+
+    try:
+        period = int(cfs_b.period.tv64)
+    except Exception:
+        period = int(cfs_b.period)
+
+    quota = int(cfs_b.quota)
+    unlimited = (quota < 0 or quota == RUNTIME_INF)
+
+    info = {
+        "period_us": period // 1000,
+        "quota_us": -1 if unlimited else quota // 1000,
+    }
+
+    for field, key, divisor in (("burst", "burst_us", 1000),
+                                 ("nr_periods", "nr_periods", 1),
+                                 ("nr_throttled", "nr_throttled", 1),
+                                 ("throttled_time", "throttled_time_sec", 1000000000)):
+        try:
+            info[key] = int(getattr(cfs_b, field)) // divisor
+        except Exception:
+            info[key] = None
+
+    return info
+
+
+def get_mem_cgroup_quotas(cgroup):
+    try:
+        mem_id = None
+        for sid, sname in cginfo.cgroup_subsys_id_list.items():
+            if "memory" in sname:
+                mem_id = sid
+                break
+        if mem_id is None:
+            return None
+
+        css = cgroup.subsys[mem_id]
+        if css == 0 or css is None:
+            return None
+
+        css_off = member_offset("struct mem_cgroup", "css")
+        if css_off < 0:
+            return None
+        mem_cgroup = readSU("struct mem_cgroup", int(css) - css_off)
+
+        def try_get(fn):
+            try:
+                return fn()
+            except Exception:
+                return None
+
+        usage = try_get(lambda: int(mem_cgroup.memory.usage.counter))
+        if usage is None:
+            usage = try_get(lambda: int(mem_cgroup.res.usage.counter) * cginfo.PAGE_SIZE)
+
+        max_val = try_get(lambda: int(mem_cgroup.memory.max))
+        if max_val is None:
+            max_val = try_get(lambda: int(mem_cgroup.res.limit.counter) * cginfo.PAGE_SIZE)
+
+        return {
+            "usage": usage,
+            "max": max_val,
+            "high": try_get(lambda: int(mem_cgroup.memory.high)),
+            "min": try_get(lambda: int(mem_cgroup.memory.min)),
+            "low": try_get(lambda: int(mem_cgroup.memory.low)),
+        }
+    except Exception:
+        return None
+
+
+def get_pids_cgroup_quotas(cgroup):
+    try:
+        pids_id = None
+        for sid, sname in cginfo.cgroup_subsys_id_list.items():
+            if "pids" in sname:
+                pids_id = sid
+                break
+        if pids_id is None:
+            return None
+
+        css = cgroup.subsys[pids_id]
+        if css == 0 or css is None:
+            return None
+
+        css_off = member_offset("struct pids_cgroup", "css")
+        if css_off < 0:
+            return None
+        pids_cgroup = readSU("struct pids_cgroup", int(css) - css_off)
+
+        return {
+            "current": int(pids_cgroup.counter.counter),
+            "max": int(pids_cgroup.limit.counter),
+        }
+    except Exception:
+        return None
+
+
+def show_task_cgroup_info(task):
+    if member_offset("struct task_struct", "sched_task_group") < 0:
+        return
+
+    task_group = task.sched_task_group
+    if task_group == 0 or task_group is None:
+        return
+
+    cginfo.cgroup_subsys_id_init()
+
+    print("==== Cgroup / CFS Bandwidth ====")
+    print("sched_task_group : 0x%x" % (Addr(task_group)))
+
+    cgroup = get_task_group_cgroup(task_group)
+    if cgroup is not None:
+        print("cpu cgroup path  : %s" % (cginfo._cgroup_full_path(cgroup)))
+    else:
+        print("cpu cgroup path  : <unknown>")
+
+    try:
+        print("cpu.shares       : %d" % (int(task_group.shares)))
+    except Exception:
+        pass
+
+    try:
+        bw = get_cfs_bandwidth_info(task_group)
+        quota_str = "unlimited" if bw["quota_us"] < 0 else "%d us" % (bw["quota_us"])
+        print("cfs_period_us    : %d" % (bw["period_us"]))
+        print("cfs_quota_us     : %s" % (quota_str))
+        if bw["quota_us"] >= 0 and bw["period_us"] > 0:
+            cores = bw["quota_us"] / float(bw["period_us"])
+            nr_cpus = get_nr_cpus()
+            if nr_cpus > 0:
+                pct = cores / nr_cpus * 100
+                print("cpu quota        : %.2f core%s (%.2f%% of %d CPU%s in system)" %
+                      (cores, "" if cores == 1 else "s", pct, nr_cpus,
+                       "" if nr_cpus == 1 else "s"))
+            else:
+                print("cpu quota        : %.2f cores" % (cores))
+        if bw["burst_us"] is not None:
+            print("cfs_burst_us     : %d" % (bw["burst_us"]))
+        if bw["nr_periods"] is not None:
+            print("nr_periods       : %d" % (bw["nr_periods"]))
+        if bw["nr_throttled"] is not None:
+            print("nr_throttled     : %d" % (bw["nr_throttled"]))
+        if bw["throttled_time_sec"] is not None:
+            print("throttled_time   : %d secs" % (bw["throttled_time_sec"]))
+    except Exception as e:
+        print("cfs_bandwidth    : <unavailable> (%s)" % (e))
+
+    if cgroup is None:
+        return
+
+    mem_quota = get_mem_cgroup_quotas(cgroup)
+    if mem_quota is not None:
+        print("memory.current   : %s bytes" % (fmt_quota_val(mem_quota["usage"])))
+        print("memory.max       : %s bytes" % (fmt_quota_val(mem_quota["max"])))
+        print("memory.high      : %s bytes" % (fmt_quota_val(mem_quota["high"])))
+        print("memory.min       : %s bytes" % (fmt_quota_val(mem_quota["min"])))
+        print("memory.low       : %s bytes" % (fmt_quota_val(mem_quota["low"])))
+
+    pids_quota = get_pids_cgroup_quotas(cgroup)
+    if pids_quota is not None:
+        print("pids.current     : %d" % (pids_quota["current"]))
+        print("pids.max         : %s" % (fmt_quota_val(pids_quota["max"])))
+
+
 def show_task_details(options):
     task = readSU("struct task_struct", int(options.taskaddr, 16))
     print("pid      : %d (%s)" % (task.pid, task.comm))
@@ -599,6 +798,11 @@ def show_task_details(options):
             print("\t.pid_allocated = %d" % (pid_namespace.pid_allocated & ~PIDNS_ADDING))
         if member_offset("struct pid_namespace", "child_reaper") >= 0:
             print("\t.child_reaper = 0x%x" % (pid_namespace.child_reaper))
+
+    try:
+        show_task_cgroup_info(task)
+    except Exception as e:
+        print("cgroup info      : <unavailable> (%s)" % (e))
 
     if options.nodetails: # no further print
         return
