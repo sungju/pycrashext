@@ -32,17 +32,30 @@ def add_rule(sysinfo):
 
 
 def get_total_physical_mem_kb():
+    """
+    Returns total physical memory in kB, or 0 when it can't be determined.
+    """
     try:
-        if rh.is_symbol_exists("totalram_pages"):
+        import meminfo as mi
+        total = mi.get_meminfo().get('MemTotal', 0)
+        if total > 0:
+            return total
+    except Exception:
+        pass
+
+    # Kernels >= 5.0 renamed 'totalram_pages' to the atomic '_totalram_pages',
+    # so check the newer name first.
+    totalram_pages = 0
+    try:
+        if rh.is_symbol_exists("_totalram_pages"):
+            value = rh.get_symbol("_totalram_pages")
+            totalram_pages = getattr(value, "counter", value)
+        elif rh.is_symbol_exists("totalram_pages"):
             totalram_pages = rh.get_symbol("totalram_pages")
-        elif rh.is_symbol_exists("_totalram_pages"):
-            totalram_pages = rh.get_symbol("_totalram_pages").counter
-        else:
-            totalram_pages = 0
-    except:
+    except Exception:
         totalram_pages = 0
 
-    return totalram_pages * (rh.get_page_size() // 1024)
+    return int(totalram_pages) * (rh.get_page_size() // 1024)
 
 
 BUG_CONSIDER_PERCENT = 50 # Not scientific number, but 50% sounds reasonable
@@ -53,6 +66,9 @@ def run_rule(basic_data):
         pcpu_nr_units = rh.get_symbol("pcpu_nr_units")
         total_used_kb = pcpu_nr_populated * pcpu_nr_units * 4
         total_physical_mem_kb = get_total_physical_mem_kb()
+        if total_physical_mem_kb <= 0:
+            return None
+
         used_percent = (total_used_kb / total_physical_mem_kb) * 100
 
         if used_percent < BUG_CONSIDER_PERCENT:
@@ -79,7 +95,7 @@ def run_rule(basic_data):
 
         return [result_dict]
     except Exception as e:
-        print(e)
+        print("Error running rule %s: %s" % (ntpath.basename(__file__), e))
         return None
 
 
