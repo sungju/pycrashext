@@ -317,7 +317,7 @@ def print_help():
     print("  git show abc123def --stat")
     print("  git log -Sinit_new_ldt --repos=rhel9,upstream")
     print("  git show HEAD~3 --repos=linux")
-    print("  git find 0dd3ee311255 --stat")
+    print("  git find <commit-id> --stat")
     print("  git find mm/slub: fix kmalloc accounting")
 
 
@@ -385,10 +385,10 @@ def print_help_for_subcommand(subcommand):
         print("  --verbose          Show verbose output")
         print("")
         print("Examples:")
-        print("  git find 0dd3ee311255")
+        print("  git find <commit-id>")
         print("  git find net/mlx5e: Fix crash moving to switchdev mode")
         print("  git find --subject=\"use-after-free in nf_tables\" --max-count=20")
-        print("  git find 0dd3ee311255 --repos=rhel8,rhel9 --stat")
+        print("  git find <commit-id> --repos=rhel8,rhel9 --stat")
         print("")
         print("A commit ID that is reported as NOT FOUND does not exist in the")
         print("searched trees - useful for checking a suggested or quoted fix.")

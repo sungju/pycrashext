@@ -1423,10 +1423,16 @@ crash> git find net/mlx5e: Fix crash moving to switchdev mode
 
 Use `--commit=` or `--subject=` when the automatic choice is wrong, for example when searching for a subject that happens to look like a hash.
 
+> **The hashes and subjects in the sample output below are made up**, purely to
+> show the shape of the report. Do not copy them into 'crash' expecting a hit -
+> they do not exist in any real tree, and `git find` will correctly say so.
+> The `#### Trying it out ####` section further down shows how to run a real
+> check against your own mirrors.
+
 **Looking a commit up by ID**
 
 ```
-crash> git find 0dd3ee311255
+crash> git find <commit-id>
 ================================================================================
 Git Find Results
 Query          : 0dd3ee311255
@@ -1469,7 +1475,7 @@ Backports are matched in two ways, strongest first:
 **A fix that was never backported**
 
 ```
-crash> git find a2a1cc5465226c2f270f06a041a6d77385d6df6d
+crash> git find <commit-id>
 ...
 [1/1] a2a1cc5465226c2f270f06a041a6d77385d6df6d  (upstream)
     subject : net: never backported fix
@@ -1492,9 +1498,17 @@ NOT FOUND: no commit matches this commit ID.
 
   The local mirror may also be out of date - rerun with
   --update to fetch the latest before searching.
+
+  Searched:
+    upstream   /srv/kernel-src/upstream
+               HEAD 3e5c1f9a... 2025-09-02T11:24:07+00:00
+    rhel9      /srv/kernel-src/rhel9
+               HEAD 91ab77c2... 2025-08-28T09:10:51+00:00
 ```
 
-This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant. Note the last hint: the server keeps local clones, so a genuinely recent commit can be missing simply because the mirror is behind. Re-run with `--update` to fetch first.
+This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant.
+
+The `Searched:` block exists so a miss can be told apart from a misconfiguration: it lists the directory each repository resolved to and the commit its HEAD is on. A HEAD date months in the past explains a missing recent commit - re-run with `--update` to fetch first. A path pointing somewhere unexpected explains everything else.
 
 **Searching by subject**
 
@@ -1507,19 +1521,45 @@ Subject search is a case-insensitive literal search over the whole commit messag
 **More examples**
 
 ```
-crash> git find 0dd3ee311255 --stat                  # add a diffstat for each match
-crash> git find 0dd3ee311255 --patch                 # add the full diff
-crash> git find 0dd3ee311255 --repos=rhel8,rhel9     # check extra trees for the backport
-crash> git find 0dd3ee311255 --no-tags               # skip release-tag lookup, much faster
-crash> git find 0dd3ee311255 --no-backport           # upstream information only
-crash> git find 0dd3ee311255 --update                # refresh the mirrors before searching
-crash> git find --upstream=linux-next 0dd3ee311255   # search a different upstream tree
-crash> git find --subject=deadbeef                   # force subject mode for a hash-like string
+crash> git find <commit-id> --stat                # add a diffstat for each match
+crash> git find <commit-id> --patch               # add the full diff
+crash> git find <commit-id> --repos=rhel8,rhel9   # check extra trees for the backport
+crash> git find <commit-id> --no-tags             # skip release-tag lookup, much faster
+crash> git find <commit-id> --no-backport         # upstream information only
+crash> git find <commit-id> --update              # refresh the mirrors before searching
+crash> git find --upstream=linux-next <commit-id> # search a different upstream tree
+crash> git find --subject=deadbeef                # force subject mode for a hash-like string
 ```
+
+#### Trying it out ####
+
+To confirm the command works against your own mirrors, start from a commit you
+know is there rather than one copied out of a document. Ask the upstream tree
+for a real subject first, then feed the hash it prints back to `git find`:
+
+```
+crash> git find --subject=Linux 2.6.12-rc2 --no-backport --no-tags
+```
+
+That is the root commit of the linux git history, so it is present in any full
+clone of the upstream tree. Take the hash from the `[1/1] ...` line and run:
+
+```
+crash> git find <that hash> --no-tags
+```
+
+`--no-tags` matters for this particular check: every release tag contains the
+root commit, so the `first release` lookup has a lot of tags to walk. For an
+ordinary fix you can leave it off.
+
+If the first command finds nothing either, the problem is the server side
+rather than the query - check that the directory `git find` reported on the
+`Upstream repo` line really is a full clone of the upstream linux tree, and
+that it is not shallow (`git log` in it should reach back to 2005).
 
 Notes:
 
-- The upstream tree is the first directory named `upstream`, `linux`, `mainline` or `torvalds` under 'RHEL_SOURCE_DIR'. Use `--upstream=<dirname>` for anything else.
+- The upstream tree is the first directory named `upstream`, `linux`, `mainline` or `torvalds` under 'RHEL_SOURCE_DIR' that is a real git repository. Directories that exist but are not clones - an extracted tarball, say - are skipped rather than used. Use `--upstream=<dirname>` for anything else, and `--verbose` to print the path that was picked.
 - `git tag --contains` drives the `first release` lines and is the slowest part on a full linux tree. `--no-tags` drops those lines and returns much faster.
 - `running kernel` is only reported for RHEL style tags, since it compares against the `.elN` version taken from the vmcore.
 

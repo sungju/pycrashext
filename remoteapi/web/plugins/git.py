@@ -848,26 +848,42 @@ def resolve_repo_path(base_dir, repo_name):
     return repo_path, None
 
 
+def is_git_repo(path):
+    """Return True when path is inside/at a git repository."""
+    rc, _out, _err = run_git(path, ['rev-parse', '--git-dir'], timeout=30)
+    return rc == 0
+
+
 def find_upstream_repo(base_dir, preferred=''):
     """
     Locate the upstream linux repository under base_dir.
+
+    Directories that exist but are not git repositories are skipped, so an
+    extracted source tree sitting next to the real clones cannot shadow it.
 
     Args:
         base_dir: RHEL_SOURCE_DIR
         preferred: Comma separated repo names to try first (from --upstream)
 
     Returns:
-        tuple: (repo_name, repo_path) or (None, None) when nothing matches.
+        tuple: (repo_name, repo_path, skipped) where skipped lists names that
+               exist but are not git repositories. (None, None, skipped) when
+               nothing usable matches.
     """
     candidates = [n.strip() for n in preferred.split(',') if n.strip()]
     if not candidates:
         candidates = list(UPSTREAM_REPO_NAMES)
 
+    skipped = []
     for name in candidates:
         repo_path, _err = resolve_repo_path(base_dir, name)
-        if repo_path is not None:
-            return name, repo_path
-    return None, None
+        if repo_path is None:
+            continue
+        if not is_git_repo(repo_path):
+            skipped.append(name)
+            continue
+        return name, repo_path, skipped
+    return None, None, skipped
 
 
 def strip_tag_prefix(tag):
@@ -1064,23 +1080,28 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
 
     out = []
 
-    upstream_name, upstream_path = find_upstream_repo(base_dir, upstream_pref)
+    upstream_name, upstream_path, skipped = find_upstream_repo(base_dir, upstream_pref)
     if upstream_path is None:
         tried = upstream_pref if upstream_pref else ', '.join(UPSTREAM_REPO_NAMES)
-        return ("Error: No upstream repository found under %s\n"
-                "Tried: %s\n"
-                "Clone the upstream linux tree there, or pass --upstream=<dirname>."
-                % (base_dir, tried))
+        msg = ["Error: No upstream git repository found under %s" % base_dir,
+               "Tried: %s" % tried]
+        if skipped:
+            msg.append("These exist but are not git repositories: %s" %
+                       ', '.join(skipped))
+        msg.append("Clone the upstream linux tree there, or pass --upstream=<dirname>.")
+        return '\n'.join(msg)
 
     # RHEL repositories to cross-check for backports
     backport_repos = []
     rhel_path, rhel_name = get_current_rhel_dir(kernel_version)
-    if rhel_path is not None:
+    if rhel_path is not None and is_git_repo(rhel_path):
         backport_repos.append((rhel_name, rhel_path))
     for name in [r.strip() for r in extra_repos.split(',') if r.strip()]:
         repo_path, err = resolve_repo_path(base_dir, name)
         if repo_path is None:
             return "Error: %s" % err
+        if not is_git_repo(repo_path):
+            return "Error: '%s' is not a git repository (%s)" % (name, repo_path)
         if (name, repo_path) not in backport_repos:
             backport_repos.append((name, repo_path))
 
@@ -1099,7 +1120,8 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
     out.append(CYAN + "Query          : %s" % query + RESET)
     out.append(CYAN + "Match mode     : %s" % mode + RESET)
     out.append(CYAN + "Kernel version : %s" % kernel_version + RESET)
-    out.append(CYAN + "Upstream repo  : %s" % upstream_name + RESET)
+    out.append(CYAN + "Upstream repo  : %s%s" %
+               (upstream_name, " (%s)" % upstream_path if verbose else "") + RESET)
     if backport_repos:
         out.append(CYAN + "Backport check : %s" %
                    ', '.join(n for n, _p in backport_repos) + RESET)
@@ -1149,6 +1171,14 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         if not do_update:
             out.append("  The local mirror may also be out of date - rerun with")
             out.append("  --update to fetch the latest before searching.")
+        out.append("")
+        out.append("  Searched:")
+        for name, path in [(upstream_name, upstream_path)] + backport_repos:
+            rc, head, _err = run_git(path, ['log', '--max-count=1', '--format=%H %cI'],
+                                     timeout=60)
+            state = head.strip() if rc == 0 and head.strip() else "unreadable"
+            out.append("    %-10s %s" % (name, path))
+            out.append("    %-10s HEAD %s" % ("", state))
         out.append(BOLD_WHITE + separator + RESET)
         return '\n'.join(out)
 
