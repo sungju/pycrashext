@@ -52,6 +52,15 @@ CGIT_TREES = (
     ('kernel.org/linux-next',
      'https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git'),
 )
+# Where a match came from. A local mirror and a public tree often share a
+# name ('linux', 'torvalds'), so the name alone cannot say which was read;
+# every match is tagged with one of these instead. Colour is a hint only -
+# the word carries the meaning when output is piped or logged.
+ORIGIN_MARKERS = {
+    'local': ("\033[32m", "local"),    # green
+    'web':   ("\033[35m", "web"),      # magenta
+}
+
 GITHUB_API = 'https://api.github.com'
 GITHUB_REPO = 'torvalds/linux'
 GITHUB_ACCEPT = 'application/vnd.github+json'
@@ -1360,11 +1369,21 @@ def web_find(query, mode, max_count, timeout):
     return matches, notes
 
 
-def format_commit_block(index, total, commit, label, colors, url='', max_body_lines=20):
-    """Format the header block describing one matched commit."""
+def format_commit_block(index, total, commit, label, colors, url='', max_body_lines=20,
+                        origin='local'):
+    """
+    Format the header block describing one matched commit.
+
+    origin says where the match came from - 'local' for a mirror under the
+    server's git directory, 'web' for a public kernel source. A local mirror
+    and a public tree routinely carry the same name, so the origin is spelled
+    out on every match rather than left to the section it appears under.
+    """
     YELLOW, CYAN, BOLD_WHITE, RESET = colors
+    marker_colour, marker = ORIGIN_MARKERS.get(origin, ORIGIN_MARKERS['local'])
     lines = []
-    lines.append(YELLOW + "[%d/%d] %s  (%s)" % (index, total, commit['sha'], label) + RESET)
+    lines.append(YELLOW + "[%d/%d] %s  " % (index, total, commit['sha']) +
+                 marker_colour + "(%s: %s)" % (marker, label) + RESET)
     lines.append("    subject : " + BOLD_WHITE + commit['subject'] + RESET)
     lines.append("    author  : %s" % commit['author'])
     lines.append("    date    : %s" % commit['date'])
@@ -1442,10 +1461,10 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
     out.append(CYAN + "Query          : %s" % query + RESET)
     out.append(CYAN + "Match mode     : %s" % mode + RESET)
     out.append(CYAN + "Kernel version : %s" % kernel_version + RESET)
-    out.append(CYAN + "Upstream repo  : %s%s" %
+    out.append(CYAN + "Upstream repo  : local %s%s" %
                (upstream_name, " (%s)" % upstream_path if verbose else "") + RESET)
     if backport_repos:
-        out.append(CYAN + "Backport check : %s" %
+        out.append(CYAN + "Backport check : local %s" %
                    ', '.join(n for n, _p in backport_repos) + RESET)
     out.append(CYAN + "Web lookup     : %s" %
                ("off (PYCRASHEXT_NO_WEB)" if web_is_disabled() else
@@ -1511,17 +1530,20 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
             out.append("  --update to fetch the latest before searching.")
         out.append("")
         out.append("  Searched:")
+        local_marker = ORIGIN_MARKERS['local'][1]
+        web_marker = ORIGIN_MARKERS['web'][1]
         for name, path in [(upstream_name, upstream_path)] + backport_repos:
             rc, head, _err = run_git(path, ['log', '--max-count=1', '--format=%H %cI'],
                                      timeout=60)
             state = head.strip() if rc == 0 and head.strip() else "unreadable"
-            out.append("    %-10s %s" % (name, path))
-            out.append("    %-10s HEAD %s" % ("", state))
+            out.append("    %-5s %-22s %s" % (local_marker, name, path))
+            out.append("    %-5s %-22s HEAD %s" % ("", "", state))
         if use_web != 'never' and not web_is_disabled():
             if mode == 'commit':
-                for name, _base in CGIT_TREES:
-                    out.append("    %-10s %s" % (name, '(web)'))
-            out.append("    %-10s %s" % ('github', GITHUB_REPO + ' (web)'))
+                for name, base in CGIT_TREES:
+                    out.append("    %-5s %-22s %s" % (web_marker, name, base))
+            out.append("    %-5s %-22s https://github.com/%s" %
+                       (web_marker, 'github', GITHUB_REPO))
         for note in web_notes:
             out.append("  " + YELLOW + "web: %s" % note + RESET)
         out.append(BOLD_WHITE + separator + RESET)
@@ -1530,7 +1552,7 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
     for idx, (repo_name, repo_path, commit) in enumerate(matches, 1):
         out.extend(format_commit_block(idx, len(matches), commit, repo_name, colors,
                                        url=repo_browse_url(repo_path, commit['sha']),
-                                       max_body_lines=body_lines))
+                                       max_body_lines=body_lines, origin='local'))
         out.extend(describe_presence(repo_path, commit['sha'], kernel_version,
                                      check_tags, timeout, "    "))
 
@@ -1571,7 +1593,7 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         for idx, (source, commit) in enumerate(web_matches, 1):
             out.extend(format_commit_block(idx, len(web_matches), commit, source, colors,
                                            url=commit.get('url', ''),
-                                           max_body_lines=body_lines))
+                                           max_body_lines=body_lines, origin='web'))
 
             # We know the sha and subject now, so the local backport check can
             # still answer the question that actually matters.
