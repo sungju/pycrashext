@@ -1078,6 +1078,96 @@ def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, inden
     return lines
 
 
+def remote_browse_url(remote, sha):
+    """
+    Turn a git remote URL into a web URL for one commit.
+
+    The remote is what the clone was actually made from, so the link is real
+    rather than guessed. Returns '' for hosts we have no URL scheme for.
+    """
+    if not remote or not sha:
+        return ''
+    remote = remote.strip()
+
+    # scp style: git@host:path/repo.git
+    m = re.match(r'^[\w.+-]+@([^:/]+):(.+)$', remote)
+    if m:
+        host, path = m.group(1), m.group(2)
+    else:
+        m = re.match(r'^(?:https?|git|ssh|git\+ssh)://(?:[^@/]+@)?([^:/]+)(?::\d+)?/(.+)$',
+                     remote)
+        if not m:
+            return ''
+        host, path = m.group(1), m.group(2)
+
+    path = path.strip('/')
+    if not path:
+        return ''
+
+    if host == 'git.kernel.org':
+        # cgit wants the .git suffix kept in the path
+        if not path.endswith('.git'):
+            path += '.git'
+        return 'https://%s/%s/commit/?id=%s' % (host, path, sha)
+
+    if path.endswith('.git'):
+        path = path[:-4]
+    if host in ('github.com', 'www.github.com'):
+        return 'https://github.com/%s/commit/%s' % (path, sha)
+    if 'gitlab' in host:
+        return 'https://%s/%s/-/commit/%s' % (host, path, sha)
+    if 'googlesource.com' in host:
+        return 'https://%s/%s/+/%s' % (host, path, sha)
+
+    return ''
+
+
+_BROWSE_URL_CACHE = {}
+
+
+def repo_browse_url(repo_path, sha, timeout=30):
+    """Web URL for a commit in a local clone, or '' when we cannot build one."""
+    if repo_path not in _BROWSE_URL_CACHE:
+        rc, out, _err = run_git(repo_path, ['config', '--get', 'remote.origin.url'],
+                                timeout=timeout)
+        _BROWSE_URL_CACHE[repo_path] = out.strip() if rc == 0 else ''
+    return remote_browse_url(_BROWSE_URL_CACHE[repo_path], sha)
+
+
+def format_message_body(body, indent, max_lines=20):
+    """
+    Format a commit message body for the report.
+
+    Trailers (Signed-off-by: and friends) are dropped - they are long, and
+    never the reason somebody is reading the message here.
+    """
+    if not body or max_lines <= 0:
+        return []
+
+    lines = [l.rstrip() for l in body.strip('\n').split('\n')]
+    while lines and not lines[-1]:
+        lines.pop()
+    trailer = re.compile(r'^(Signed-off-by|Acked-by|Reviewed-by|Tested-by|Cc|'
+                         r'Reported-by|Suggested-by|Co-developed-by|Link|'
+                         r'Fixes|Closes|Bugzilla|Upstream Status|Reported-and-tested-by)'
+                         r'\s*:', re.IGNORECASE)
+    body_lines = [l for l in lines if not trailer.match(l)]
+    while body_lines and not body_lines[-1]:
+        body_lines.pop()
+    if not body_lines:
+        return []
+
+    out = [indent + "message :"]
+    shown = body_lines[:max_lines]
+    for line in shown:
+        out.append(indent + "    " + line)
+    hidden = len(body_lines) - len(shown)
+    if hidden > 0:
+        out.append(indent + "    ... (%d more line%s, use --patch to see it all)" %
+                   (hidden, "s" if hidden != 1 else ""))
+    return out
+
+
 def web_is_disabled():
     """True when the administrator turned web lookups off server-side."""
     return os.environ.get('PYCRASHEXT_NO_WEB', '').lower() in ('1', 'true', 'yes', 'on')
@@ -1153,8 +1243,18 @@ def parse_mbox_patch(text):
     if not subject:
         return None
 
+    # The message body runs from the end of the headers to the '---' that
+    # introduces the diffstat.
+    try:
+        payload = msg.get_payload()
+    except Exception:
+        payload = ''
+    if not isinstance(payload, str):
+        payload = ''
+    body = re.split(r'^---\s*$', payload, maxsplit=1, flags=re.MULTILINE)[0]
+
     return {'sha': sha, 'author': header('From'), 'date': header('Date'),
-            'subject': subject, 'body': ''}
+            'subject': subject, 'body': body}
 
 
 def github_commit_dict(data):
@@ -1164,12 +1264,13 @@ def github_commit_dict(data):
     message = commit.get('message') or ''
     name = author.get('name') or ''
     mail = author.get('email') or ''
+    parts = message.split('\n', 1)
     return {
         'sha': data.get('sha') or '',
         'author': ('%s <%s>' % (name, mail)).strip(),
         'date': author.get('date') or '',
-        'subject': message.split('\n', 1)[0].strip(),
-        'body': message,
+        'subject': parts[0].strip(),
+        'body': parts[1] if len(parts) > 1 else '',
         'url': data.get('html_url') or '',
     }
 
@@ -1253,7 +1354,7 @@ def web_find(query, mode, max_count, timeout):
     return matches, notes
 
 
-def format_commit_block(index, total, commit, label, colors):
+def format_commit_block(index, total, commit, label, colors, url='', max_body_lines=20):
     """Format the header block describing one matched commit."""
     YELLOW, CYAN, BOLD_WHITE, RESET = colors
     lines = []
@@ -1261,12 +1362,16 @@ def format_commit_block(index, total, commit, label, colors):
     lines.append("    subject : " + BOLD_WHITE + commit['subject'] + RESET)
     lines.append("    author  : %s" % commit['author'])
     lines.append("    date    : %s" % commit['date'])
+    if url:
+        lines.append("    url     : " + CYAN + url + RESET)
+    lines.extend(format_message_body(commit.get('body', ''), "    ", max_body_lines))
     return lines
 
 
 def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_repos,
                  max_count, check_backport, check_tags, show_patch, show_stat,
-                 do_update, verbose, timeout, use_web='auto', web_timeout=20):
+                 do_update, verbose, timeout, use_web='auto', web_timeout=20,
+                 body_lines=20):
     """
     Handle the 'find' subcommand: look a patch up in the upstream tree by
     subject or commit ID, then report whether it was backported into the
@@ -1274,6 +1379,7 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
 
     use_web selects when the public kernel sources are consulted: 'auto' only
     when the local mirrors come up empty, 'always' on every search, 'never'.
+    body_lines caps how much of each commit message is shown; 0 hides it.
     """
     YELLOW = "\033[33m"
     CYAN = "\033[36m"
@@ -1412,7 +1518,9 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         return '\n'.join(out)
 
     for idx, (repo_name, repo_path, commit) in enumerate(matches, 1):
-        out.extend(format_commit_block(idx, len(matches), commit, repo_name, colors))
+        out.extend(format_commit_block(idx, len(matches), commit, repo_name, colors,
+                                       url=repo_browse_url(repo_path, commit['sha']),
+                                       max_body_lines=body_lines))
         out.extend(describe_presence(repo_path, commit['sha'], kernel_version,
                                      check_tags, timeout, "    "))
 
@@ -1427,6 +1535,9 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                 out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
                            " as %s" % backport['sha'])
                 out.append("        matched by     : %s" % method)
+                backport_url = repo_browse_url(path, backport['sha'])
+                if backport_url:
+                    out.append("        url            : " + CYAN + backport_url + RESET)
                 out.extend(describe_presence(path, backport['sha'], kernel_version,
                                              check_tags, timeout, "        "))
 
@@ -1448,9 +1559,9 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         out.append("")
 
         for idx, (source, commit) in enumerate(web_matches, 1):
-            out.extend(format_commit_block(idx, len(web_matches), commit, source, colors))
-            if commit.get('url'):
-                out.append("    url     : %s" % commit['url'])
+            out.extend(format_commit_block(idx, len(web_matches), commit, source, colors,
+                                           url=commit.get('url', ''),
+                                           max_body_lines=body_lines))
 
             # We know the sha and subject now, so the local backport check can
             # still answer the question that actually matters.
@@ -1465,6 +1576,9 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                     out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
                                " as %s" % backport['sha'])
                     out.append("        matched by     : %s" % method)
+                    backport_url = repo_browse_url(path, backport['sha'])
+                    if backport_url:
+                        out.append("        url            : " + CYAN + backport_url + RESET)
                     out.extend(describe_presence(path, backport['sha'], kernel_version,
                                                  check_tags, timeout, "        "))
             out.append("")
@@ -1540,6 +1654,10 @@ def git_command():
             web_timeout = max(5, min(int(request.form.get('web_timeout', '20')), 300))
         except ValueError:
             web_timeout = 20
+        try:
+            body_lines = max(0, min(int(request.form.get('message_lines', '20')), 500))
+        except ValueError:
+            body_lines = 20
 
         mode = request.form.get('mode', 'auto')
         if mode not in ('auto', 'commit', 'subject'):
@@ -1565,7 +1683,8 @@ def git_command():
             verbose=verbose,
             timeout=git_timeout,
             use_web=use_web,
-            web_timeout=web_timeout)
+            web_timeout=web_timeout,
+            body_lines=body_lines)
 
     debug_print("[DEBUG] Parsing git options...")
     # Parse and validate git options

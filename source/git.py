@@ -183,6 +183,7 @@ def find(args):
     timeout = 3600
     use_web = 'auto'
     web_timeout = 20
+    message_lines = 20
     check_backport = True
     check_tags = True
     show_patch = False
@@ -251,6 +252,16 @@ def find(args):
                 print("Error: --web-timeout requires a number")
                 return
             continue
+        elif name == '--message-lines':
+            value, i = take_value(arg, i)
+            try:
+                message_lines = int(value)
+            except (TypeError, ValueError):
+                print("Error: --message-lines requires a number")
+                return
+            continue
+        elif arg == '--no-message':
+            message_lines = 0
         elif arg == '--web':
             use_web = 'always'
         elif arg == '--no-web':
@@ -300,6 +311,7 @@ def find(args):
         'update': str(do_update),
         'web': use_web,
         'web_timeout': str(web_timeout),
+        'message_lines': str(message_lines),
         'verbose': str(verbose),
         'kernel_version': get_kernel_version(),
         # Leave the server room to finish before the client gives up
@@ -397,6 +409,8 @@ def print_help_for_subcommand(subcommand):
         print("  --upstream=<name>  Upstream repo dir name (default: upstream,linux,")
         print("                     mainline,torvalds - first one that exists)")
         print("  --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)")
+        print("  --message-lines=<n> Lines of commit message to show (default: 20)")
+        print("  --no-message       Show only the subject, not the message body")
         print("  --web              Always query the public sources, even on a hit")
         print("  --no-web           Never query the public sources (local only)")
         print("  --web-timeout=<s>  Per-request web timeout in seconds (default: 20)")

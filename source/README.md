@@ -1406,6 +1406,8 @@ Options:
   --upstream=<name>  Upstream repo dir name (default: upstream,linux,
                      mainline,torvalds - first one that exists)
   --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)
+  --message-lines=<n> Lines of commit message to show (default: 20)
+  --no-message       Show only the subject, not the message body
   --web              Always query the public sources, even on a hit
   --no-web           Never query the public sources (local only)
   --web-timeout=<s>  Per-request web timeout in seconds (default: 20)
@@ -1449,9 +1451,15 @@ Backport check : rhel9
     subject : net/mlx5e: Fix crash moving to switchdev mode
     author  : A Developer <dev@example.com>
     date    : 2024-03-11T10:00:00+00:00
+    url     : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    message :
+        Moving to switchdev mode with bonded VFs crashed because the uplink
+        representor was freed before the bond netdev was unregistered.
+        Hold a reference until the notifier has run.
     first release  : v6.9-rc1
     rhel9 : BACKPORTED as ed390b904be9941b19c149bdc2320697b3f7996e
         matched by     : upstream commit ID referenced in commit message
+        url            : https://gitlab.com/redhat/rhel/src/kernel/rhel-9/-/commit/ed390b904be9941b19c149bdc2320697b3f7996e
         first release  : kernel-5.14.0-427.el9
         running kernel : PRESENT (5.14.0-427.13.1.el9_4.x86_64 >= kernel-5.14.0-427.el9)
 
@@ -1464,11 +1472,17 @@ The report is read from the bottom up:
 
 | Line | Meaning |
 |---|---|
+| `url` | Link to the commit, built from the repository's own `origin` remote |
+| `message` | The commit message body, minus `Signed-off-by:` and similar trailers |
 | `first release` (upstream) | Earliest upstream tag containing the commit, so the kernel version the fix landed in |
 | `BACKPORTED as <sha>` | The matching commit found in the RHEL tree |
 | `matched by` | How the match was made - see below |
 | `first release` (rhel) | Earliest `kernel-*` tag in the RHEL tree containing the backport |
 | `running kernel` | Whether the kernel in the vmcore is at or above that release |
+
+The message body makes the match self-explanatory - you can tell whether a commit is the one you were after without a second `git show`. It is capped at 20 lines; use `--message-lines=<n>` to change that, `--no-message` to drop it, or `--patch` to see the whole thing along with the diff.
+
+The `url` line is derived from `remote.origin.url` in the repository the commit came from, so it points at the tree that was actually cloned rather than a guessed location. kernel.org cgit, GitHub, GitLab and googlesource URLs are recognised; for any other host, and for a clone with no usable remote, the line is left out rather than guessed at.
 
 Backports are matched in two ways, strongest first:
 
@@ -1558,10 +1572,14 @@ the last fetch, or live in a tree that is not cloned here.
     author  : A Developer <dev@example.com>
     date    : Mon, 11 Mar 2024 10:00:00 +0000
     url     : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    message :
+        Moving to switchdev mode with bonded VFs crashed because the uplink
+        representor was freed before the bond netdev was unregistered.
+        Hold a reference until the notifier has run.
     rhel9 : NOT BACKPORTED (no matching commit found)
 ```
 
-The `first release` line is missing for these matches - working out the earliest tag containing a commit needs a local clone.
+Commit message and URL come back for these matches just as they do for local ones - the URL is the page the commit was read from, so it can be opened directly. The `first release` line is what is missing: working out the earliest tag containing a commit needs a local clone.
 
 Control it with:
 
@@ -1591,6 +1609,8 @@ crash> git find --upstream=linux-next <commit-id> # search a different upstream 
 crash> git find --subject=deadbeef                # force subject mode for a hash-like string
 crash> git find <commit-id> --web                 # ask the public sources too
 crash> git find <commit-id> --no-web              # local mirrors only
+crash> git find <commit-id> --no-message          # subject line only, no message body
+crash> git find <commit-id> --message-lines=100   # show a long commit message in full
 ```
 
 #### Trying it out ####
@@ -1628,6 +1648,7 @@ Notes:
 - The upstream tree is the first directory named `upstream`, `linux`, `mainline` or `torvalds` under 'RHEL_SOURCE_DIR' that is a real git repository. Directories that exist but are not clones - an extracted tarball, say - are skipped rather than used. Use `--upstream=<dirname>` for anything else, and `--verbose` to print the path that was picked.
 - The web fallback needs outbound HTTPS from the 'remoteapi' server, not from the machine running 'crash'. Standard `http_proxy` / `https_proxy` variables are honoured.
 - cgit answers an unresolvable commit ID with the tip of the tree rather than an error, so every web result is checked against the ID that was asked for before it is reported.
+- The `url` line needs the repository to have an `origin` remote pointing at a host whose URL layout is known. A bare mirror cloned from a local path has no public URL, so none is shown.
 - `git tag --contains` drives the `first release` lines and is the slowest part on a full linux tree. `--no-tags` drops those lines and returns much faster.
 - `running kernel` is only reported for RHEL style tags, since it compares against the `.elN` version taken from the vmcore.
 
