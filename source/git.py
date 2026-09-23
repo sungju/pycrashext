@@ -181,6 +181,8 @@ def find(args):
     upstream = ''
     max_count = 10
     timeout = 3600
+    use_web = 'auto'
+    web_timeout = 20
     check_backport = True
     check_tags = True
     show_patch = False
@@ -241,6 +243,18 @@ def find(args):
                 print("Error: --timeout requires a number")
                 return
             continue
+        elif name == '--web-timeout':
+            value, i = take_value(arg, i)
+            try:
+                web_timeout = int(value)
+            except (TypeError, ValueError):
+                print("Error: --web-timeout requires a number")
+                return
+            continue
+        elif arg == '--web':
+            use_web = 'always'
+        elif arg == '--no-web':
+            use_web = 'never'
         elif arg == '--no-backport':
             check_backport = False
         elif arg == '--no-tags':
@@ -284,6 +298,8 @@ def find(args):
         'show_patch': str(show_patch),
         'show_stat': str(show_stat),
         'update': str(do_update),
+        'web': use_web,
+        'web_timeout': str(web_timeout),
         'verbose': str(verbose),
         'kernel_version': get_kernel_version(),
         # Leave the server room to finish before the client gives up
@@ -369,6 +385,11 @@ def print_help_for_subcommand(subcommand):
         print("treated as a commit ID, anything else as subject text. Subject text")
         print("does not need quoting - all remaining words are joined.")
         print("")
+        print("When the local mirrors come up empty, the server also asks the")
+        print("public kernel sources (git.kernel.org cgit and the GitHub API for")
+        print("torvalds/linux). Any commit found there is still cross-checked for")
+        print("backports against the local RHEL trees.")
+        print("")
         print("Options:")
         print("  --commit=<id>      Force commit ID lookup")
         print("  --subject=<text>   Force subject text search")
@@ -376,6 +397,9 @@ def print_help_for_subcommand(subcommand):
         print("  --upstream=<name>  Upstream repo dir name (default: upstream,linux,")
         print("                     mainline,torvalds - first one that exists)")
         print("  --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)")
+        print("  --web              Always query the public sources, even on a hit")
+        print("  --no-web           Never query the public sources (local only)")
+        print("  --web-timeout=<s>  Per-request web timeout in seconds (default: 20)")
         print("  --no-backport      Skip the backport cross-check")
         print("  --no-tags          Skip the release-tag lookup (much faster)")
         print("  --patch, -p        Show the full diff of each match")
@@ -389,9 +413,12 @@ def print_help_for_subcommand(subcommand):
         print("  git find net/mlx5e: Fix crash moving to switchdev mode")
         print("  git find --subject=\"use-after-free in nf_tables\" --max-count=20")
         print("  git find <commit-id> --repos=rhel8,rhel9 --stat")
+        print("  git find <commit-id> --web        # ask the public sources too")
+        print("  git find <commit-id> --no-web     # local mirrors only")
         print("")
-        print("A commit ID that is reported as NOT FOUND does not exist in the")
-        print("searched trees - useful for checking a suggested or quoted fix.")
+        print("A commit ID that is reported as NOT FOUND exists neither in the")
+        print("local trees nor on the public kernel sources - useful for checking")
+        print("a suggested or quoted fix.")
 
 
 if __name__ == '__main__':

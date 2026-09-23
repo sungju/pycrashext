@@ -1,15 +1,21 @@
 """
-remoteapi plugin: /api/git endpoint running git log/show in kernel source repositories.
+remoteapi plugin: /api/git endpoint running git log/show/find in kernel source repositories.
 
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from flask import Flask, request
+import email
+import email.header
+import json
 import os
 import subprocess
 import re
 import shlex
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 
 # Import kernel version utilities from pycrashext source directory
 try:
@@ -33,6 +39,26 @@ GIT_LOG_FORMAT = ('--format=%H' + GIT_FIELD_SEP + '%an <%ae>' + GIT_FIELD_SEP +
                   '%aI' + GIT_FIELD_SEP + '%s' + GIT_FIELD_SEP + '%b' + GIT_REC_SEP)
 
 COMMIT_ID_RE = re.compile(r'^[0-9a-fA-F]{7,40}$')
+
+# Public sources consulted when the local mirrors come up empty. cgit's
+# /patch/?id= endpoint answers with a plain mbox patch, which is both
+# authoritative and trivial to parse; the GitHub API is the only one of the
+# two that can search commit messages by text.
+CGIT_TREES = (
+    ('kernel.org/torvalds',
+     'https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git'),
+    ('kernel.org/stable',
+     'https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git'),
+    ('kernel.org/linux-next',
+     'https://git.kernel.org/pub/scm/linux/kernel/git/next/linux-next.git'),
+)
+GITHUB_API = 'https://api.github.com'
+GITHUB_REPO = 'torvalds/linux'
+GITHUB_ACCEPT = 'application/vnd.github+json'
+WEB_USER_AGENT = 'pycrashext-git-find'
+# Enough for the mail headers of even a very wordy commit message; the diff
+# that follows is of no interest here.
+PATCH_HEADER_BYTES = 64 * 1024
 
 
 def debug_print(msg):
@@ -110,21 +136,23 @@ def colorize_git_output(text):
     return '\n'.join(colored_lines)
 
 
-def get_current_rhel_dir(kernel_version='unknown'):
+def get_current_rhel_dir(kernel_version='unknown', base_dir=None):
     """
     Determine the current RHEL source directory based on kernel version from vmcore.
 
     Args:
         kernel_version: Kernel version string from crash dump
+        base_dir: Directory holding the repos; defaults to RHEL_SOURCE_DIR
 
     Returns:
         tuple: (rhel_dir, version_name) e.g., ('/path/to/rhel8', 'rhel8')
                 or (None, None) if version cannot be detected
     """
-    try:
-        base_dir = os.environ['RHEL_SOURCE_DIR']
-    except KeyError:
-        return None, None
+    if base_dir is None:
+        try:
+            base_dir = os.environ['RHEL_SOURCE_DIR']
+        except KeyError:
+            return None, None
 
     # Detect RHEL version from kernel version string
     detected_version = None
@@ -1050,6 +1078,181 @@ def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, inden
     return lines
 
 
+def web_is_disabled():
+    """True when the administrator turned web lookups off server-side."""
+    return os.environ.get('PYCRASHEXT_NO_WEB', '').lower() in ('1', 'true', 'yes', 'on')
+
+
+def http_get(url, timeout, accept=None, max_bytes=0):
+    """
+    Fetch a URL. Proxies are taken from the usual http_proxy/https_proxy
+    environment variables.
+
+    max_bytes caps how much of the body is read (0 means no cap). A tree-wide
+    patch can run to hundreds of megabytes and we only ever need the mail
+    headers at the top of it.
+
+    Returns:
+        tuple: (body_text, error). error is None on success, 'HTTP 404' when
+               the resource simply is not there, an error string otherwise.
+    """
+    headers = {'User-Agent': WEB_USER_AGENT}
+    if accept:
+        headers['Accept'] = accept
+    token = os.environ.get('GITHUB_TOKEN', '')
+    if token and url.startswith(GITHUB_API):
+        headers['Authorization'] = 'Bearer ' + token
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        response = urllib.request.urlopen(req, timeout=timeout)
+        try:
+            raw = response.read(max_bytes) if max_bytes > 0 else response.read()
+            return raw.decode('utf-8', 'replace'), None
+        finally:
+            response.close()
+    except urllib.error.HTTPError as e:
+        if e.code == 403:
+            return None, 'HTTP 403 (rate limited? set GITHUB_TOKEN to raise the limit)'
+        return None, 'HTTP %d' % e.code
+    except urllib.error.URLError as e:
+        return None, str(e.reason)
+    except Exception as e:
+        return None, str(e)
+
+
+def parse_mbox_patch(text):
+    """
+    Parse a cgit /patch/ response (an mbox formatted patch) into a commit
+    dictionary. Returns None when the body is not a patch, which is how cgit
+    answers for an unknown commit ID.
+    """
+    if not text or not text.startswith('From '):
+        return None
+    m = re.match(r'^From ([0-9a-f]{7,40})', text)
+    if not m:
+        return None
+    sha = m.group(1)
+
+    if '\n' not in text:
+        return None
+    try:
+        msg = email.message_from_string(text.split('\n', 1)[1])
+    except Exception:
+        return None
+
+    def header(name):
+        raw = msg.get(name, '')
+        try:
+            return str(email.header.make_header(email.header.decode_header(raw)))
+        except Exception:
+            return raw
+
+    # cgit formats the subject as a patch mail, so drop the [PATCH] prefix
+    subject = re.sub(r'^\[[^\]]*PATCH[^\]]*\]\s*', '', header('Subject')).strip()
+    if not subject:
+        return None
+
+    return {'sha': sha, 'author': header('From'), 'date': header('Date'),
+            'subject': subject, 'body': ''}
+
+
+def github_commit_dict(data):
+    """Turn a GitHub commit API object into our commit dictionary."""
+    commit = data.get('commit') or {}
+    author = commit.get('author') or {}
+    message = commit.get('message') or ''
+    name = author.get('name') or ''
+    mail = author.get('email') or ''
+    return {
+        'sha': data.get('sha') or '',
+        'author': ('%s <%s>' % (name, mail)).strip(),
+        'date': author.get('date') or '',
+        'subject': message.split('\n', 1)[0].strip(),
+        'body': message,
+        'url': data.get('html_url') or '',
+    }
+
+
+def github_commit(sha, timeout):
+    """Look a commit up by ID through the GitHub API."""
+    url = '%s/repos/%s/commits/%s' % (GITHUB_API, GITHUB_REPO,
+                                      urllib.parse.quote(sha, safe=''))
+    body, err = http_get(url, timeout, accept=GITHUB_ACCEPT)
+    if body is None:
+        return None, err
+    try:
+        data = json.loads(body)
+    except ValueError as e:
+        return None, 'unreadable response (%s)' % e
+    commit = github_commit_dict(data)
+    return (commit, None) if commit['sha'] else (None, 'HTTP 404')
+
+
+def github_search(text, max_count, timeout):
+    """Search commit messages through the GitHub commit search API."""
+    query = '%s repo:%s' % (text, GITHUB_REPO)
+    url = '%s/search/commits?q=%s&per_page=%d' % (
+        GITHUB_API, urllib.parse.quote(query, safe=''), min(max(max_count, 1), 100))
+    body, err = http_get(url, timeout, accept=GITHUB_ACCEPT)
+    if body is None:
+        return None, err
+    try:
+        data = json.loads(body)
+    except ValueError as e:
+        return None, 'unreadable response (%s)' % e
+    items = data.get('items') or []
+    return [github_commit_dict(i) for i in items[:max_count]], None
+
+
+def web_find(query, mode, max_count, timeout):
+    """
+    Look a patch up on the public kernel sources.
+
+    Returns:
+        tuple: (matches, notes) where matches is a list of (source, commit)
+               and notes carries per-source problems worth showing. A plain
+               'not here' answer is not a note.
+    """
+    matches = []
+    notes = []
+
+    def note(source, err):
+        # 404, and GitHub's 422 for an unknown sha, just mean "not in this tree"
+        if err and err not in ('HTTP 404', 'HTTP 422'):
+            notes.append('%s: %s' % (source, err))
+
+    if mode == 'commit':
+        for name, base in CGIT_TREES:
+            url = '%s/patch/?id=%s' % (base, urllib.parse.quote(query, safe=''))
+            body, err = http_get(url, timeout, max_bytes=PATCH_HEADER_BYTES)
+            if body is None:
+                note(name, err)
+                continue
+            commit = parse_mbox_patch(body)
+            # cgit answers an unresolvable id with HEAD rather than a 404, so
+            # never trust a patch whose sha is not the one we asked for.
+            if commit is not None and commit['sha'].startswith(query.lower()):
+                commit['url'] = '%s/commit/?id=%s' % (base, commit['sha'])
+                matches.append((name, commit))
+                return matches, notes
+
+        commit, err = github_commit(query, timeout)
+        if commit is not None and commit['sha'].startswith(query.lower()):
+            matches.append(('github/' + GITHUB_REPO, commit))
+        else:
+            note('github', err)
+    else:
+        commits, err = github_search(query, max_count, timeout)
+        if commits:
+            for commit in commits:
+                matches.append(('github/' + GITHUB_REPO, commit))
+        else:
+            note('github', err)
+
+    return matches, notes
+
+
 def format_commit_block(index, total, commit, label, colors):
     """Format the header block describing one matched commit."""
     YELLOW, CYAN, BOLD_WHITE, RESET = colors
@@ -1063,11 +1266,14 @@ def format_commit_block(index, total, commit, label, colors):
 
 def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_repos,
                  max_count, check_backport, check_tags, show_patch, show_stat,
-                 do_update, verbose, timeout):
+                 do_update, verbose, timeout, use_web='auto', web_timeout=20):
     """
     Handle the 'find' subcommand: look a patch up in the upstream tree by
     subject or commit ID, then report whether it was backported into the
     RHEL tree matching the vmcore.
+
+    use_web selects when the public kernel sources are consulted: 'auto' only
+    when the local mirrors come up empty, 'always' on every search, 'never'.
     """
     YELLOW = "\033[33m"
     CYAN = "\033[36m"
@@ -1093,16 +1299,16 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
 
     # RHEL repositories to cross-check for backports
     backport_repos = []
-    rhel_path, rhel_name = get_current_rhel_dir(kernel_version)
+    rhel_path, rhel_name = get_current_rhel_dir(kernel_version, base_dir)
     if rhel_path is not None and is_git_repo(rhel_path):
-        backport_repos.append((rhel_name, rhel_path))
+        backport_repos.append((rhel_name, os.path.normpath(rhel_path)))
     for name in [r.strip() for r in extra_repos.split(',') if r.strip()]:
         repo_path, err = resolve_repo_path(base_dir, name)
         if repo_path is None:
             return "Error: %s" % err
         if not is_git_repo(repo_path):
             return "Error: '%s' is not a git repository (%s)" % (name, repo_path)
-        if (name, repo_path) not in backport_repos:
+        if repo_path not in [p for _n, p in backport_repos]:
             backport_repos.append((name, repo_path))
 
     if do_update:
@@ -1125,6 +1331,10 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
     if backport_repos:
         out.append(CYAN + "Backport check : %s" %
                    ', '.join(n for n, _p in backport_repos) + RESET)
+    out.append(CYAN + "Web lookup     : %s" %
+               ("off (PYCRASHEXT_NO_WEB)" if web_is_disabled() else
+                {'always': 'always', 'never': 'off'}.get(use_web,
+                                                         'on local miss')) + RESET)
     out.append(BOLD_WHITE + separator + RESET)
     out.append("")
 
@@ -1153,7 +1363,17 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                 if found:
                     break
 
-    if not matches:
+    # The local mirrors can be stale, or the patch may be too new / in a tree
+    # nobody cloned here. Ask the public sources before giving up.
+    web_matches = []
+    web_notes = []
+    if use_web == 'always' or (use_web == 'auto' and not matches):
+        if web_is_disabled():
+            web_notes.append('web lookup is disabled on the server (PYCRASHEXT_NO_WEB)')
+        else:
+            web_matches, web_notes = web_find(query, mode, max_count, web_timeout)
+
+    if not matches and not web_matches:
         out.append(RED + "NOT FOUND: no commit matches this %s." %
                    ("commit ID" if mode == 'commit' else "subject text") + RESET)
         out.append("")
@@ -1162,6 +1382,8 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                        (upstream_name,
                         " or " + ', '.join(n for n, _p in backport_repos)
                         if backport_repos else ""))
+            if use_web != 'never' and not web_is_disabled():
+                out.append("  It is not on the public kernel sources either.")
             out.append("  A suggested commit ID that cannot be found here is very")
             out.append("  likely wrong - double check it before relying on it.")
         else:
@@ -1179,6 +1401,13 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
             state = head.strip() if rc == 0 and head.strip() else "unreadable"
             out.append("    %-10s %s" % (name, path))
             out.append("    %-10s HEAD %s" % ("", state))
+        if use_web != 'never' and not web_is_disabled():
+            if mode == 'commit':
+                for name, _base in CGIT_TREES:
+                    out.append("    %-10s %s" % (name, '(web)'))
+            out.append("    %-10s %s" % ('github', GITHUB_REPO + ' (web)'))
+        for note in web_notes:
+            out.append("  " + YELLOW + "web: %s" % note + RESET)
         out.append(BOLD_WHITE + separator + RESET)
         return '\n'.join(out)
 
@@ -1210,9 +1439,45 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
 
         out.append("")
 
+    if web_matches:
+        out.append(BOLD_WHITE + "Found on public kernel sources" + RESET)
+        if not matches:
+            out.append(YELLOW + "The local mirror does not have this commit - it may be "
+                       "newer than\nthe last fetch, or live in a tree that is not "
+                       "cloned here." + RESET)
+        out.append("")
+
+        for idx, (source, commit) in enumerate(web_matches, 1):
+            out.extend(format_commit_block(idx, len(web_matches), commit, source, colors))
+            if commit.get('url'):
+                out.append("    url     : %s" % commit['url'])
+
+            # We know the sha and subject now, so the local backport check can
+            # still answer the question that actually matters.
+            if check_backport:
+                for name, path in backport_repos:
+                    backport, method = find_backport(path, commit['sha'],
+                                                     commit['subject'], timeout=timeout)
+                    if backport is None:
+                        out.append("    %s : " % name + RED + "NOT BACKPORTED" + RESET +
+                                   " (no matching commit found)")
+                        continue
+                    out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
+                               " as %s" % backport['sha'])
+                    out.append("        matched by     : %s" % method)
+                    out.extend(describe_presence(path, backport['sha'], kernel_version,
+                                                 check_tags, timeout, "        "))
+            out.append("")
+
+    for note in web_notes:
+        out.append(YELLOW + "web: %s" % note + RESET)
+    if web_notes:
+        out.append("")
+
+    total = len(matches) + len(web_matches)
     out.append(BOLD_WHITE + separator + RESET)
     out.append(BOLD_WHITE + "Complete - %d match%s" %
-               (len(matches), "es" if len(matches) != 1 else "") + RESET)
+               (total, "es" if total != 1 else "") + RESET)
     out.append(BOLD_WHITE + separator + RESET)
     return '\n'.join(out)
 
@@ -1271,10 +1536,18 @@ def git_command():
             git_timeout = max(10, min(int(request.form.get('git_timeout', '600')), 3600))
         except ValueError:
             git_timeout = 600
+        try:
+            web_timeout = max(5, min(int(request.form.get('web_timeout', '20')), 300))
+        except ValueError:
+            web_timeout = 20
 
         mode = request.form.get('mode', 'auto')
         if mode not in ('auto', 'commit', 'subject'):
             mode = 'auto'
+
+        use_web = request.form.get('web', 'auto')
+        if use_web not in ('auto', 'always', 'never'):
+            use_web = 'auto'
 
         return find_command(
             query=query,
@@ -1290,7 +1563,9 @@ def git_command():
             show_stat=request.form.get('show_stat', 'False') == 'True',
             do_update=request.form.get('update', 'False') == 'True',
             verbose=verbose,
-            timeout=git_timeout)
+            timeout=git_timeout,
+            use_web=use_web,
+            web_timeout=web_timeout)
 
     debug_print("[DEBUG] Parsing git options...")
     # Parse and validate git options

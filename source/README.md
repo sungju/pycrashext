@@ -1389,11 +1389,11 @@ crash> git log -Sinit_new_ldt --repos=rhel9,upstream
 
 `git find` answers a different question from `log`/`show`: *does this patch exist, and does this kernel have it?*
 
-It looks the patch up in the upstream linux tree, then cross-checks the RHEL tree that matches the vmcore, and reports which release first carried the commit on both sides. Typical uses:
+It looks the patch up in the upstream linux tree, then cross-checks the RHEL tree that matches the vmcore, and reports which release first carried the commit on both sides. When the local mirrors come up empty it falls back to the public kernel sources, so a stale or incomplete clone on the server no longer turns into a false "does not exist". Typical uses:
 
 - Check whether a fix you found upstream was ever backported, and whether the crashed kernel is new enough to have it.
 - Turn a subject line from a bug report, a KCS article or a mailing list thread into a real commit ID.
-- Verify that a commit ID or subject somebody quoted - including one suggested by an AI - actually exists. A commit that `git find` cannot locate does not exist in the searched trees.
+- Verify that a commit ID or subject somebody quoted - including one suggested by an AI - actually exists. A commit that `git find` cannot locate exists in neither the local trees nor the public ones.
 
 ```
 crash> git find -h
@@ -1406,6 +1406,9 @@ Options:
   --upstream=<name>  Upstream repo dir name (default: upstream,linux,
                      mainline,torvalds - first one that exists)
   --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)
+  --web              Always query the public sources, even on a hit
+  --no-web           Never query the public sources (local only)
+  --web-timeout=<s>  Per-request web timeout in seconds (default: 20)
   --no-backport      Skip the backport cross-check
   --no-tags          Skip the release-tag lookup (much faster)
   --patch, -p        Show the full diff of each match
@@ -1493,6 +1496,7 @@ crash> git find deadbeefdead
 NOT FOUND: no commit matches this commit ID.
 
   The commit ID does not exist in 'upstream' or rhel9.
+  It is not on the public kernel sources either.
   A suggested commit ID that cannot be found here is very
   likely wrong - double check it before relying on it.
 
@@ -1504,9 +1508,13 @@ NOT FOUND: no commit matches this commit ID.
                HEAD 3e5c1f9a... 2025-09-02T11:24:07+00:00
     rhel9      /srv/kernel-src/rhel9
                HEAD 91ab77c2... 2025-08-28T09:10:51+00:00
+    kernel.org/torvalds (web)
+    kernel.org/stable (web)
+    kernel.org/linux-next (web)
+    github     torvalds/linux (web)
 ```
 
-This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant.
+This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant. Because the public sources were consulted too, a miss here is a strong statement: the commit does not exist in mainline, stable or linux-next, not merely in the server's clones.
 
 The `Searched:` block exists so a miss can be told apart from a misconfiguration: it lists the directory each repository resolved to and the commit its HEAD is on. A HEAD date months in the past explains a missing recent commit - re-run with `--update` to fetch first. A path pointing somewhere unexpected explains everything else.
 
@@ -1517,6 +1525,58 @@ crash> git find --max-count=5 use-after-free in nf_tables
 ```
 
 Subject search is a case-insensitive literal search over the whole commit message, not just the subject line, so a distinctive fragment works better than a full subject with punctuation. If nothing matches upstream, the RHEL trees are searched as a fallback - a match reported with `(rhel9)` instead of `(upstream)` is a RHEL-only patch with no upstream equivalent.
+
+**Falling back to the public kernel sources**
+
+A local mirror is only as fresh as its last fetch, and no server carries every tree. When nothing matches locally, the query goes out to the public sources instead of reporting a miss:
+
+| Source | Used for |
+|---|---|
+| `git.kernel.org` cgit - torvalds, stable and linux-next | Commit ID lookups. The `/patch/` endpoint returns the real commit mail, so the answer is authoritative. |
+| GitHub API - `torvalds/linux` | Commit ID lookups that the cgit trees miss, and all subject searches. It is the only one of the two that can search commit messages. |
+
+A commit found this way is still cross-checked against the local RHEL trees, so the backport verdict - the part that actually matters - is unaffected:
+
+```
+crash> git find <commit-id>
+================================================================================
+Git Find Results
+Query          : 0dd3ee311255
+Match mode     : commit
+Kernel version : 5.14.0-427.13.1.el9_4.x86_64
+Upstream repo  : upstream
+Backport check : rhel9
+Web lookup     : on local miss
+================================================================================
+
+Found on public kernel sources
+The local mirror does not have this commit - it may be newer than
+the last fetch, or live in a tree that is not cloned here.
+
+[1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (kernel.org/torvalds)
+    subject : net/mlx5e: Fix crash moving to switchdev mode
+    author  : A Developer <dev@example.com>
+    date    : Mon, 11 Mar 2024 10:00:00 +0000
+    url     : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    rhel9 : NOT BACKPORTED (no matching commit found)
+```
+
+The `first release` line is missing for these matches - working out the earliest tag containing a commit needs a local clone.
+
+Control it with:
+
+```
+crash> git find <commit-id>              # local first, web only on a miss (default)
+crash> git find <commit-id> --web        # always ask the public sources as well
+crash> git find <commit-id> --no-web     # local mirrors only
+```
+
+The header's `Web lookup` line always states which of the three applied. A source that is simply missing the commit is not mentioned; a source that failed for another reason - rate limiting, a proxy, a timeout - is reported as a `web:` note, so a network problem is never silently reported as NOT FOUND.
+
+Two server-side environment variables affect this:
+
+- `PYCRASHEXT_NO_WEB=1` turns the fallback off entirely, for servers that must not reach the internet. The header then reads `off (PYCRASHEXT_NO_WEB)`.
+- `GITHUB_TOKEN` raises the GitHub API rate limit from 60 to 5000 requests/hour. Without it, heavy use eventually produces an `HTTP 403` note.
 
 **More examples**
 
@@ -1529,6 +1589,8 @@ crash> git find <commit-id> --no-backport         # upstream information only
 crash> git find <commit-id> --update              # refresh the mirrors before searching
 crash> git find --upstream=linux-next <commit-id> # search a different upstream tree
 crash> git find --subject=deadbeef                # force subject mode for a hash-like string
+crash> git find <commit-id> --web                 # ask the public sources too
+crash> git find <commit-id> --no-web              # local mirrors only
 ```
 
 #### Trying it out ####
@@ -1557,9 +1619,15 @@ rather than the query - check that the directory `git find` reported on the
 `Upstream repo` line really is a full clone of the upstream linux tree, and
 that it is not shallow (`git log` in it should reach back to 2005).
 
+To check the web fallback separately, run a lookup with `--no-web` and then
+without it. A commit that only turns up on the second run came from the public
+sources, which also tells you the local mirror is behind.
+
 Notes:
 
 - The upstream tree is the first directory named `upstream`, `linux`, `mainline` or `torvalds` under 'RHEL_SOURCE_DIR' that is a real git repository. Directories that exist but are not clones - an extracted tarball, say - are skipped rather than used. Use `--upstream=<dirname>` for anything else, and `--verbose` to print the path that was picked.
+- The web fallback needs outbound HTTPS from the 'remoteapi' server, not from the machine running 'crash'. Standard `http_proxy` / `https_proxy` variables are honoured.
+- cgit answers an unresolvable commit ID with the tip of the tree rather than an error, so every web result is checked against the ID that was asked for before it is reported.
 - `git tag --contains` drives the `first release` lines and is the slowest part on a full linux tree. `--no-tags` drops those lines and returns much faster.
 - `running kernel` is only reported for RHEL style tags, since it compares against the `.elN` version taken from the vmcore.
 

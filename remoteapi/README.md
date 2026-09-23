@@ -44,6 +44,7 @@ $ export RHEL_SOURCE_DIR="/Users/sungju/source"
 
 - It does not need every repository — only the ones you plan to use.
 - `git find` needs an upstream linux tree. It uses the first directory it finds named `upstream`, `linux`, `mainline` or `torvalds`; pass `--upstream=<dirname>` to point it elsewhere.
+- When those repositories do not have the commit, `git find` falls back to the public kernel sources (`git.kernel.org` cgit for torvalds/stable/linux-next, and the GitHub API for `torvalds/linux`). This needs outbound HTTPS from the server; `http_proxy`/`https_proxy` are honoured. Set `PYCRASHEXT_NO_WEB=1` to disable it, and `GITHUB_TOKEN` to lift the GitHub rate limit.
 
 ### Configure 'insights' rules (optional) ###
 
@@ -65,6 +66,8 @@ $ export INSIGHTS_RULES="/home/sungju/support-rules:/home/sungju/new-rules"
 | INSIGHTS_RULES | (unset) | Colon-separated list of extra insights rule directories |
 | PYCRASHEXT_API_KEY | (unset) | If set, requests must send a matching `X-API-Key` header; otherwise auth is disabled |
 | PYCRASHEXT_DEBUG | (unset) | Set to `1`/`true`/`yes` to enable Flask reloader/debug behavior |
+| PYCRASHEXT_NO_WEB | (unset) | Set to `1`/`true`/`yes` to stop `git find` from consulting the public kernel sources |
+| GITHUB_TOKEN | (unset) | Optional GitHub token used by `git find`; raises the API rate limit from 60 to 5000 requests/hour |
 
 ## Launching the server ##
 
