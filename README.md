@@ -54,7 +54,7 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **devinfo** | Device information |
 | **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
 | **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style) |
-| **git** | Run `git log`/`git show` on remote kernel source repos (needs remoteapi) |
+| **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel (needs remoteapi) |
 | **hangcheck** | Show hung (D-state) tasks with details |
 | **insights** | Run insights rules (needs remoteapi; currently deprecated) |
 | **ipcinfo** | IPC information |

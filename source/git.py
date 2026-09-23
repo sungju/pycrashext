@@ -1,5 +1,5 @@
 """
-'git' command: run git log/show in remote kernel source repositories through the remoteapi server.
+'git' command: run git log/show/find in remote kernel source repositories through the remoteapi server.
 
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
@@ -30,10 +30,10 @@ def git():
     # Determine subcommand (log or show)
     subcommand = args[0]
 
-    if subcommand not in ['log', 'show']:
+    if subcommand not in ['log', 'show', 'find']:
         print("Error: Invalid subcommand '%s'" % subcommand)
-        print("Usage: git <log|show> [options]")
-        print("Try 'git log --help' or 'git show --help'")
+        print("Usage: git <log|show|find> [options]")
+        print("Try 'git log --help', 'git show --help' or 'git find --help'")
         return
 
     # Parse options
@@ -43,6 +43,11 @@ def git():
     all_versions = False
     git_options = []
     remaining_args = args[1:]
+
+    # 'find' has its own option set and is dispatched separately
+    if subcommand == 'find':
+        find(remaining_args)
+        return
 
     i = 0
     while i < len(remaining_args):
@@ -89,26 +94,12 @@ def git():
             i += 1
 
     # Check if CRASHEXT_SERVER is configured
-    try:
-        server_url = os.environ['CRASHEXT_SERVER']
-    except:
-        print("CRASHEXT_SERVER environment variable not configured")
-        print("\nPlease set it to your remote source server URL:")
-        print("  export CRASHEXT_SERVER=http://your-server:5000")
+    server_url = get_server_url()
+    if server_url is None:
         return
 
     # Get kernel version for context (same approach as edis.py)
-    kernel_ver = "unknown"
-    try:
-        sys_output = exec_crash_command("sys")
-        for line in sys_output.splitlines():
-            words = line.split()
-            if len(words) >= 2 and words[0] == "RELEASE:":
-                kernel_ver = words[1]
-                break
-    except Exception as e:
-        print("Warning: Could not detect kernel version: %s" % str(e))
-        kernel_ver = "unknown"
+    kernel_ver = get_kernel_version()
 
     # Prepare request data
     data = {
@@ -120,12 +111,42 @@ def git():
         'all_versions': str(all_versions)
     }
 
-    # Make API request
+    if verbose:
+        print("Executing: git %s %s" % (subcommand, ' '.join(git_options)))
+
+    send_request(server_url, data, timeout, verbose)
+
+
+def get_server_url():
+    """Return CRASHEXT_SERVER, or None (with an explanation) when unset."""
+    try:
+        return os.environ['CRASHEXT_SERVER']
+    except KeyError:
+        print("CRASHEXT_SERVER environment variable not configured")
+        print("\nPlease set it to your remote source server URL:")
+        print("  export CRASHEXT_SERVER=http://your-server:5000")
+        return None
+
+
+def get_kernel_version():
+    """Read the kernel release from the dump, or 'unknown' when unavailable."""
+    try:
+        sys_output = exec_crash_command("sys")
+        for line in sys_output.splitlines():
+            words = line.split()
+            if len(words) >= 2 and words[0] == "RELEASE:":
+                return words[1]
+    except Exception as e:
+        print("Warning: Could not detect kernel version: %s" % str(e))
+    return "unknown"
+
+
+def send_request(server_url, data, timeout, verbose):
+    """POST the request to /api/git and print the server's response."""
     api_url = server_url + '/api/git'
 
     try:
         if verbose:
-            print("Executing: git %s %s" % (subcommand, ' '.join(git_options)))
             print("Connecting to: %s" % api_url)
             print("Timeout: %d seconds (%d minutes)" % (timeout, timeout // 60))
 
@@ -149,12 +170,140 @@ def git():
         print("Unexpected error: %s" % str(e))
 
 
+def find(args):
+    """
+    'git find' - look a patch up in the upstream tree by subject or commit ID
+    and report whether it was backported into the RHEL tree of this vmcore.
+    """
+    query_words = []
+    mode = 'auto'
+    repos = ''
+    upstream = ''
+    max_count = 10
+    timeout = 3600
+    check_backport = True
+    check_tags = True
+    show_patch = False
+    show_stat = False
+    do_update = False
+    verbose = False
+
+    def take_value(arg, index):
+        """Return (value, next_index) for '--opt value' or '--opt=value'."""
+        if '=' in arg:
+            return arg.split('=', 1)[1], index + 1
+        if index + 1 < len(args):
+            return args[index + 1], index + 2
+        return None, index + 1
+
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        name = arg.split('=', 1)[0]
+
+        if arg in ('--help', '-h'):
+            print_help_for_subcommand('find')
+            return
+        elif name in ('--commit', '--subject') and ('=' in arg):
+            mode = 'commit' if name == '--commit' else 'subject'
+            value, i = take_value(arg, i)
+            query_words.append(value)
+            continue
+        elif arg in ('--commit', '--subject'):
+            mode = 'commit' if arg == '--commit' else 'subject'
+            i += 1
+            continue
+        elif name == '--repos':
+            repos, i = take_value(arg, i)
+            if repos is None:
+                print("Error: --repos requires an argument")
+                return
+            continue
+        elif name == '--upstream':
+            upstream, i = take_value(arg, i)
+            if upstream is None:
+                print("Error: --upstream requires an argument")
+                return
+            continue
+        elif name in ('--max-count', '-n'):
+            value, i = take_value(arg, i)
+            try:
+                max_count = int(value)
+            except (TypeError, ValueError):
+                print("Error: %s requires a number" % name)
+                return
+            continue
+        elif name == '--timeout':
+            value, i = take_value(arg, i)
+            try:
+                timeout = int(value)
+            except (TypeError, ValueError):
+                print("Error: --timeout requires a number")
+                return
+            continue
+        elif arg == '--no-backport':
+            check_backport = False
+        elif arg == '--no-tags':
+            check_tags = False
+        elif arg in ('--patch', '-p'):
+            show_patch = True
+        elif arg == '--stat':
+            show_stat = True
+        elif arg == '--update':
+            do_update = True
+        elif arg == '--verbose':
+            verbose = True
+        elif arg.startswith('-'):
+            print("Error: Unknown option '%s' for 'git find'" % arg)
+            print("Try 'git find --help'")
+            return
+        else:
+            # Everything else makes up the subject text
+            query_words.append(arg)
+        i += 1
+
+    query = ' '.join(w for w in query_words if w)
+    if not query:
+        print("Error: 'git find' requires a commit ID or subject text")
+        print("Try 'git find --help'")
+        return
+
+    server_url = get_server_url()
+    if server_url is None:
+        return
+
+    data = {
+        'subcommand': 'find',
+        'query': query,
+        'mode': mode,
+        'repos': repos,
+        'upstream': upstream,
+        'max_count': str(max_count),
+        'check_backport': str(check_backport),
+        'check_tags': str(check_tags),
+        'show_patch': str(show_patch),
+        'show_stat': str(show_stat),
+        'update': str(do_update),
+        'verbose': str(verbose),
+        'kernel_version': get_kernel_version(),
+        # Leave the server room to finish before the client gives up
+        'git_timeout': str(max(10, timeout - 30)),
+    }
+
+    if verbose:
+        print("Searching for %s: %s" % (mode, query))
+
+    send_request(server_url, data, timeout, verbose)
+
+
 def print_help():
     print("Usage: git <subcommand> [options]")
     print("")
     print("Subcommands:")
     print("  log        Search git log (supports git log options, default: --max-count=1)")
     print("  show       Show commit details (supports git show options)")
+    print("  find       Find an upstream patch by subject or commit ID and report")
+    print("             whether it is backported into this kernel")
     print("")
     print("Common options:")
     print("  --repos=<repos>    Comma-separated list of repos to search (e.g., rhel9,linux,upstream)")
@@ -168,6 +317,8 @@ def print_help():
     print("  git show abc123def --stat")
     print("  git log -Sinit_new_ldt --repos=rhel9,upstream")
     print("  git show HEAD~3 --repos=linux")
+    print("  git find 0dd3ee311255 --stat")
+    print("  git find mm/slub: fix kmalloc accounting")
 
 
 def print_help_for_subcommand(subcommand):
@@ -207,6 +358,40 @@ def print_help_for_subcommand(subcommand):
         print("  git show abc123def")
         print("  git show HEAD~3 --stat")
         print("  git show v5.10..v5.11 --oneline --repos=upstream")
+    elif subcommand == 'find':
+        print("Usage: git find <commit-id | subject text> [options]")
+        print("")
+        print("Look a patch up in the upstream linux tree by commit ID or by")
+        print("subject text, then report whether it was backported into the RHEL")
+        print("tree matching this vmcore, and whether the running kernel has it.")
+        print("")
+        print("The query type is detected automatically: 7-40 hex characters are")
+        print("treated as a commit ID, anything else as subject text. Subject text")
+        print("does not need quoting - all remaining words are joined.")
+        print("")
+        print("Options:")
+        print("  --commit=<id>      Force commit ID lookup")
+        print("  --subject=<text>   Force subject text search")
+        print("  --max-count=<n>    Maximum matches to report (default: 10)")
+        print("  --upstream=<name>  Upstream repo dir name (default: upstream,linux,")
+        print("                     mainline,torvalds - first one that exists)")
+        print("  --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)")
+        print("  --no-backport      Skip the backport cross-check")
+        print("  --no-tags          Skip the release-tag lookup (much faster)")
+        print("  --patch, -p        Show the full diff of each match")
+        print("  --stat             Show a diffstat for each match")
+        print("  --update           Fetch the latest before searching")
+        print("  --timeout=<secs>   Request timeout in seconds (default: 3600)")
+        print("  --verbose          Show verbose output")
+        print("")
+        print("Examples:")
+        print("  git find 0dd3ee311255")
+        print("  git find net/mlx5e: Fix crash moving to switchdev mode")
+        print("  git find --subject=\"use-after-free in nf_tables\" --max-count=20")
+        print("  git find 0dd3ee311255 --repos=rhel8,rhel9 --stat")
+        print("")
+        print("A commit ID that is reported as NOT FOUND does not exist in the")
+        print("searched trees - useful for checking a suggested or quoted fix.")
 
 
 if __name__ == '__main__':

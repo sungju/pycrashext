@@ -12,7 +12,7 @@ The server loads every plugin under `web/plugins/` at start-up. The currently ac
 |---|---|---|---|
 | `/api/disasm` | POST | edis | Source-level disassembly using the kernel source tree |
 | `/api/setgit/<asm_str>` | GET | edis | Select the git source repo for disassembly |
-| `/api/git` | POST | git | Run `git log` / `git show` in the kernel source repos |
+| `/api/git` | POST | git | Run `git log` / `git show` / `git find` in the kernel source repos |
 | `/api/ai` | POST | ai | Forward command output to an AI engine (ollama/podman) and return the analysis |
 | `/list` | GET | — | List all registered routes |
 | `/reload` | GET | — | Reload plugins without restarting |
@@ -43,6 +43,7 @@ $ export RHEL_SOURCE_DIR="/Users/sungju/source"
 ```
 
 - It does not need every repository — only the ones you plan to use.
+- `git find` needs an upstream linux tree. It uses the first directory it finds named `upstream`, `linux`, `mainline` or `torvalds`; pass `--upstream=<dirname>` to point it elsewhere.
 
 ### Configure 'insights' rules (optional) ###
 

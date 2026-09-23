@@ -23,6 +23,18 @@ except ImportError:
     parse_kernel_version = None
 
 
+# Repository names tried, in order, when looking for the upstream linux tree
+UPSTREAM_REPO_NAMES = ('upstream', 'linux', 'mainline', 'torvalds')
+
+# Record/field separators used to parse `git log` output reliably
+GIT_REC_SEP = '\x1e'
+GIT_FIELD_SEP = '\x1f'
+GIT_LOG_FORMAT = ('--format=%H' + GIT_FIELD_SEP + '%an <%ae>' + GIT_FIELD_SEP +
+                  '%aI' + GIT_FIELD_SEP + '%s' + GIT_FIELD_SEP + '%b' + GIT_REC_SEP)
+
+COMMIT_ID_RE = re.compile(r'^[0-9a-fA-F]{7,40}$')
+
+
 def debug_print(msg):
     """Print debug message only if DEBUG environment variable is set"""
     if os.environ.get('DEBUG', '').lower() in ('1', 'true', 'yes', 'on'):
@@ -760,11 +772,426 @@ def execute_git_command(repo_path, subcommand, git_args):
         return False, "Exception executing git command: %s" % str(e)
 
 
+def run_git(repo_path, args, timeout=300):
+    """
+    Run a git command inside repo_path without a shell.
+
+    Args:
+        repo_path: Repository to run in
+        args: List of git arguments (without the leading 'git --no-pager')
+        timeout: Seconds to wait before killing the command
+
+    Returns:
+        tuple: (returncode, stdout_text, stderr_text). returncode is -1 when
+               the command could not be run or timed out.
+    """
+    process = None
+    try:
+        process = subprocess.Popen(
+            ['git', '--no-pager'] + args,
+            cwd=repo_path,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout_data, stderr_data = process.communicate(timeout=timeout)
+        return (process.returncode,
+                stdout_data.decode('utf-8', 'replace'),
+                stderr_data.decode('utf-8', 'replace'))
+    except subprocess.TimeoutExpired:
+        if process is not None:
+            process.kill()
+            process.communicate()
+        return -1, '', 'git %s timed out after %d seconds' % (args[0] if args else '', timeout)
+    except Exception as e:
+        return -1, '', str(e)
+
+
+def parse_log_records(stdout):
+    """
+    Parse `git log GIT_LOG_FORMAT` output into a list of commit dictionaries.
+    """
+    commits = []
+    for record in stdout.split(GIT_REC_SEP):
+        if not record.strip():
+            continue
+        fields = record.lstrip('\n').split(GIT_FIELD_SEP)
+        if len(fields) < 5:
+            continue
+        commits.append({
+            'sha': fields[0].strip(),
+            'author': fields[1].strip(),
+            'date': fields[2].strip(),
+            'subject': fields[3].strip(),
+            'body': fields[4],
+        })
+    return commits
+
+
+def resolve_repo_path(base_dir, repo_name):
+    """
+    Turn a repository name into a validated absolute path under base_dir.
+
+    Returns:
+        tuple: (path, error_message). path is None when the name is rejected.
+    """
+    if not repo_name:
+        return None, "Empty repository name"
+    if '..' in repo_name or '/' in repo_name or '\\' in repo_name or repo_name.startswith('/'):
+        return None, "Invalid repository name '%s' - path traversal not allowed" % repo_name
+
+    repo_path = os.path.normpath(os.path.join(base_dir, repo_name))
+    if not repo_path.startswith(os.path.normpath(base_dir) + os.sep):
+        return None, "Path traversal detected in repository name '%s'" % repo_name
+    if not os.path.isdir(repo_path):
+        return None, "Repository directory not found: %s" % repo_path
+    return repo_path, None
+
+
+def find_upstream_repo(base_dir, preferred=''):
+    """
+    Locate the upstream linux repository under base_dir.
+
+    Args:
+        base_dir: RHEL_SOURCE_DIR
+        preferred: Comma separated repo names to try first (from --upstream)
+
+    Returns:
+        tuple: (repo_name, repo_path) or (None, None) when nothing matches.
+    """
+    candidates = [n.strip() for n in preferred.split(',') if n.strip()]
+    if not candidates:
+        candidates = list(UPSTREAM_REPO_NAMES)
+
+    for name in candidates:
+        repo_path, _err = resolve_repo_path(base_dir, name)
+        if repo_path is not None:
+            return name, repo_path
+    return None, None
+
+
+def strip_tag_prefix(tag):
+    """Strip the 'kernel-' or leading 'v' prefix used by kernel release tags."""
+    for prefix in ('kernel-', 'v'):
+        if tag.startswith(prefix):
+            return tag[len(prefix):]
+    return tag
+
+
+def parse_upstream_tag(tag):
+    """
+    Parse an upstream kernel tag (v6.9, v6.9.3, v6.10-rc2) into a sort key.
+
+    Returns:
+        tuple (major, minor, patch, is_final, rc) or None when unparsable.
+        Release candidates sort before the matching final release.
+    """
+    m = re.match(r'^v?(\d+)\.(\d+)(?:\.(\d+))?(?:-rc(\d+))?$', tag.strip())
+    if not m:
+        return None
+    major, minor, patch, rc = m.groups()
+    if rc is None:
+        return (int(major), int(minor), int(patch or 0), 1, 0)
+    return (int(major), int(minor), int(patch or 0), 0, int(rc))
+
+
+def earliest_release_tag(repo_path, sha, timeout=300):
+    """
+    Find the earliest release tag that contains the given commit.
+
+    RHEL style tags (kernel-5.14.0-427.el9) are preferred when present;
+    otherwise upstream style tags (v6.9-rc1) are used.
+
+    Returns:
+        tuple: (tag_name, sort_key, kind) where kind is 'rhel' or 'upstream',
+               or (None, None, None) when no release tag contains the commit.
+    """
+    rc, out, _err = run_git(repo_path, ['tag', '--contains', sha], timeout=timeout)
+    if rc != 0:
+        return None, None, None
+
+    rhel_tags = []
+    upstream_tags = []
+    for tag in out.split('\n'):
+        tag = tag.strip()
+        if not tag or not re.match(r'^[\w.\-/]+$', tag):
+            continue
+        base = strip_tag_prefix(tag)
+        if parse_kernel_version is not None:
+            key = parse_kernel_version(base)
+            if key is not None:
+                rhel_tags.append((key, tag))
+                continue
+        key = parse_upstream_tag(tag)
+        if key is not None:
+            upstream_tags.append((key, tag))
+
+    if rhel_tags:
+        key, tag = min(rhel_tags)
+        return tag, key, 'rhel'
+    if upstream_tags:
+        key, tag = min(upstream_tags)
+        return tag, key, 'upstream'
+    return None, None, None
+
+
+def find_backport(repo_path, upstream_sha, subject, timeout=300):
+    """
+    Look for a commit in repo_path that corresponds to an upstream commit.
+
+    Two strategies are tried, strongest first:
+      1. The upstream commit ID quoted in the commit message. RHEL backports
+         carry "commit <sha> upstream." or "(cherry picked from commit <sha>)".
+      2. An identical (or contained) subject line.
+
+    Returns:
+        tuple: (commit_dict, match_method) or (None, None) when not found.
+    """
+    if upstream_sha and len(upstream_sha) >= 12:
+        rc, out, _err = run_git(
+            repo_path,
+            ['log', '--all', '--max-count=5', '--fixed-strings',
+             '--grep=' + upstream_sha[:12], GIT_LOG_FORMAT],
+            timeout=timeout)
+        if rc == 0:
+            commits = parse_log_records(out)
+            if commits:
+                return commits[0], 'upstream commit ID referenced in commit message'
+
+    if subject:
+        rc, out, _err = run_git(
+            repo_path,
+            ['log', '--all', '--max-count=10', '--fixed-strings',
+             '--grep=' + subject, GIT_LOG_FORMAT],
+            timeout=timeout)
+        if rc == 0:
+            commits = parse_log_records(out)
+            for commit in commits:
+                if commit['subject'] == subject:
+                    return commit, 'identical subject line'
+            if commits:
+                return commits[0], 'subject text found in commit message'
+
+    return None, None
+
+
+def lookup_commit(repo_path, commit_id, timeout=300):
+    """
+    Fetch a single commit by ID. Returns the commit dict, or None when the
+    ID does not resolve to a commit in this repository.
+    """
+    if not COMMIT_ID_RE.match(commit_id):
+        return None
+    rc, out, _err = run_git(
+        repo_path,
+        ['log', '--max-count=1', GIT_LOG_FORMAT, commit_id, '--'],
+        timeout=timeout)
+    if rc != 0:
+        return None
+    commits = parse_log_records(out)
+    return commits[0] if commits else None
+
+
+def search_commits(repo_path, text, max_count, search_all_refs=True, timeout=600):
+    """
+    Search commit messages for a literal text (typically a patch subject).
+    """
+    args = ['log', '--max-count=%d' % max_count, '--fixed-strings',
+            '--regexp-ignore-case', '--grep=' + text]
+    if search_all_refs:
+        args.append('--all')
+    args.append(GIT_LOG_FORMAT)
+    rc, out, _err = run_git(repo_path, args, timeout=timeout)
+    if rc != 0:
+        return []
+    return parse_log_records(out)
+
+
+def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, indent):
+    """
+    Describe when a commit first appeared in a release, and whether that
+    release is at or below the kernel version taken from the vmcore.
+
+    Returns a list of description lines prefixed with the given indent.
+    """
+    if not check_tags:
+        return []
+
+    tag, key, kind = earliest_release_tag(repo_path, sha, timeout=timeout)
+    if tag is None:
+        return [indent + "first release  : none (not in any tagged release yet)"]
+
+    lines = [indent + "first release  : %s" % tag]
+    if kind == 'rhel' and parse_kernel_version is not None:
+        current = parse_kernel_version(kernel_version)
+        if current is not None:
+            if current >= key:
+                lines.append(indent + "running kernel : PRESENT (%s >= %s)" %
+                             (kernel_version, tag))
+            else:
+                lines.append(indent + "running kernel : NOT PRESENT "
+                             "(%s is older than %s)" % (kernel_version, tag))
+    return lines
+
+
+def format_commit_block(index, total, commit, label, colors):
+    """Format the header block describing one matched commit."""
+    YELLOW, CYAN, BOLD_WHITE, RESET = colors
+    lines = []
+    lines.append(YELLOW + "[%d/%d] %s  (%s)" % (index, total, commit['sha'], label) + RESET)
+    lines.append("    subject : " + BOLD_WHITE + commit['subject'] + RESET)
+    lines.append("    author  : %s" % commit['author'])
+    lines.append("    date    : %s" % commit['date'])
+    return lines
+
+
+def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_repos,
+                 max_count, check_backport, check_tags, show_patch, show_stat,
+                 do_update, verbose, timeout):
+    """
+    Handle the 'find' subcommand: look a patch up in the upstream tree by
+    subject or commit ID, then report whether it was backported into the
+    RHEL tree matching the vmcore.
+    """
+    YELLOW = "\033[33m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    BOLD_WHITE = "\033[1;37m"
+    RESET = "\033[0m"
+    colors = (YELLOW, CYAN, BOLD_WHITE, RESET)
+    separator = "=" * 80
+
+    out = []
+
+    upstream_name, upstream_path = find_upstream_repo(base_dir, upstream_pref)
+    if upstream_path is None:
+        tried = upstream_pref if upstream_pref else ', '.join(UPSTREAM_REPO_NAMES)
+        return ("Error: No upstream repository found under %s\n"
+                "Tried: %s\n"
+                "Clone the upstream linux tree there, or pass --upstream=<dirname>."
+                % (base_dir, tried))
+
+    # RHEL repositories to cross-check for backports
+    backport_repos = []
+    rhel_path, rhel_name = get_current_rhel_dir(kernel_version)
+    if rhel_path is not None:
+        backport_repos.append((rhel_name, rhel_path))
+    for name in [r.strip() for r in extra_repos.split(',') if r.strip()]:
+        repo_path, err = resolve_repo_path(base_dir, name)
+        if repo_path is None:
+            return "Error: %s" % err
+        if (name, repo_path) not in backport_repos:
+            backport_repos.append((name, repo_path))
+
+    if do_update:
+        for name, path in [(upstream_name, upstream_path)] + backport_repos:
+            ok, msg = git_checkout_latest(path)
+            if verbose or not ok:
+                out.append(CYAN + "[update %s] %s" % (name, msg) + RESET)
+
+    # Auto-detect what kind of query this is
+    if mode == 'auto':
+        mode = 'commit' if COMMIT_ID_RE.match(query) else 'subject'
+
+    out.append(BOLD_WHITE + separator + RESET)
+    out.append(BOLD_WHITE + "Git Find Results" + RESET)
+    out.append(CYAN + "Query          : %s" % query + RESET)
+    out.append(CYAN + "Match mode     : %s" % mode + RESET)
+    out.append(CYAN + "Kernel version : %s" % kernel_version + RESET)
+    out.append(CYAN + "Upstream repo  : %s" % upstream_name + RESET)
+    if backport_repos:
+        out.append(CYAN + "Backport check : %s" %
+                   ', '.join(n for n, _p in backport_repos) + RESET)
+    out.append(BOLD_WHITE + separator + RESET)
+    out.append("")
+
+    # Collect matches, remembering which repository each came from
+    matches = []
+    if mode == 'commit':
+        commit = lookup_commit(upstream_path, query, timeout=timeout)
+        if commit is not None:
+            matches.append((upstream_name, upstream_path, commit))
+        else:
+            # The ID may be a RHEL commit rather than an upstream one
+            for name, path in backport_repos:
+                commit = lookup_commit(path, query, timeout=timeout)
+                if commit is not None:
+                    matches.append((name, path, commit))
+                    break
+    else:
+        for commit in search_commits(upstream_path, query, max_count, timeout=timeout):
+            matches.append((upstream_name, upstream_path, commit))
+        if not matches:
+            # Fall back to the RHEL trees: the patch may be RHEL-only
+            for name, path in backport_repos:
+                found = search_commits(path, query, max_count, timeout=timeout)
+                for commit in found:
+                    matches.append((name, path, commit))
+                if found:
+                    break
+
+    if not matches:
+        out.append(RED + "NOT FOUND: no commit matches this %s." %
+                   ("commit ID" if mode == 'commit' else "subject text") + RESET)
+        out.append("")
+        if mode == 'commit':
+            out.append("  The commit ID does not exist in '%s'%s." %
+                       (upstream_name,
+                        " or " + ', '.join(n for n, _p in backport_repos)
+                        if backport_repos else ""))
+            out.append("  A suggested commit ID that cannot be found here is very")
+            out.append("  likely wrong - double check it before relying on it.")
+        else:
+            out.append("  No commit message contains this text.")
+            out.append("  Try a shorter or more distinctive part of the subject line.")
+        out.append("")
+        if not do_update:
+            out.append("  The local mirror may also be out of date - rerun with")
+            out.append("  --update to fetch the latest before searching.")
+        out.append(BOLD_WHITE + separator + RESET)
+        return '\n'.join(out)
+
+    for idx, (repo_name, repo_path, commit) in enumerate(matches, 1):
+        out.extend(format_commit_block(idx, len(matches), commit, repo_name, colors))
+        out.extend(describe_presence(repo_path, commit['sha'], kernel_version,
+                                     check_tags, timeout, "    "))
+
+        if check_backport and repo_path == upstream_path:
+            for name, path in backport_repos:
+                backport, method = find_backport(path, commit['sha'],
+                                                 commit['subject'], timeout=timeout)
+                if backport is None:
+                    out.append("    %s : " % name + RED + "NOT BACKPORTED" + RESET +
+                               " (no matching commit found)")
+                    continue
+                out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
+                           " as %s" % backport['sha'])
+                out.append("        matched by     : %s" % method)
+                out.extend(describe_presence(path, backport['sha'], kernel_version,
+                                             check_tags, timeout, "        "))
+
+        if show_patch or show_stat:
+            args = ['show', '--stat' if show_stat and not show_patch else '--patch',
+                    commit['sha']]
+            rc, detail, err = run_git(repo_path, args, timeout=timeout)
+            out.append("")
+            out.append(colorize_git_output(detail) if rc == 0 else "Error: %s" % err)
+
+        out.append("")
+
+    out.append(BOLD_WHITE + separator + RESET)
+    out.append(BOLD_WHITE + "Complete - %d match%s" %
+               (len(matches), "es" if len(matches) != 1 else "") + RESET)
+    out.append(BOLD_WHITE + separator + RESET)
+    return '\n'.join(out)
+
+
 def git_command():
     """
     Main git endpoint handler.
 
-    Executes git log/show commands in kernel source repositories.
+    Executes git log/show/find commands in kernel source repositories.
     """
     import datetime
     debug_print("\n" + "="*80)
@@ -792,9 +1219,48 @@ def git_command():
         return "Error parsing request parameters: %s" % str(e)
 
     # Validate subcommand
-    if subcommand not in ['log', 'show']:
+    if subcommand not in ['log', 'show', 'find']:
         debug_print("[DEBUG] ERROR: Invalid subcommand '%s'" % subcommand)
-        return "Error: Invalid subcommand '%s'. Must be 'log' or 'show'." % subcommand
+        return "Error: Invalid subcommand '%s'. Must be 'log', 'show' or 'find'." % subcommand
+
+    if subcommand == 'find':
+        try:
+            base_dir = os.environ['RHEL_SOURCE_DIR']
+        except KeyError:
+            return "Error: RHEL_SOURCE_DIR environment variable not set"
+
+        query = request.form.get('query', '').strip()
+        if not query:
+            return "Error: 'find' requires a commit ID or subject text"
+
+        try:
+            max_count = max(1, min(int(request.form.get('max_count', '10')), 200))
+        except ValueError:
+            max_count = 10
+        try:
+            git_timeout = max(10, min(int(request.form.get('git_timeout', '600')), 3600))
+        except ValueError:
+            git_timeout = 600
+
+        mode = request.form.get('mode', 'auto')
+        if mode not in ('auto', 'commit', 'subject'):
+            mode = 'auto'
+
+        return find_command(
+            query=query,
+            mode=mode,
+            kernel_version=kernel_version,
+            base_dir=base_dir,
+            upstream_pref=request.form.get('upstream', ''),
+            extra_repos=repos_str,
+            max_count=max_count,
+            check_backport=request.form.get('check_backport', 'True') == 'True',
+            check_tags=request.form.get('check_tags', 'True') == 'True',
+            show_patch=request.form.get('show_patch', 'False') == 'True',
+            show_stat=request.form.get('show_stat', 'False') == 'True',
+            do_update=request.form.get('update', 'False') == 'True',
+            verbose=verbose,
+            timeout=git_timeout)
 
     debug_print("[DEBUG] Parsing git options...")
     # Parse and validate git options

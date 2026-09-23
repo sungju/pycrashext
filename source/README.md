@@ -61,7 +61,7 @@ Every command accepts '-h' to show the available options.
 | devinfo | Device information |
 | edis | Enhanced disassembly with source lines (needs remoteapi) |
 | fsinfo | Filesystem information |
-| git | Run 'git log/show' on remote kernel source repositories (needs remoteapi) |
+| git | Run 'git log/show' on remote kernel source repositories, and 'git find' to check whether an upstream patch is backported into this kernel (needs remoteapi) |
 | hangcheck | Show hung (D-state) tasks with details |
 | insights | Run insights rules (needs remoteapi; server plugin currently deprecated) |
 | ipcinfo | IPC information |
@@ -1355,16 +1355,18 @@ root                7        2  0    May26        ?  116,05:21:33 [migration/1]
 
 ### git ###
 
-It runs `git log` / `git show` on the kernel source repositories hosted by the 'remoteapi' server. This is useful to find which commit introduced or changed a symbol without leaving 'crash'. It needs 'CRASHEXT_SERVER' to be set (see the 'edis' section and README.md under ./remoteapi).
+It runs `git log` / `git show` / `git find` on the kernel source repositories hosted by the 'remoteapi' server. This is useful to find which commit introduced or changed a symbol, and to check whether a known upstream fix is present in the crashed kernel, without leaving 'crash'. It needs 'CRASHEXT_SERVER' to be set (see the 'edis' section and README.md under ./remoteapi).
 
 ```
 crash> git -h
 Usage:
-  git <log|show> [git-options]
+  git <log|show|find> [options]
 
 Subcommands:
   log              Search git log (supports all git log options, default: --max-count=1)
   show             Show commit details (supports all git show options)
+  find             Find an upstream patch by subject or commit ID and report
+                   whether it is backported into this kernel
 
 Options:
   --repos=<repos>  Comma-separated list of repos (e.g., rhel9,linux,upstream)
@@ -1373,6 +1375,8 @@ Options:
   -h, --help       Show help
 ```
 
+The repository to search is picked from the kernel version of the vmcore: a `.el9` kernel searches the `rhel9` directory under 'RHEL_SOURCE_DIR'. `--repos=` adds more repositories, and `git log` limits the current repository to commits at or above the running kernel version unless `--all` is given.
+
 Examples)
 
 ```
@@ -1380,6 +1384,144 @@ crash> git log -Sclip_push --max-count=5
 crash> git show abc123def --stat
 crash> git log -Sinit_new_ldt --repos=rhel9,upstream
 ```
+
+#### git find ####
+
+`git find` answers a different question from `log`/`show`: *does this patch exist, and does this kernel have it?*
+
+It looks the patch up in the upstream linux tree, then cross-checks the RHEL tree that matches the vmcore, and reports which release first carried the commit on both sides. Typical uses:
+
+- Check whether a fix you found upstream was ever backported, and whether the crashed kernel is new enough to have it.
+- Turn a subject line from a bug report, a KCS article or a mailing list thread into a real commit ID.
+- Verify that a commit ID or subject somebody quoted - including one suggested by an AI - actually exists. A commit that `git find` cannot locate does not exist in the searched trees.
+
+```
+crash> git find -h
+Usage: git find <commit-id | subject text> [options]
+
+Options:
+  --commit=<id>      Force commit ID lookup
+  --subject=<text>   Force subject text search
+  --max-count=<n>    Maximum matches to report (default: 10)
+  --upstream=<name>  Upstream repo dir name (default: upstream,linux,
+                     mainline,torvalds - first one that exists)
+  --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)
+  --no-backport      Skip the backport cross-check
+  --no-tags          Skip the release-tag lookup (much faster)
+  --patch, -p        Show the full diff of each match
+  --stat             Show a diffstat for each match
+  --update           Fetch the latest before searching
+  --timeout=<secs>   Request timeout in seconds (default: 3600)
+  --verbose          Show verbose output
+```
+
+The query type is detected automatically: 7 to 40 hexadecimal characters are treated as a commit ID, anything else as subject text. Subject text does not need quoting - every remaining word is joined into one search string, so a subject line can be pasted as-is:
+
+```
+crash> git find net/mlx5e: Fix crash moving to switchdev mode
+```
+
+Use `--commit=` or `--subject=` when the automatic choice is wrong, for example when searching for a subject that happens to look like a hash.
+
+**Looking a commit up by ID**
+
+```
+crash> git find 0dd3ee311255
+================================================================================
+Git Find Results
+Query          : 0dd3ee311255
+Match mode     : commit
+Kernel version : 5.14.0-427.13.1.el9_4.x86_64
+Upstream repo  : upstream
+Backport check : rhel9
+================================================================================
+
+[1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (upstream)
+    subject : net/mlx5e: Fix crash moving to switchdev mode
+    author  : A Developer <dev@example.com>
+    date    : 2024-03-11T10:00:00+00:00
+    first release  : v6.9-rc1
+    rhel9 : BACKPORTED as ed390b904be9941b19c149bdc2320697b3f7996e
+        matched by     : upstream commit ID referenced in commit message
+        first release  : kernel-5.14.0-427.el9
+        running kernel : PRESENT (5.14.0-427.13.1.el9_4.x86_64 >= kernel-5.14.0-427.el9)
+
+================================================================================
+Complete - 1 match
+================================================================================
+```
+
+The report is read from the bottom up:
+
+| Line | Meaning |
+|---|---|
+| `first release` (upstream) | Earliest upstream tag containing the commit, so the kernel version the fix landed in |
+| `BACKPORTED as <sha>` | The matching commit found in the RHEL tree |
+| `matched by` | How the match was made - see below |
+| `first release` (rhel) | Earliest `kernel-*` tag in the RHEL tree containing the backport |
+| `running kernel` | Whether the kernel in the vmcore is at or above that release |
+
+Backports are matched in two ways, strongest first:
+
+1. **upstream commit ID referenced in commit message** - RHEL backports carry `commit <sha> upstream.` or `(cherry picked from commit <sha>)`. This is an exact match.
+2. **identical subject line** / **subject text found in commit message** - used when the backport does not quote the upstream ID. Worth eyeballing the commit before trusting it.
+
+**A fix that was never backported**
+
+```
+crash> git find a2a1cc5465226c2f270f06a041a6d77385d6df6d
+...
+[1/1] a2a1cc5465226c2f270f06a041a6d77385d6df6d  (upstream)
+    subject : net: never backported fix
+    author  : A Developer <dev@example.com>
+    date    : 2024-03-11T10:00:00+00:00
+    first release  : v6.10
+    rhel9 : NOT BACKPORTED (no matching commit found)
+```
+
+**A commit ID that does not exist**
+
+```
+crash> git find deadbeefdead
+...
+NOT FOUND: no commit matches this commit ID.
+
+  The commit ID does not exist in 'upstream' or rhel9.
+  A suggested commit ID that cannot be found here is very
+  likely wrong - double check it before relying on it.
+
+  The local mirror may also be out of date - rerun with
+  --update to fetch the latest before searching.
+```
+
+This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant. Note the last hint: the server keeps local clones, so a genuinely recent commit can be missing simply because the mirror is behind. Re-run with `--update` to fetch first.
+
+**Searching by subject**
+
+```
+crash> git find --max-count=5 use-after-free in nf_tables
+```
+
+Subject search is a case-insensitive literal search over the whole commit message, not just the subject line, so a distinctive fragment works better than a full subject with punctuation. If nothing matches upstream, the RHEL trees are searched as a fallback - a match reported with `(rhel9)` instead of `(upstream)` is a RHEL-only patch with no upstream equivalent.
+
+**More examples**
+
+```
+crash> git find 0dd3ee311255 --stat                  # add a diffstat for each match
+crash> git find 0dd3ee311255 --patch                 # add the full diff
+crash> git find 0dd3ee311255 --repos=rhel8,rhel9     # check extra trees for the backport
+crash> git find 0dd3ee311255 --no-tags               # skip release-tag lookup, much faster
+crash> git find 0dd3ee311255 --no-backport           # upstream information only
+crash> git find 0dd3ee311255 --update                # refresh the mirrors before searching
+crash> git find --upstream=linux-next 0dd3ee311255   # search a different upstream tree
+crash> git find --subject=deadbeef                   # force subject mode for a hash-like string
+```
+
+Notes:
+
+- The upstream tree is the first directory named `upstream`, `linux`, `mainline` or `torvalds` under 'RHEL_SOURCE_DIR'. Use `--upstream=<dirname>` for anything else.
+- `git tag --contains` drives the `first release` lines and is the slowest part on a full linux tree. `--no-tags` drops those lines and returns much faster.
+- `running kernel` is only reported for RHEL style tags, since it compares against the `.elN` version taken from the vmcore.
 
 ### ai ###
 
