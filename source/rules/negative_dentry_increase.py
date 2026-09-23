@@ -153,7 +153,7 @@ def run_rule(basic_data):
 
         return [result_dict]
     except Exception as e:
-        print(e)
+        print("Error running rule %s: %s" % (ntpath.basename(__file__), e))
         return None
 
 
