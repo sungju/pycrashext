@@ -301,125 +301,125 @@ def get_version_range_for_repo(repo_path, kernel_version):
         return None
 
 
-def git_checkout_latest(repo_path):
+def repo_head_sha(repo_path, rev='HEAD', timeout=60):
+    """Return the resolved sha of rev, or '' when it does not resolve."""
+    rc, out, _err = run_git(repo_path, ['rev-parse', '--verify', '--quiet', rev],
+                            timeout=timeout)
+    return out.strip() if rc == 0 else ''
+
+
+def repo_is_bare(repo_path, timeout=30):
+    """Return True for a bare or mirror clone, which has no working tree."""
+    rc, out, _err = run_git(repo_path, ['rev-parse', '--is-bare-repository'],
+                            timeout=timeout)
+    return rc == 0 and out.strip() == 'true'
+
+
+def default_branch_of(repo_path, timeout=120):
     """
-    Checkout the latest code in a git repository.
+    Work out which branch 'the latest' means for this clone.
+
+    'git remote show origin' needs the network and enumerates every ref, which
+    is painfully slow on a tree the size of linux, so the locally recorded
+    origin/HEAD is consulted first and the remote is only a fallback.
+
+    Returns:
+        str: branch name, or '' when nothing could be determined.
+    """
+    rc, out, _err = run_git(repo_path,
+                            ['symbolic-ref', '--short', '--quiet',
+                             'refs/remotes/origin/HEAD'],
+                            timeout=min(timeout, 30))
+    head = out.strip()
+    if rc == 0 and head.startswith('origin/'):
+        return head[len('origin/'):]
+
+    rc, out, _err = run_git(repo_path, ['remote', 'show', 'origin'], timeout=timeout)
+    if rc == 0:
+        for line in out.splitlines():
+            if 'HEAD branch' in line:
+                branch = line.split(':', 1)[1].strip()
+                if branch and branch != '(unknown)':
+                    return branch
+
+    for branch in ('main', 'master', 'trunk'):
+        for ref in ('refs/remotes/origin/' + branch, 'refs/heads/' + branch):
+            if repo_head_sha(repo_path, ref, timeout=min(timeout, 30)):
+                return branch
+    return ''
+
+
+def git_checkout_latest(repo_path, timeout=1800):
+    """
+    Bring a local mirror up to date with its origin.
 
     Args:
         repo_path: Path to git repository
+        timeout: Seconds allowed for each git invocation (the fetch of a tree
+                 the size of linux is the one that needs the headroom)
 
     Returns:
-        tuple: (success, message)
+        tuple: (success, message). The message names the branch and the
+               before/after shas so a fetch that quietly did nothing is
+               visible rather than reported as a bare 'Successfully updated'.
     """
-    import datetime
-    debug_print("[DEBUG %s] git_checkout_latest() STARTED" % datetime.datetime.now().strftime("%H:%M:%S"))
-    debug_print("[DEBUG]   repo_path: %s" % repo_path)
+    debug_print("[DEBUG] git_checkout_latest() STARTED for %s" % repo_path)
 
-    try:
-        original_dir = os.getcwd()
-        os.chdir(repo_path)
-        debug_print("[DEBUG]   Changed to: %s" % os.getcwd())
+    rc, _out, err = run_git(repo_path, ['rev-parse', '--git-dir'], timeout=30)
+    if rc != 0:
+        return False, "not a git repository: %s (%s)" % (repo_path, err.strip())
 
-        # Get the default branch (usually main or master)
-        # Use subprocess without shell=True to prevent command injection
-        debug_print("[DEBUG]   Getting default branch from remote...")
-        branch_process = subprocess.Popen(
-            ['git', '--no-pager', 'remote', 'show', 'origin'],
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        remote_output_data, remote_err = branch_process.communicate()
-        remote_output = remote_output_data.decode('utf-8')
+    rc, out, _err = run_git(repo_path, ['remote'], timeout=30)
+    remotes = out.split()
+    if rc != 0 or 'origin' not in remotes:
+        return False, ("no 'origin' remote in %s%s - nothing to fetch from" %
+                       (repo_path,
+                        " (has: %s)" % ', '.join(remotes) if remotes else ""))
 
-        # Parse output to find HEAD branch
-        default_branch = ''
-        for line in remote_output.splitlines():
-            if 'HEAD branch' in line:
-                default_branch = line.split(':', 1)[1].strip()
-                break
+    branch = default_branch_of(repo_path, timeout=min(timeout, 120))
+    if not branch:
+        return False, ("could not determine the default branch of %s "
+                       "(no origin/HEAD, and origin is not reachable)" % repo_path)
+    # Keep the name sane before it goes into a refspec
+    if not re.match(r'^[a-zA-Z0-9][a-zA-Z0-9._/-]*$', branch):
+        return False, "invalid branch name format: %s" % branch
 
-        if not default_branch:
-            debug_print("[DEBUG]   No HEAD branch found, trying common names...")
-            # Fallback to common branch names
-            for branch in ['main', 'master', 'trunk']:
-                check_process = subprocess.Popen(
-                    ['git', '--no-pager', 'rev-parse', '--verify', branch],
-                    shell=False,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
-                check_out, check_err = check_process.communicate()
-                if check_process.returncode == 0:
-                    default_branch = branch
-                    debug_print("[DEBUG]   Found branch: %s" % branch)
-                    break
+    bare = repo_is_bare(repo_path)
+    local_ref = ('refs/heads/' + branch) if bare else ('refs/remotes/origin/' + branch)
+    before = repo_head_sha(repo_path, branch if bare else 'HEAD')
 
-        if not default_branch:
-            default_branch = 'master'  # Ultimate fallback
-            debug_print("[DEBUG]   Using ultimate fallback: master")
-        else:
-            debug_print("[DEBUG]   Default branch: %s" % default_branch)
+    # The explicit refspec is the point here: plain 'git fetch origin <branch>'
+    # only writes FETCH_HEAD, so on a mirror or a single-branch clone the
+    # remote-tracking ref never moves and the reset below quietly puts the tree
+    # back on the commit it was already on. --tags matters too, because the
+    # release-tag lookup ('git tag --contains') is useless without them.
+    refspec = '+refs/heads/%s:%s' % (branch, local_ref)
+    rc, _out, err = run_git(repo_path,
+                            ['fetch', '--tags', '--prune', '--force',
+                             'origin', refspec],
+                            timeout=timeout)
+    if rc != 0:
+        return False, "failed to fetch %s: %s" % (branch,
+                                                  err.strip() or 'git fetch failed')
 
-        # Validate branch name format (alphanumeric, slashes, dashes, underscores)
-        if not re.match(r'^[a-zA-Z0-9/_-]+$', default_branch):
-            os.chdir(original_dir)
-            return False, "Invalid branch name format: %s" % default_branch
+    if not bare:
+        rc, _out, err = run_git(repo_path, ['checkout', '-f', branch], timeout=timeout)
+        if rc != 0:
+            return False, "failed to checkout %s: %s" % (branch, err.strip())
 
-        # Fetch latest changes (doesn't require clean working directory)
-        fetch_process = subprocess.Popen(
-            ['git', '--no-pager', 'fetch', 'origin', default_branch],
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        fetch_out, fetch_err_data = fetch_process.communicate()
-        fetch_err = fetch_err_data.decode('utf-8')
+        rc, _out, err = run_git(repo_path,
+                                ['reset', '--hard', 'refs/remotes/origin/' + branch],
+                                timeout=timeout)
+        if rc != 0:
+            return False, "failed to reset to origin/%s: %s" % (branch, err.strip())
 
-        if fetch_process.returncode != 0:
-            os.chdir(original_dir)
-            return False, "Failed to fetch: %s" % fetch_err
-
-        # Reset to latest (discards any local changes - safe for read-only source repos)
-        # Execute checkout
-        checkout_process = subprocess.Popen(
-            ['git', '--no-pager', 'checkout', '-f', default_branch],
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        checkout_out, checkout_err_data = checkout_process.communicate()
-        checkout_err = checkout_err_data.decode('utf-8')
-
-        if checkout_process.returncode != 0:
-            os.chdir(original_dir)
-            return False, "Failed to checkout: %s" % checkout_err
-
-        # Execute reset
-        reset_process = subprocess.Popen(
-            ['git', '--no-pager', 'reset', '--hard', 'origin/' + default_branch],
-            shell=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
-        )
-        reset_out_data, reset_err_data = reset_process.communicate()
-        reset_out = reset_out_data.decode('utf-8')
-        reset_err = reset_err_data.decode('utf-8')
-
-        os.chdir(original_dir)
-
-        if reset_process.returncode != 0:
-            return False, "Failed to reset to latest: %s" % reset_err
-
-        return True, "Successfully updated to latest on branch %s" % default_branch
-
-    except Exception as e:
-        try:
-            os.chdir(original_dir)
-        except:
-            pass
-        return False, "Exception during checkout: %s" % str(e)
-
+    after = repo_head_sha(repo_path, branch if bare else 'HEAD')
+    if not after:
+        return False, "fetched %s but its head does not resolve" % branch
+    if before == after:
+        return True, "%s already up to date at %s" % (branch, after[:12])
+    return True, "%s updated %s -> %s" % (branch, (before or 'unknown')[:12],
+                                          after[:12])
 
 def search_git_log(repo_path, pattern, max_lines=30, max_commits=1, show_context=False):
     """
@@ -813,12 +813,18 @@ def run_git(repo_path, args, timeout=300):
         tuple: (returncode, stdout_text, stderr_text). returncode is -1 when
                the command could not be run or timed out.
     """
+    # A fetch over https against a repo that wants credentials will sit on a
+    # terminal prompt forever, which looks exactly like a hung server.
+    env = dict(os.environ)
+    env['GIT_TERMINAL_PROMPT'] = '0'
+
     process = None
     try:
         process = subprocess.Popen(
             ['git', '--no-pager'] + args,
             cwd=repo_path,
             shell=False,
+            env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE
         )
@@ -1418,10 +1424,14 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
             backport_repos.append((name, repo_path))
 
     if do_update:
+        # Always report the outcome. An update that fetched nothing is exactly
+        # what the caller asked --update to rule out, so hiding it behind
+        # --verbose defeats the option.
         for name, path in [(upstream_name, upstream_path)] + backport_repos:
-            ok, msg = git_checkout_latest(path)
-            if verbose or not ok:
-                out.append(CYAN + "[update %s] %s" % (name, msg) + RESET)
+            ok, msg = git_checkout_latest(path, timeout=timeout)
+            colour = CYAN if ok else RED
+            out.append(colour + "[update %s] %s" % (name, msg) + RESET)
+        out.append("")
 
     # Auto-detect what kind of query this is
     if mode == 'auto':

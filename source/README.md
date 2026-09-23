@@ -1415,7 +1415,7 @@ Options:
   --no-tags          Skip the release-tag lookup (much faster)
   --patch, -p        Show the full diff of each match
   --stat             Show a diffstat for each match
-  --update           Fetch the latest before searching
+  --update           Fetch the latest (branch + tags) into every repo first
   --timeout=<secs>   Request timeout in seconds (default: 3600)
   --verbose          Show verbose output
 ```
@@ -1531,6 +1531,24 @@ NOT FOUND: no commit matches this commit ID.
 This is the check to run before acting on a commit ID quoted in a report or produced by an AI assistant. Because the public sources were consulted too, a miss here is a strong statement: the commit does not exist in mainline, stable or linux-next, not merely in the server's clones.
 
 The `Searched:` block exists so a miss can be told apart from a misconfiguration: it lists the directory each repository resolved to and the commit its HEAD is on. A HEAD date months in the past explains a missing recent commit - re-run with `--update` to fetch first. A path pointing somewhere unexpected explains everything else.
+
+**Refreshing the mirrors**
+
+`--update` fetches every repository the search will use - the upstream tree and each backport tree - before searching, and reports what happened to each one:
+
+```
+crash> git find <commit-id> --update
+[update linux] master updated 8f3e4c21a90b -> c7d1b0e45f2a
+[update rhel8] master already up to date at 4b21ce9077de
+```
+
+The before/after shas are there on purpose. A fetch that pulls nothing is indistinguishable from a fetch that failed unless the result says so, and that distinction is the whole reason to pass `--update`. A repository that could not be refreshed is reported in red and the search still runs against what is on disk:
+
+```
+[update linux] failed to fetch master: fatal: could not read from remote repository
+```
+
+Tags are fetched along with the branch, so the `first release` line reflects releases cut since the mirror was last touched. Updating a full linux clone is slow; it is not worth passing on every search, only when a recent commit is expected to be missing.
 
 **Searching by subject**
 
