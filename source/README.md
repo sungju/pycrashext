@@ -489,9 +489,59 @@ crash> fsinfo -r ffff995380013800 --breakdown --holders
 ```
 
 A file open in several processes is counted under each of them, so the shares
-in this table can add up to more than 100%. Inodes that no open fd refers to
-are reported separately — those are pinned by something other than a process
-fd, such as a mapping or an internal kernel reference.
+in this table can add up to more than 100%.
+
+`foreach files` only knows about the fd table, and an fd is not the only thing
+that pins an inode. `--holders` also walks each inode's VMA interval tree and
+reports who has it mapped, because a file that was mapped and then had its fd
+closed — the normal life of a `memfd_create()` or POSIX shm segment — holds
+every one of its pages while appearing in no fd table at all:
+
+```
+== Cache mapped by each process (mmap) ==
+  PROCESS (PID)                   INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------------------
+  qemu-kvm (4242)                     40    3200000    12.2 GB  100.0%  [████████████████]
+  dpdk-worker (9001)                  40    3200000    12.2 GB  100.0%  [████████████████]
+  (mappings pin every page just as an open fd does,
+   and outlive the fd they were created from)
+
+  Not open by any fd                 : 40 inode(s), 12.2 GB
+    of those, held by a mapping      : 40 inode(s), 12.2 GB
+```
+
+Whatever is left with no fd *and* no mapping gets its own section listing what
+can still be holding it — SysV shm marked for deletion but still attached, a
+descriptor in flight over a unix socket, a loop device or GEM buffer, or a
+mount in a namespace that `mount` does not report.
+
+#### The kernel-internal shmem mount ####
+
+A tmpfs superblock that was `kern_mount()`ed is recognised and reported as
+`<kernel-internal shmem>` rather than `<not mounted>`:
+
+```
+  Mounted on             : <kernel-internal shmem>
+  ...
+  ** This is the kernel-internal shmem mount. **
+  It is kern_mount()ed, so it is in no mount table and
+  none of its inodes were ever linked into a directory
+  - 'unlinked' and 'no path' are its normal state, not
+  a leak in themselves. shmem_file_setup() allocates
+  from it for anonymous shared mappings, memfd_create(),
+  SysV shared memory and DRM/GEM buffers, so read the
+  size as shared-memory usage rather than page cache.
+```
+
+This is the common answer to "every inode is unlinked and nothing holds an fd".
+`shmem_file_setup()` allocates from this mount for anonymous shared mappings,
+`memfd_create()`, SysV shared memory and DRM/GEM buffers. Those inodes are
+never linked into a directory, so they are unlinked and pathless from birth —
+the size is shared memory in use, not reclaimable page cache.
+
+If `foreach files` yields no usable rows at all — an output format the parser
+does not recognise — that is reported as a tooling problem rather than being
+left to read as "no process holds anything".
 
 The mount point comes from the `mount` table rather than from the root dentry,
 because a tmpfs root dentry has no name of its own. A superblock still holding

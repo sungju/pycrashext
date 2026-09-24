@@ -152,6 +152,25 @@ It runs `foreach files` once for the whole system, so the cost does not grow
 with the size of the filesystem. A file open in several processes is counted
 under each of them, so those shares can exceed 100%.
 
+An open fd is not the only thing that pins an inode, and on tmpfs it is usually
+not the one that matters. `--holders` therefore also walks each inode's VMA
+interval tree and reports the processes that have it **mapped** — a file that
+was mapped and then had its fd closed, which is the normal life of a
+`memfd_create()` or POSIX shm segment, is invisible to `foreach files` but
+holds every one of its pages.
+
+Anything left with no fd *and* no mapping is called out separately, along with
+what can still be holding it: SysV shared memory marked for deletion but still
+attached, a descriptor in flight over a unix socket, a loop device or GEM
+buffer, or a mount in another namespace.
+
+Finally, a tmpfs superblock that is `kern_mount()`ed is recognised and labelled
+`<kernel-internal shmem>`. That is where `shmem_file_setup()` allocates from —
+anonymous shared mappings, `memfd_create()`, SysV shm and DRM/GEM buffers — so
+its inodes have no name and no path by construction. On that superblock
+"unlinked" and "no path" are the normal state rather than a finding, and the
+total is better read as shared-memory usage than as page cache.
+
 Paths come from walking `d_parent` and reading `d_name` directly, with
 ancestors memoised, so this costs no crash command per inode. Paths are
 relative to the filesystem root and carry no mount point — every inode being
