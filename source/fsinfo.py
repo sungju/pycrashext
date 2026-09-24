@@ -123,6 +123,29 @@ def get_vfsmount_from_sb(sb):
     return None 
 
 
+def get_mount_points(sb):
+    """
+    Where a superblock is mounted, from the 'mount' table.
+
+    dentry_to_filename(sb.s_root) answers '<blank>' whenever the root
+    dentry carries no name of its own - tmpfs in particular - so ask crash
+    instead. A superblock appears once per mount, so a bind-mounted
+    filesystem yields several paths.
+    """
+    points = []
+    try:
+        for line in exec_crash_command("mount").splitlines():
+            words = line.split()
+            if len(words) < 5:
+                continue
+            if words[1] == ("%x" % sb):
+                points.append(words[4])
+    except Exception:
+        pass
+
+    return points
+
+
 def get_mount_option(mnt_flags):
     try:
         return {
@@ -1372,6 +1395,131 @@ def get_inode_filename(inode):
         return "<unknown>"
 
 
+# A dentry chain deeper than this in a crash dump is a corrupt d_parent
+# pointer, not a real path.
+MAX_DENTRY_DEPTH = 64
+
+
+def get_dentry_path(dentry, cache):
+    """
+    Path of a dentry within its own filesystem, by walking d_parent.
+
+    This reads struct fields directly rather than going through
+    'files -d' like dentry_to_filename(), because the breakdown resolves a
+    path for every cached inode instead of just the few being listed.
+    Ancestors are memoised in 'cache', so thousands of files sharing a
+    handful of directories cost a handful of walks.
+
+    The path is relative to the filesystem root, so it carries no mount
+    point - which is the useful form here, since every inode being
+    grouped belongs to the same superblock anyway.
+    """
+    chain = []
+    seen = set()
+    base = "/"
+    cur = dentry
+
+    for _ in range(MAX_DENTRY_DEPTH):
+        addr = int(cur)
+        if addr == 0:
+            base = "..."        # ran off the chain before reaching a root
+            break
+        if addr in cache:
+            base = cache[addr]
+            break
+        if addr in seen:        # d_parent ring; the dump is inconsistent
+            base = "..."
+            break
+        seen.add(addr)
+
+        parent = cur.d_parent
+        if int(parent) == addr or int(parent) == 0:   # filesystem root
+            cache[addr] = "/"
+            break
+
+        try:
+            chain.append((addr, cur.d_name.name.string_()))
+        except Exception:
+            chain.append((addr, "<?>"))
+
+        cur = parent
+    else:
+        base = "..."            # hit the depth cap, path is truncated
+
+    path = base
+    for addr, name in reversed(chain):
+        path = path + name if path.endswith("/") else path + "/" + name
+        cache[addr] = path
+
+    return path
+
+
+def get_inode_path(inode, cache):
+    try:
+        dentry_addr = get_first_dentry_addr(inode)
+        if dentry_addr == 0:
+            return ""
+
+        return get_dentry_path(readSU('struct dentry', dentry_addr), cache)
+    except Exception:
+        return ""
+
+
+def get_inode_uid(inode):
+    try:
+        return inode.i_uid.val
+    except Exception:
+        try:
+            return int(inode.i_uid)
+        except Exception:
+            return -1
+
+
+# Runs of digits, and long runs of hex, are the part of a generated
+# filename that varies per instance.
+VARYING_NAME_RE = re.compile(r'[0-9a-fA-F]{6,}|[0-9]+')
+
+
+def _name_pattern_sub(match):
+    # Decide by length, not by whether the run happens to be all digits:
+    # a random 32-bit id renders as 'a1b2c3d4' or as '08154711', and those
+    # are the same kind of name. Splitting them into two buckets would
+    # defeat the grouping.
+    return "<ID>" if len(match.group(0)) >= 6 else "<N>"
+
+
+def get_name_pattern(name):
+    """
+    Collapse the varying part of a generated filename.
+
+    'sess_a1b2c3d4' and 'sess_9f8e7d6c' are the same kind of file. When
+    thousands of inodes are holding the cache, the thing worth seeing is
+    that something is producing them, not each individual name.
+    """
+    return VARYING_NAME_RE.sub(_name_pattern_sub, name)
+
+
+def get_path_prefix(path, depth):
+    """Group a directory at 'depth' components, so siblings collapse."""
+    if depth <= 0 or path == "":
+        return path if path != "" else "/"
+
+    parts = [p for p in path.split("/") if p != ""]
+    if len(parts) <= depth:
+        return "/" + "/".join(parts) if parts else "/"
+
+    return "/" + "/".join(parts[:depth]) + "/..."
+
+
+def _bump(table, key, pages):
+    entry = table.get(key)
+    if entry is None:
+        table[key] = [1, pages]
+    else:
+        entry[0] = entry[0] + 1
+        entry[1] = entry[1] + pages
+
+
 def bytes_to_str(byte_size):
     """
     Compact human-readable size, for table columns.
@@ -1399,6 +1547,30 @@ def _print_stat_row(label, inodes, pages, total_pages, label_width=16):
     crashcolor.set_color(crashcolor.RESET)
 
 
+def _print_group_table(title, header, table, total_pages, top_n,
+                       label_width=16):
+    """One '== title ==' section, biggest consumer first."""
+    print("")
+    print("== %s ==" % title)
+    print("  %-*s %9s %10s %10s %7s  %s" %
+          (label_width, header, "INODES", "PAGES", "BYTES", "%", "SHARE"))
+    print("  " + "-" * (label_width + 60))
+
+    rows = sorted(table.items(), key=lambda kv: kv[1][1], reverse=True)
+    for key, (inodes, pages) in rows[:top_n]:
+        label = str(key)
+        if len(label) > label_width:
+            # Keep the tail: the leaf of a path says more than its root
+            label = "..." + label[-(label_width - 3):]
+        _print_stat_row(label, inodes, pages, total_pages, label_width)
+
+    if len(rows) > top_n:
+        rest_inodes = sum(v[0] for _, v in rows[top_n:])
+        rest_pages = sum(v[1] for _, v in rows[top_n:])
+        _print_stat_row("(%d more)" % (len(rows) - top_n), rest_inodes,
+                        rest_pages, total_pages, label_width)
+
+
 def show_pagecache_sb_stats(options, sb_addr):
     """
     Break down what is holding the page cache of one filesystem.
@@ -1420,7 +1592,9 @@ def show_pagecache_sb_stats(options, sb_addr):
     if top_n <= 0:
         top_n = 20
 
-    mount_path = dentry_to_filename(sb.s_root)
+    mount_points = get_mount_points(sb)
+    mount_path = ", ".join(mount_points) if mount_points \
+        else dentry_to_filename(sb.s_root)
     dev_major, dev_minor = get_dev_no(sb)
 
     total_pages = 0
@@ -1434,6 +1608,15 @@ def show_pagecache_sb_stats(options, sb_addr):
     fully_cached = barely_cached = 0
     sized_inodes = 0
     top_heap = []               # bounded min-heap of the largest consumers
+
+    want_breakdown = getattr(options, "breakdown", 0)
+    path_depth = getattr(options, "path_depth", 3)
+    dentry_cache = {}           # dentry address -> resolved path
+    by_dir = {}                 # directory -> [inodes, pages]
+    by_pattern = {}             # filename pattern -> [inodes, pages]
+    by_uid = {}                 # owner uid -> [inodes, pages]
+    unlinked_inodes = unlinked_pages = 0
+    unnamed_inodes = unnamed_pages = 0
 
     for inode in readSUListFromHead(sb.s_inodes,
                                     "i_sb_list",
@@ -1486,6 +1669,30 @@ def show_pagecache_sb_stats(options, sb_addr):
                 fully_cached = fully_cached + 1
             elif resident < 10:
                 barely_cached = barely_cached + 1
+
+        if want_breakdown:
+            path = get_inode_path(inode, dentry_cache)
+            if path == "" or path == "/":
+                # Held open with no reachable dentry - a deleted file still
+                # referenced by an fd, or an internal allocation
+                unnamed_inodes = unnamed_inodes + 1
+                unnamed_pages = unnamed_pages + nrpages
+            else:
+                name = path.rsplit("/", 1)[-1]
+                dirname = path.rsplit("/", 1)[0]
+                if dirname == "":
+                    dirname = "/"
+                _bump(by_dir, get_path_prefix(dirname, path_depth), nrpages)
+                _bump(by_pattern, get_name_pattern(name), nrpages)
+
+            _bump(by_uid, get_inode_uid(inode), nrpages)
+
+            try:
+                if inode.i_nlink == 0:
+                    unlinked_inodes = unlinked_inodes + 1
+                    unlinked_pages = unlinked_pages + nrpages
+            except Exception:
+                pass
 
         # cached_inodes is a unique increasing key, so tuple comparison
         # never has to order the inode objects themselves
@@ -1574,6 +1781,36 @@ def show_pagecache_sb_stats(options, sb_addr):
         print("  (the dirty page count is the whole cache of the dirty")
         print("   inodes, an upper bound - not every page of them is dirty)")
 
+    if want_breakdown:
+        if by_dir:
+            _print_group_table("Cache by directory", "DIRECTORY", by_dir,
+                               total_pages, top_n, label_width=44)
+            if path_depth > 0:
+                print("  (directories grouped at %d path component(s); "
+                      "--depth 0 for full paths)" % path_depth)
+        if by_pattern:
+            _print_group_table("Cache by filename pattern", "PATTERN",
+                               by_pattern, total_pages, top_n,
+                               label_width=40)
+            print("  (varying ids collapsed to <ID>, short numbers to <N>)")
+        if by_uid:
+            _print_group_table("Cache by owner", "UID", by_uid,
+                               total_pages, top_n, label_width=16)
+
+        if unlinked_inodes > 0 or unnamed_inodes > 0:
+            print("")
+            print("== Held without a name ==")
+            crashcolor.set_color(crashcolor.YELLOW)
+            print("  %-30s : %d inode(s), %d page(s) (%s)" %
+                  ("Unlinked, still open", unlinked_inodes, unlinked_pages,
+                   bytes_to_str(unlinked_pages * page_size)))
+            print("  %-30s : %d inode(s), %d page(s) (%s)" %
+                  ("No reachable dentry", unnamed_inodes, unnamed_pages,
+                   bytes_to_str(unnamed_pages * page_size)))
+            crashcolor.set_color(crashcolor.RESET)
+            print("  (this cache is not reachable by path - it goes away")
+            print("   only when the last fd referencing it is closed)")
+
     print("")
     print("== Top %d inodes by cached pages ==" % min(top_n, cached_inodes))
     print("  %-18s %10s %10s %7s %10s %8s  %s" %
@@ -1595,7 +1832,11 @@ def show_pagecache_sb_stats(options, sb_addr):
         if (i_state & I_SYNC) != 0:
             marks = marks + " [writeback]"
 
-        filename = get_inode_filename(inode)
+        # The d_parent walk gives a full path and costs no crash command,
+        # so prefer it; fall back to 'files -d' when it finds no name
+        filename = get_inode_path(inode, dentry_cache)
+        if filename == "" or filename == "/":
+            filename = get_inode_filename(inode)
         print("  0x%-16x %10d %10s %6.1f%% %10s %8s  %s%s" %
               (inode, nrpages, bytes_to_str(nrpages * page_size), percentage,
                bytes_to_str(i_size), resident_str, filename, marks))
@@ -2126,8 +2367,17 @@ def fsinfo():
                        "consuming that filesystem's page cache")
     op.add_option("--top", dest="top_count", default=20,
                   action="store", type="int", metavar="N",
-                  help="With '-r <super_block>', number of inodes to list "
-                       "(default: 20)")
+                  help="With '-r <super_block>', number of rows to list "
+                       "in each table (default: 20)")
+    op.add_option("--breakdown", dest="breakdown", default=0,
+                  action="store_true",
+                  help="With '-r <super_block>', also group the cache by "
+                       "directory, filename pattern and owner, and report "
+                       "cache held by unlinked files")
+    op.add_option("--depth", dest="path_depth", default=3,
+                  action="store", type="int", metavar="N",
+                  help="With '--breakdown', group directories at N path "
+                       "components (default: 3; 0 for full paths)")
     op.add_option("-s", "--slab", dest="show_slab", default=0,
                   action="store_true",
                   help="Show all 'dentry' details in slab")

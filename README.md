@@ -116,6 +116,33 @@ Inodes that are being freed (`I_FREEING`/`I_WILL_FREE`) and inodes with no
 cached pages are skipped. The dirty page count is the whole cache of the dirty
 inodes, so treat it as an upper bound.
 
+### Finding out *who* is holding it
+
+When the cache is one big pile of regular files — a tmpfs with thousands of
+generated filenames, say — the type breakdown says nothing useful. `--breakdown`
+resolves a path for every cached inode and groups them:
+
+```
+crash> fsinfo -r ffff995380013800 --breakdown
+crash> fsinfo -r ffff995380013800 --breakdown --depth 0    # full paths
+```
+
+| Section | Answers |
+|---|---|
+| Cache by directory | which tree it lives under (`--depth N` sets the grouping level, default 3) |
+| Cache by filename pattern | which *producer* made it — varying ids collapse to `<ID>`/`<N>`, so 2000 `sess_a1b2c3d4` files become one row |
+| Cache by owner | which uid |
+| Held without a name | unlinked files still held open, and inodes with no reachable dentry |
+
+That last one matters most on tmpfs: cache behind an unlinked file is not
+reachable by path and is not freed until the last fd referencing it is closed,
+so it will not show up in anything that walks the directory tree.
+
+Paths come from walking `d_parent` and reading `d_name` directly, with
+ancestors memoised, so this costs no crash command per inode. Paths are
+relative to the filesystem root and carry no mount point — every inode being
+grouped belongs to the same superblock anyway.
+
 ## Finding Backported Patches
 
 `git find` answers the question that comes up on nearly every kernel case: *is

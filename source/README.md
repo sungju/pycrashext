@@ -399,11 +399,57 @@ Page cache statistics for super_block 0xffff888100aabbcc
 ================================================================================
 ```
 
-Use `--top N` to list more (or fewer) than the default 20 inodes.
+Use `--top N` to list more (or fewer) than the default 20 rows per table.
 
 ```
 crash> fsinfo -r ffff888100aabbcc --top 50
 ```
+
+When everything is a regular file and the type breakdown says nothing — a
+tmpfs full of generated filenames, for instance — `--breakdown` groups the
+cache by where the files live, what made them, and who owns them.
+
+```
+crash> fsinfo -r ffff995380013800 --breakdown
+
+== Cache by directory ==
+  DIRECTORY                                     INODES      PAGES      BYTES       %  SHARE
+  ------------------------------------------------------------------------------------------
+  /var/lib/containers/...                         1755    4522421    17.3 GB   73.6%  [████████████░░░░]
+  /var/lib/php/...                                8462    1365641     5.2 GB   22.2%  [███▓░░░░░░░░░░░░]
+  /dev/shm                                         340     246000   960.9 MB    4.0%  [▓░░░░░░░░░░░░░░░]
+  (directories grouped at 3 path component(s); --depth 0 for full paths)
+
+== Cache by filename pattern ==
+  PATTERN                                     INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------------------
+  layer<N>.tar                                  1755    4522421    17.3 GB   73.6%  [████████████░░░░]
+  sess_<ID>                                     2153    1359332     5.2 GB   22.1%  [███▓░░░░░░░░░░░░]
+  tiny<N>.tmp                                   6309       6309    24.6 MB    0.1%  [▒░░░░░░░░░░░░░░░]
+  (varying ids collapsed to <ID>, short numbers to <N>)
+
+== Cache by owner ==
+  UID                 INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------
+  0                     1767    4536821    17.3 GB   73.8%  [████████████░░░░]
+  48                    8502    1401641     5.3 GB   22.8%  [███▓░░░░░░░░░░░░]
+
+== Held without a name ==
+  Unlinked, still open           : 40 inode(s), 36000 page(s) (140.6 MB)
+  No reachable dentry            : 12 inode(s), 14400 page(s) (56.2 MB)
+```
+
+The filename pattern table is usually the one that names the culprit: it
+collapses generated names, so thousands of `sess_a1b2c3d4` files become a
+single row pointing at whatever is producing them.
+
+"Held without a name" is the tmpfs trap — cache behind an unlinked file is
+unreachable by path and is only freed when the last fd referencing it closes,
+so nothing that walks the directory tree will account for it.
+
+Paths are resolved by walking `d_parent` and reading `d_name`, with ancestors
+memoised, so no crash command runs per inode. `--depth N` controls how many
+path components the directory table groups at (default 3, `0` for full paths).
 
 ### cginfo ###
 It provides cgroup related information. It is mostly useful to find out how many cgroups were created in the system.
