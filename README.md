@@ -160,9 +160,16 @@ was mapped and then had its fd closed, which is the normal life of a
 holds every one of its pages.
 
 Anything left with no fd *and* no mapping is called out separately, along with
-what can still be holding it: SysV shared memory marked for deletion but still
-attached, a descriptor in flight over a unix socket, a loop device or GEM
-buffer, or a mount in another namespace.
+what can still be holding it: an unattached SysV segment held by the IPC
+namespace alone, a descriptor in flight over a unix socket (`SCM_RIGHTS`), a
+loop device's backing file, a swapfile, or a GEM/DRM buffer. An *attached* SysV
+segment is not in that list — `shmat()` creates a VMA, so it shows up in the
+mmap table instead.
+
+Inodes whose `i_mmap` layout the build does not recognise are reported as
+unclassified rather than counted as unmapped, and an inode with more mappings
+than the walk limit is flagged so a short mapper list is not mistaken for a
+complete one.
 
 Finally, a tmpfs superblock that is `kern_mount()`ed is recognised and labelled
 `<kernel-internal shmem>`. That is where `shmem_file_setup()` allocates from —

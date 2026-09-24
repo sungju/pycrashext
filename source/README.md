@@ -511,9 +511,19 @@ every one of its pages while appearing in no fd table at all:
 ```
 
 Whatever is left with no fd *and* no mapping gets its own section listing what
-can still be holding it — SysV shm marked for deletion but still attached, a
-descriptor in flight over a unix socket, a loop device or GEM buffer, or a
-mount in a namespace that `mount` does not report.
+can still be holding it — a SysV segment attached to nothing and held by the
+IPC namespace alone (`ipcs -m` with NATTCH 0), a descriptor in flight over a
+unix socket (`SCM_RIGHTS`), a loop device's backing file, a swapfile, or a
+GEM/DRM buffer that maps through the DRM node rather than through this inode.
+An *attached* SysV segment is deliberately not in that list: `shmat()` creates
+a VMA, so it appears in the mmap table above instead.
+
+Two honesty notes round it out. An inode whose `i_mmap` layout the build does
+not recognise (`prio_tree_root`, pre-3.9) is counted as *unclassified* rather
+than as unmapped — claiming "nothing maps this" from a struct that could not be
+read would invent a finding. And an inode with more than 512 mappings is
+flagged, because only the first 512 are walked and the mapper list for it is
+therefore incomplete.
 
 #### The kernel-internal shmem mount ####
 

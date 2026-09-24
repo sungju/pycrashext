@@ -1487,7 +1487,21 @@ def is_internal_shmem_sb(sb):
             mnt = readSymbol(name)
             if mnt is None or int(mnt) == 0:
                 continue
-            if int(mnt.mnt_sb) == int(sb):
+        except Exception:
+            continue
+
+        try:
+            mnt_sb = mnt.mnt_sb
+        except Exception:
+            # readSymbol gave back the bare pointer value rather than
+            # dereferencing it, so do that ourselves
+            try:
+                mnt_sb = readSU("struct vfsmount", int(mnt)).mnt_sb
+            except Exception:
+                continue
+
+        try:
+            if int(mnt_sb) == int(sb):
                 return True
         except Exception:
             continue
@@ -1521,7 +1535,13 @@ def get_i_mmap_root(inode):
 
 
 def get_mm_owners():
-    """Map 'struct mm_struct' address -> 'comm (pid)', built once."""
+    """
+    Map 'struct mm_struct' address -> 'comm (pid)', built once.
+
+    Every thread of a process shares one mm, so prefer the thread group
+    leader: reporting an arbitrary thread would print a tid where the reader
+    expects a pid, and 'ps' would not find it.
+    """
     owners = {}
 
     try:
@@ -1532,7 +1552,14 @@ def get_mm_owners():
     for t in threads:
         try:
             mm = int(t.mm)
-            if mm != 0 and mm not in owners:
+            if mm == 0:
+                continue
+            is_leader = True
+            try:
+                is_leader = (int(t.pid) == int(t.tgid))
+            except Exception:
+                pass
+            if mm not in owners or is_leader:
                 owners[mm] = "%s (%d)" % (t.comm, t.pid)
         except Exception:
             continue
@@ -1542,6 +1569,29 @@ def get_mm_owners():
 
 MAX_MMAP_VMAS = 512
 
+_vma_shared_offset = None
+
+def get_vma_shared_offset():
+    """
+    Offset of the interval-tree node within 'struct vm_area_struct'.
+
+    Resolved once: this runs for every cached inode, and a per-inode symbol
+    lookup is exactly the kind of cost that makes the walk unusable on a
+    filesystem with tens of thousands of inodes.
+    """
+    global _vma_shared_offset
+
+    if _vma_shared_offset is None:
+        offset = member_offset("struct vm_area_struct", "shared.rb")
+        if offset < 0:
+            # 'rb' is the first member of the 'shared' struct, so the offset
+            # of the one is the offset of the other
+            offset = member_offset("struct vm_area_struct", "shared")
+        _vma_shared_offset = offset
+
+    return _vma_shared_offset
+
+
 def get_inode_mappers(inode, mm_owners):
     """
     Processes that have this inode mapped, by walking its VMA interval tree.
@@ -1550,19 +1600,23 @@ def get_inode_mappers(inode, mm_owners):
     and then had its fd closed - the normal life of a memfd or a POSIX shm
     segment - is invisible to it. The mapping still pins every page.
 
-    Returns (set of "comm (pid)", number of VMAs seen).
+    Returns (mappers, vma_count, truncated), where vma_count is None when the
+    mappings could not be read at all. None is not the same as zero: it means
+    'cannot tell', and reporting it as 'nothing maps this' would invent a
+    finding.
     """
-    root = get_i_mmap_root(inode)
-    if not root:
-        return set(), 0
+    if mm_owners is None:
+        mm_owners = {}
 
-    vma_offset = member_offset("struct vm_area_struct", "shared.rb")
+    root = get_i_mmap_root(inode)
+    if root is None:
+        return set(), None, False
+    if root == 0:
+        return set(), 0, False
+
+    vma_offset = get_vma_shared_offset()
     if vma_offset < 0:
-        # 'rb' is the first member of the 'shared' struct, so the offset of
-        # the one is the offset of the other
-        vma_offset = member_offset("struct vm_area_struct", "shared")
-    if vma_offset < 0:
-        return set(), 0
+        return set(), None, False
 
     mappers = set()
     pending = [root]
@@ -1589,17 +1643,21 @@ def get_inode_mappers(inode, mm_owners):
 
         mappers.add(mm_owners.get(mm, "<mm %#x, no task>" % mm))
 
-    return mappers, len(seen)
+    # Real nodes still queued means the cap stopped us short, so the mapper
+    # list for this inode is incomplete. NULL children do not count.
+    truncated = any(node_addr != 0 for node_addr in pending)
+
+    return mappers, len(seen), truncated
 
 
 def get_inode_holders():
     """
     Map inode address -> set of (pid, comm), from 'foreach files'.
 
-    When a file has been unlinked, the only thing keeping its pages alive
-    is an open fd, and the only way back to a culprit is the process that
-    holds it. This is one crash command for the whole system rather than
-    one per inode, so the cost does not grow with the filesystem.
+    This covers the fd table and nothing else, so an absent inode does not
+    mean an unheld one - see get_inode_mappers() for the other half. One
+    crash command for the whole system rather than one per inode, so the
+    cost does not grow with the filesystem.
     """
     holders = {}
     pid = 0
@@ -1805,9 +1863,12 @@ def show_pagecache_sb_stats(options, sb_addr):
 
     by_holder = {}                      # "comm (pid)" -> [inodes, pages]
     by_mapper = {}                      # same, for mmap rather than fd
-    orphan_inodes = orphan_pages = 0
-    mapped_inodes = mapped_pages = 0
-    unheld_inodes = unheld_pages = 0    # no fd and no mapping either
+    orphan_inodes = orphan_pages = 0            # no fd
+    mapped_inodes = mapped_pages = 0            # mapped, fd or not
+    orphan_mapped_inodes = orphan_mapped_pages = 0   # no fd, but mapped
+    unheld_inodes = unheld_pages = 0            # no fd and no mapping either
+    unknown_mmap_inodes = 0                     # mappings could not be read
+    truncated_mmap_inodes = 0                   # more VMAs than we walked
     want_holders = bool(getattr(options, "holders", 0))
     holders = get_inode_holders() if want_holders else None
     mm_owners = get_mm_owners() if want_holders else None
@@ -1906,10 +1967,20 @@ def show_pagecache_sb_stats(options, sb_addr):
             # mapped and then had its fd closed - the normal life of a memfd
             # or a POSIX shm segment - holds every one of its pages through
             # the mapping alone, and 'foreach files' cannot see it.
-            mappers, vma_count = get_inode_mappers(inode, mm_owners)
-            if vma_count > 0:
+            mappers, vma_count, truncated = get_inode_mappers(inode, mm_owners)
+            if truncated:
+                truncated_mmap_inodes = truncated_mmap_inodes + 1
+
+            if vma_count is None:
+                # Could not read the mappings. Saying 'nothing maps this'
+                # here would manufacture a finding out of a missing struct.
+                unknown_mmap_inodes = unknown_mmap_inodes + 1
+            elif vma_count > 0:
                 mapped_inodes = mapped_inodes + 1
                 mapped_pages = mapped_pages + nrpages
+                if not who:
+                    orphan_mapped_inodes = orphan_mapped_inodes + 1
+                    orphan_mapped_pages = orphan_mapped_pages + nrpages
                 for mapper in mappers:
                     _bump(by_mapper, mapper, nrpages)
             elif not who:
@@ -2084,7 +2155,15 @@ def show_pagecache_sb_stats(options, sb_addr):
                                    "PROCESS (PID)", by_mapper, total_pages,
                                    top_n, label_width=28)
                 print("  (mappings pin every page just as an open fd does,")
-                print("   and outlive the fd they were created from)")
+                print("   and outlive the fd they were created from; an inode")
+                print("   mapped by several processes is counted under each,")
+                print("   so these shares can exceed 100%)")
+                if truncated_mmap_inodes > 0:
+                    print("  (%d inode(s) have more than %d mappings; only the"
+                          % (truncated_mmap_inodes, MAX_MMAP_VMAS))
+                    print("   first %d were walked, so some processes holding"
+                          % MAX_MMAP_VMAS)
+                    print("   them are missing from this table)")
 
             if not holders:
                 # Nothing at all parsed out of 'foreach files'. That is a
@@ -2101,12 +2180,23 @@ def show_pagecache_sb_stats(options, sb_addr):
                 print("  %-34s : %d inode(s), %s" %
                       ("Not open by any fd", orphan_inodes,
                        bytes_to_str(orphan_pages * page_size)))
-                if mapped_inodes > 0:
+                if orphan_mapped_inodes > 0:
                     print("  %-34s : %d inode(s), %s" %
-                          ("  of those, held by a mapping", mapped_inodes,
-                           bytes_to_str(mapped_pages * page_size)))
+                          ("  of those, held by a mapping",
+                           orphan_mapped_inodes,
+                           bytes_to_str(orphan_mapped_pages * page_size)))
 
-            if unheld_inodes > 0:
+            if unknown_mmap_inodes > 0:
+                crashcolor.set_color(crashcolor.YELLOW)
+                print("")
+                print("  %-34s : %d inode(s)" %
+                      ("Mappings could not be read", unknown_mmap_inodes))
+                crashcolor.set_color(crashcolor.RESET)
+                print("  ('i_mmap' is not a layout this build understands, so")
+                print("   these are left unclassified rather than reported as")
+                print("   unmapped)")
+
+            if unheld_inodes > 0 and holders:
                 # No fd, no mapping, and no name. Worth spelling out what is
                 # left, because the usual advice - find the process and close
                 # the fd - does not apply to any of it.
@@ -2116,20 +2206,20 @@ def show_pagecache_sb_stats(options, sb_addr):
                       ("No fd and no mapping", unheld_inodes,
                        bytes_to_str(unheld_pages * page_size)))
                 crashcolor.set_color(crashcolor.RESET)
-                print("  Something other than a process is holding these.")
-                print("  On tmpfs/shmem the usual causes are:")
-                print("    - SysV shared memory that has been marked for")
-                print("      deletion but is still attached ('ipcs -m', look")
-                print("      for a non-zero NATTCH)")
-                print("    - a memfd or shm segment passed over a unix socket")
-                print("      and sitting in the receiver's queue (SCM_RIGHTS)")
-                print("    - loop devices, swapfiles or GEM/DRM buffers")
-                print("      backed by this filesystem")
-                print("    - a mount in another namespace, or a lazily")
-                print("      unmounted one ('umount -l') still pinned")
-                if internal_shmem:
-                    print("    - anonymous shared mappings, which live here")
-                    print("      with no name and no fd by construction")
+                print("  A 'struct file' or an inode reference is holding")
+                print("  these, rather than anything a process can be asked")
+                print("  to let go of. On tmpfs/shmem the usual causes are:")
+                print("    - SysV shared memory that exists but is attached")
+                print("      to nothing: the IPC namespace holds it on its")
+                print("      own ('ipcs -m', NATTCH 0). An *attached*")
+                print("      segment has a VMA and would be in the mmap")
+                print("      table above instead.")
+                print("    - a memfd or shm fd passed over a unix socket and")
+                print("      still in the receiver's queue (SCM_RIGHTS): a")
+                print("      live 'struct file' in no fd table at all")
+                print("    - a loop device's backing file, or a swapfile")
+                print("    - GEM/DRM buffers, which map through the DRM node")
+                print("      rather than through this inode")
 
             if internal_shmem:
                 print("")
@@ -2718,9 +2808,10 @@ def fsinfo():
     op.add_option("--holders", dest="holders", default=0,
                   action="store_true",
                   help="With '-r <super_block>', attribute the cache to the "
-                       "processes holding the files open (runs "
-                       "'foreach files' once; the only way to find a "
-                       "culprit for unlinked files)")
+                       "processes holding it, both by open fd ('foreach "
+                       "files', run once) and by mapping (each inode's VMA "
+                       "tree) - the only way to find a culprit for unlinked "
+                       "files")
     op.add_option("--depth", dest="path_depth", default=3,
                   action="store", type="int", metavar="N",
                   help="With '--breakdown', group directories at N path "
