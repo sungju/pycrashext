@@ -138,6 +138,20 @@ That last one matters most on tmpfs: cache behind an unlinked file is not
 reachable by path and is not freed until the last fd referencing it is closed,
 so it will not show up in anything that walks the directory tree.
 
+When *every* cached inode turns out to be unlinked, no path resolves for any of
+them and the directory and pattern tables have nothing to say. That is not a
+failure of the tool — it is the answer. `--holders` then names the processes
+keeping those deleted files open, which is the only remaining route to a
+culprit:
+
+```
+crash> fsinfo -r ffff995380013800 --breakdown --holders
+```
+
+It runs `foreach files` once for the whole system, so the cost does not grow
+with the size of the filesystem. A file open in several processes is counted
+under each of them, so those shares can exceed 100%.
+
 Paths come from walking `d_parent` and reading `d_name` directly, with
 ancestors memoised, so this costs no crash command per inode. Paths are
 relative to the filesystem root and carry no mount point — every inode being

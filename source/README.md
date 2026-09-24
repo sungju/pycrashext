@@ -435,8 +435,10 @@ crash> fsinfo -r ffff995380013800 --breakdown
   48                    8502    1401641     5.3 GB   22.8%  [███▓░░░░░░░░░░░░]
 
 == Held without a name ==
-  Unlinked, still open           : 40 inode(s), 36000 page(s) (140.6 MB)
-  No reachable dentry            : 12 inode(s), 14400 page(s) (56.2 MB)
+  Unlinked (i_nlink == 0)            : 40 inode(s), 140.6 MB
+  No path to them (disconnected)     : 44 inode(s), 156.2 MB
+    both of the above                : 38 inode(s), 136.4 MB
+  Either, counted once               : 46 inode(s), 160.4 MB (0.7% of the cache)
 ```
 
 The filename pattern table is usually the one that names the culprit: it
@@ -445,11 +447,56 @@ single row pointing at whatever is producing them.
 
 "Held without a name" is the tmpfs trap — cache behind an unlinked file is
 unreachable by path and is only freed when the last fd referencing it closes,
-so nothing that walks the directory tree will account for it.
+so nothing that walks the directory tree will account for it. The two counters
+overlap almost entirely in practice (an unlinked file normally has no reachable
+path either), which is why the overlap and the union are spelled out rather
+than leaving two numbers that look like they should be added.
 
 Paths are resolved by walking `d_parent` and reading `d_name`, with ancestors
 memoised, so no crash command runs per inode. `--depth N` controls how many
 path components the directory table groups at (default 3, `0` for full paths).
+
+#### Naming the processes that hold the cache ####
+
+When the files are unlinked there is no path to report, and the only route back
+to a culprit is the fd keeping them alive. `--holders` runs `foreach files`
+once and attributes the cache to the processes holding it open.
+
+```
+crash> fsinfo -r ffff995380013800 --breakdown --holders
+
+== Cache by directory / filename ==
+  Not available: no path could be resolved for any of the
+  11828 cached inode(s) on this filesystem.
+  Their dentries are disconnected from the tree, which is
+  what happens to a file that has been unlinked while
+  still open. See 'Held without a name' below, and use
+  '--holders' to find the processes holding them.
+
+  ** Every cached inode here is unlinked. This whole
+     filesystem is holding deleted files open - the
+     cache cannot be reclaimed by deleting anything,
+     only by the holders closing their fds. Use
+     '--holders' to name them. **
+
+== Cache reachable from each process ==
+  PROCESS (PID)                   INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------------------
+  gitlab-runner (4242)              7885    6265491    23.9 GB   66.7%  [███████████░░░░░]
+  dockerd (9001)                    3943    3133309    12.0 GB   33.3%  [█████▓░░░░░░░░░░]
+  (a file open in several processes is counted under
+   each of them, so these shares can exceed 100%)
+```
+
+A file open in several processes is counted under each of them, so the shares
+in this table can add up to more than 100%. Inodes that no open fd refers to
+are reported separately — those are pinned by something other than a process
+fd, such as a mapping or an internal kernel reference.
+
+The mount point comes from the `mount` table rather than from the root dentry,
+because a tmpfs root dentry has no name of its own. A superblock still holding
+cache but reported as `<not mounted>` is itself the finding: it has been
+unmounted (often `umount -l`) and survives only because its files are open.
 
 ### cginfo ###
 It provides cgroup related information. It is mostly useful to find out how many cgroups were created in the system.

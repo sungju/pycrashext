@@ -95,10 +95,15 @@ def dentry_to_filename (dentry) :
 
     try:
         crashout = exec_crash_command ("files -d {:#x}".format(dentry))
-        filename = crashout.split()[-1]
-        if filename == "DIR" :
-            filename = "<blank>"
-        return filename
+        # DENTRY INODE SUPERBLK TYPE PATH, and PATH is missing whenever the
+        # dentry has no name to print. Splitting on the last word of the whole
+        # output returns the TYPE column in that case - 'REG', 'FIFO', 'SOCK' -
+        # which then reads as a filename. Go by column instead of by position.
+        last_line = crashout.strip().splitlines()[-1]
+        columns = last_line.split(None, 4)      # PATH may contain spaces
+        if len(columns) < 5:
+            return "<blank>"
+        return columns[4].strip()
     except:
         return "<invalid>"
 
@@ -1465,6 +1470,51 @@ def get_inode_path(inode, cache):
         return ""
 
 
+def get_inode_holders():
+    """
+    Map inode address -> set of (pid, comm), from 'foreach files'.
+
+    When a file has been unlinked, the only thing keeping its pages alive
+    is an open fd, and the only way back to a culprit is the process that
+    holds it. This is one crash command for the whole system rather than
+    one per inode, so the cost does not grow with the filesystem.
+    """
+    holders = {}
+    pid = 0
+    comm = ""
+
+    try:
+        output = exec_crash_command("foreach files")
+    except Exception:
+        return holders
+
+    for line in output.splitlines():
+        words = line.split()
+        if not words:
+            continue
+
+        if words[0] == "PID:":
+            try:
+                pid = int(words[1])
+            except (ValueError, IndexError):
+                pid = 0
+            comm = line.split("COMMAND:")[-1].strip().strip('"') \
+                if "COMMAND:" in line else ""
+            continue
+
+        # FD  FILE  DENTRY  INODE  TYPE  PATH
+        if len(words) >= 5 and words[0].isdigit():
+            try:
+                inode_addr = int(words[3], 16)
+            except ValueError:
+                continue
+            if inode_addr not in holders:
+                holders[inode_addr] = set()
+            holders[inode_addr].add((pid, comm))
+
+    return holders
+
+
 def get_inode_uid(inode):
     try:
         return inode.i_uid.val
@@ -1593,8 +1643,14 @@ def show_pagecache_sb_stats(options, sb_addr):
         top_n = 20
 
     mount_points = get_mount_points(sb)
-    mount_path = ", ".join(mount_points) if mount_points \
-        else dentry_to_filename(sb.s_root)
+    if mount_points:
+        mount_path = ", ".join(mount_points)
+    else:
+        # Not in the mount table at all. For a superblock that is still
+        # holding gigabytes of cache this is itself the finding: it has
+        # been unmounted (often 'umount -l') and is alive only because
+        # something still holds its files open.
+        mount_path = "<not mounted>"
     dev_major, dev_minor = get_dev_no(sb)
 
     total_pages = 0
@@ -1617,6 +1673,11 @@ def show_pagecache_sb_stats(options, sb_addr):
     by_uid = {}                 # owner uid -> [inodes, pages]
     unlinked_inodes = unlinked_pages = 0
     unnamed_inodes = unnamed_pages = 0
+    both_inodes = both_pages = 0        # unlinked AND unreachable: the overlap
+
+    by_holder = {}                      # "comm (pid)" -> [inodes, pages]
+    orphan_inodes = orphan_pages = 0
+    holders = get_inode_holders() if getattr(options, "holders", 0) else None
 
     for inode in readSUListFromHead(sb.s_inodes,
                                     "i_sb_list",
@@ -1637,6 +1698,11 @@ def show_pagecache_sb_stats(options, sb_addr):
             i_size = inode.i_size
         except Exception:
             i_mode = i_size = 0
+
+        try:
+            i_nlink = inode.i_nlink
+        except Exception:
+            i_nlink = -1        # unknown, so do not claim it is unlinked
 
         cached_inodes = cached_inodes + 1
         total_pages = total_pages + nrpages
@@ -1673,10 +1739,13 @@ def show_pagecache_sb_stats(options, sb_addr):
         if want_breakdown:
             path = get_inode_path(inode, dentry_cache)
             if path == "" or path == "/":
-                # Held open with no reachable dentry - a deleted file still
-                # referenced by an fd, or an internal allocation
+                # No path leads here: a deleted file still pinned by an fd,
+                # or a dentry disconnected from the tree
                 unnamed_inodes = unnamed_inodes + 1
                 unnamed_pages = unnamed_pages + nrpages
+                if i_nlink == 0:
+                    both_inodes = both_inodes + 1
+                    both_pages = both_pages + nrpages
             else:
                 name = path.rsplit("/", 1)[-1]
                 dirname = path.rsplit("/", 1)[0]
@@ -1687,16 +1756,23 @@ def show_pagecache_sb_stats(options, sb_addr):
 
             _bump(by_uid, get_inode_uid(inode), nrpages)
 
-            try:
-                if inode.i_nlink == 0:
-                    unlinked_inodes = unlinked_inodes + 1
-                    unlinked_pages = unlinked_pages + nrpages
-            except Exception:
-                pass
+            if i_nlink == 0:
+                unlinked_inodes = unlinked_inodes + 1
+                unlinked_pages = unlinked_pages + nrpages
+
+        if holders is not None:
+            who = holders.get(int(inode))
+            if who:
+                for pid, comm in who:
+                    _bump(by_holder, "%s (%d)" % (comm, pid), nrpages)
+            else:
+                orphan_inodes = orphan_inodes + 1
+                orphan_pages = orphan_pages + nrpages
 
         # cached_inodes is a unique increasing key, so tuple comparison
         # never has to order the inode objects themselves
-        entry = (nrpages, cached_inodes, inode, i_mode, i_size, i_state)
+        entry = (nrpages, cached_inodes, inode, i_mode, i_size, i_state,
+                 i_nlink)
         if len(top_heap) < top_n:
             heapq.heappush(top_heap, entry)
         elif nrpages > top_heap[0][0]:
@@ -1782,6 +1858,16 @@ def show_pagecache_sb_stats(options, sb_addr):
         print("   inodes, an upper bound - not every page of them is dirty)")
 
     if want_breakdown:
+        if not by_dir and not by_pattern:
+            print("")
+            print("== Cache by directory / filename ==")
+            print("  Not available: no path could be resolved for any of the")
+            print("  %d cached inode(s) on this filesystem." % cached_inodes)
+            print("  Their dentries are disconnected from the tree, which is")
+            print("  what happens to a file that has been unlinked while")
+            print("  still open. See 'Held without a name' below, and use")
+            print("  '--holders' to find the processes holding them.")
+
         if by_dir:
             _print_group_table("Cache by directory", "DIRECTORY", by_dir,
                                total_pages, top_n, label_width=44)
@@ -1798,25 +1884,63 @@ def show_pagecache_sb_stats(options, sb_addr):
                                total_pages, top_n, label_width=16)
 
         if unlinked_inodes > 0 or unnamed_inodes > 0:
+            # These two overlap - an unlinked file usually has no reachable
+            # path either - so report the overlap instead of printing the
+            # same pages twice and letting them read as a sum.
+            union_inodes = unlinked_inodes + unnamed_inodes - both_inodes
+            union_pages = unlinked_pages + unnamed_pages - both_pages
+
             print("")
             print("== Held without a name ==")
             crashcolor.set_color(crashcolor.YELLOW)
-            print("  %-30s : %d inode(s), %d page(s) (%s)" %
-                  ("Unlinked, still open", unlinked_inodes, unlinked_pages,
+            print("  %-34s : %d inode(s), %s" %
+                  ("Unlinked (i_nlink == 0)", unlinked_inodes,
                    bytes_to_str(unlinked_pages * page_size)))
-            print("  %-30s : %d inode(s), %d page(s) (%s)" %
-                  ("No reachable dentry", unnamed_inodes, unnamed_pages,
+            print("  %-34s : %d inode(s), %s" %
+                  ("No path to them (disconnected)", unnamed_inodes,
                    bytes_to_str(unnamed_pages * page_size)))
+            print("  %-34s : %d inode(s), %s" %
+                  ("  both of the above", both_inodes,
+                   bytes_to_str(both_pages * page_size)))
+            print("  %-34s : %d inode(s), %s (%.1f%% of the cache)" %
+                  ("Either, counted once", union_inodes,
+                   bytes_to_str(union_pages * page_size),
+                   union_pages * 100.0 / total_pages))
             crashcolor.set_color(crashcolor.RESET)
-            print("  (this cache is not reachable by path - it goes away")
-            print("   only when the last fd referencing it is closed)")
+            print("  (no path reaches these pages; they are freed only when")
+            print("   the last fd referencing them is closed)")
+
+            if unlinked_inodes == cached_inodes and cached_inodes > 0:
+                crashcolor.set_color(crashcolor.LIGHTRED)
+                print("")
+                print("  ** Every cached inode here is unlinked. This whole")
+                print("     filesystem is holding deleted files open - the")
+                print("     cache cannot be reclaimed by deleting anything,")
+                print("     only by the holders closing their fds. Use")
+                print("     '--holders' to name them. **")
+                crashcolor.set_color(crashcolor.RESET)
+
+        if holders is not None:
+            if by_holder:
+                _print_group_table("Cache reachable from each process",
+                                   "PROCESS (PID)", by_holder, total_pages,
+                                   top_n, label_width=28)
+                print("  (a file open in several processes is counted under")
+                print("   each of them, so these shares can exceed 100%)")
+            if orphan_inodes > 0:
+                print("")
+                print("  %-34s : %d inode(s), %s" %
+                      ("Held by no open fd at all", orphan_inodes,
+                       bytes_to_str(orphan_pages * page_size)))
+                print("  (nothing in 'foreach files' refers to these; they")
+                print("   are pinned by something other than a process fd)")
 
     print("")
     print("== Top %d inodes by cached pages ==" % min(top_n, cached_inodes))
     print("  %-18s %10s %10s %7s %10s %8s  %s" %
           ("inode", "PAGES", "CACHED", "%", "SIZE", "RESIDENT", "FILE"))
     print("  " + "-" * 92)
-    for nrpages, _seq, inode, i_mode, i_size, i_state in \
+    for nrpages, _seq, inode, i_mode, i_size, i_state, i_nlink in \
             sorted(top_heap, reverse=True):
         percentage = nrpages * 100.0 / total_pages
         size_pages = (i_size + page_size - 1) // page_size
@@ -1826,17 +1950,25 @@ def show_pagecache_sb_stats(options, sb_addr):
         else:
             resident_str = "      --"
 
-        marks = ""
-        if (i_state & I_DIRTY) != 0:
-            marks = marks + " [dirty]"
-        if (i_state & I_SYNC) != 0:
-            marks = marks + " [writeback]"
-
         # The d_parent walk gives a full path and costs no crash command,
         # so prefer it; fall back to 'files -d' when it finds no name
         filename = get_inode_path(inode, dentry_cache)
         if filename == "" or filename == "/":
             filename = get_inode_filename(inode)
+        named = filename not in ("", "/", "<no dentry>", "<blank>",
+                                 "<invalid>")
+        if not named:
+            # Say why there is no name rather than leaving a placeholder
+            filename = "<deleted>" if i_nlink == 0 else "<no path>"
+
+        marks = ""
+        if i_nlink == 0 and named:
+            # '<deleted>' already carries this; do not say it twice
+            marks = marks + " [deleted]"
+        if (i_state & I_DIRTY) != 0:
+            marks = marks + " [dirty]"
+        if (i_state & I_SYNC) != 0:
+            marks = marks + " [writeback]"
         print("  0x%-16x %10d %10s %6.1f%% %10s %8s  %s%s" %
               (inode, nrpages, bytes_to_str(nrpages * page_size), percentage,
                bytes_to_str(i_size), resident_str, filename, marks))
@@ -2374,6 +2506,12 @@ def fsinfo():
                   help="With '-r <super_block>', also group the cache by "
                        "directory, filename pattern and owner, and report "
                        "cache held by unlinked files")
+    op.add_option("--holders", dest="holders", default=0,
+                  action="store_true",
+                  help="With '-r <super_block>', attribute the cache to the "
+                       "processes holding the files open (runs "
+                       "'foreach files' once; the only way to find a "
+                       "culprit for unlinked files)")
     op.add_option("--depth", dest="path_depth", default=3,
                   action="store", type="int", metavar="N",
                   help="With '--breakdown', group directories at N path "
