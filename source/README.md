@@ -60,7 +60,7 @@ Every command accepts '-h' to show the available options.
 | cpuinfo | CPU information |
 | devinfo | Device information |
 | edis | Enhanced disassembly with source lines (needs remoteapi) |
-| fsinfo | Filesystem information |
+| fsinfo | Filesystem information, incl. page cache breakdown per superblock |
 | git | Run 'git log/show' on remote kernel source repositories, and 'git find' to check whether an upstream patch is backported into this kernel (needs remoteapi) |
 | hangcheck | Show hung (D-state) tasks with details |
 | insights | Run insights rules (needs remoteapi; server plugin currently deprecated) |
@@ -349,6 +349,61 @@ Fragment size:                 4096
 Reserved GDT blocks:           319
 ```
 
+`fsinfo -r` shows how much page cache each mounted filesystem holds. Give it a
+`struct super_block` address and it breaks down what inside that filesystem is
+holding the cache — useful when the cache is large and the question is whether
+dropping it is safe, and what would actually be freed.
+
+```
+crash> fsinfo -r ffff888100aabbcc
+================================================================================
+Page cache statistics for super_block 0xffff888100aabbcc
+================================================================================
+  Filesystem type        : xfs
+  Device                 : dm-3
+  Mounted on             : /data
+  Cached pages           : 390240 (1.5 GB)
+  Inodes holding cache   : 440 of 442 inodes on this filesystem
+  Average per inode      : 886.9 pages (3.5 MB)
+
+== Cache by file type ==
+  TYPE                INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------
+  regular file           409     390209     1.5 GB  100.0%  [████████████████]
+  directory               30         30   120.0 KB    0.0%  [▒░░░░░░░░░░░░░░░]
+
+== Cached pages per inode ==
+  PAGES/INODE         INODES      PAGES      BYTES       %  SHARE
+  ----------------------------------------------------------------------------
+  1 page                 234        234   936.0 KB    0.1%  [▒░░░░░░░░░░░░░░░]
+  16K - 64K                3     125536   490.4 MB   32.2%  [█████▒░░░░░░░░░░]
+  64K - 256K               1     262144     1.0 GB   67.2%  [███████████░░░░░]
+
+== Cache density ==
+  Size of the cached files       : 9.4 GB
+  Held in the page cache         : 1.5 GB
+  Resident share of those files  : 15.8%
+  Files cached 90% or more       : 176 (40.0%)
+  Files cached under 10%         : 1 (0.2%)
+
+== Dirty and writeback ==
+  Dirty                          : 1 inode(s), up to 65536 page(s) (256.0 MB)
+  Writeback in progress          : 1 inode(s)
+
+== Top 10 inodes by cached pages ==
+  inode                   PAGES     CACHED       %       SIZE RESIDENT  FILE
+  --------------------------------------------------------------------------
+  0xffff888100001000     262144     1.0 GB   67.2%     1.0 GB   100.0%  /data/bigdb.dat
+  0xffff888100002000      65536   256.0 MB   16.8%   300.0 MB    85.3%  /data/journal.log [dirty]
+  0xffff888100003000      40000   156.2 MB   10.3%     8.0 GB     1.9%  /data/archive.tar
+================================================================================
+```
+
+Use `--top N` to list more (or fewer) than the default 20 inodes.
+
+```
+crash> fsinfo -r ffff888100aabbcc --top 50
+```
 
 ### cginfo ###
 It provides cgroup related information. It is mostly useful to find out how many cgroups were created in the system.

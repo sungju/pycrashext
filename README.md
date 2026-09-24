@@ -53,7 +53,7 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **cpuinfo** | CPU information, core topology, effective frequency analysis |
 | **devinfo** | Device information |
 | **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
-| **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style) |
+| **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style, page cache breakdown) |
 | **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss, with every match labelled `local` or `web` (needs remoteapi) |
 | **hangcheck** | Show hung (D-state) tasks with details |
 | **insights** | Run insights rules (needs remoteapi; currently deprecated) |
@@ -82,6 +82,39 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 The `autocheck` command runs all rules under `source/rules/` against the current crash dump and reports any known issues it finds, along with KCS article links and resolution steps.
 
 Rules implement a standard interface (`add_rule()`, `run_rule()`, `is_major()`, `description()`) and can be added by dropping a new `.py` file into the `source/rules/` directory.
+
+## Investigating Page Cache Usage
+
+`fsinfo -r` lists how many cached pages each mounted filesystem holds:
+
+```
+crash> fsinfo -r
+```
+
+When one filesystem stands out, pass its `struct super_block` address back to
+the same option to see *what inside it* is holding the cache:
+
+```
+crash> fsinfo -r ffff888100aabbcc
+crash> fsinfo -r ffff888100aabbcc --top 50
+```
+
+This walks the superblock's inode list once and reports:
+
+- **Cache by file type** — regular files vs directories vs devices, so a cache
+  held by metadata rather than data is obvious at a glance
+- **Cached pages per inode** — a bucketed histogram answering whether the cache
+  is a handful of huge files or a swarm of small ones
+- **Cache density** — how much of those files is actually resident, plus how
+  many are cached almost fully (read whole) versus barely at all (sampled, so
+  evicting them buys little)
+- **Dirty and writeback** — inodes that cannot be dropped without writeback
+- **Top N inodes** — the largest consumers with filename, size, resident share,
+  and `[dirty]` / `[writeback]` markers (`--top`, default 20)
+
+Inodes that are being freed (`I_FREEING`/`I_WILL_FREE`) and inodes with no
+cached pages are skipped. The dirty page count is the whole cache of the dirty
+inodes, so treat it as an upper bound.
 
 ## Finding Backported Patches
 

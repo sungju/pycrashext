@@ -7,6 +7,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+import heapq
 import operator
 import re
 
@@ -783,8 +784,14 @@ def get_file_open_mode_str(f_mode):
     return result_str
 
 
-def show_inode_details(options):
-    inode = readSU("struct inode", int(options.inode, 16))
+def get_first_dentry_addr(inode):
+    """
+    Address of the first dentry aliasing this inode, or 0 if it has none.
+
+    'struct inode.i_dentry' became an hlist in 3.6, and the dentry side of
+    the link moved into the 'd_u' union at the same time. Both layouts turn
+    up in the dumps we get, so tell them apart at runtime.
+    """
     dentry_offset = member_offset('struct dentry', 'd_u')
     if dentry_offset < 0:
         dentry_offset = member_offset('struct dentry',
@@ -796,7 +803,17 @@ def show_inode_details(options):
     else:
         dentry_addr = inode.i_dentry.next - dentry_offset
 
-    if dentry_addr != -dentry_offset: # No dentry for this inode
+    if dentry_addr == -dentry_offset: # The head pointer was NULL
+        return 0
+
+    return dentry_addr
+
+
+def show_inode_details(options):
+    inode = readSU("struct inode", int(options.inode, 16))
+    dentry_addr = get_first_dentry_addr(inode)
+
+    if dentry_addr != 0: # No dentry for this inode
         dentry = readSU('struct dentry', dentry_addr)
         try:
             dentry_details = exec_crash_command("files -d 0x%x" % (dentry))
@@ -1099,7 +1116,32 @@ I_WILL_FREE = (1 << 4)
 I_NEW = (1 << 3)
 I_SKIP_STATE = I_FREEING | I_WILL_FREE | I_NEW
 
+I_DIRTY_SYNC = (1 << 0)
+I_DIRTY_DATASYNC = (1 << 1)
+I_DIRTY_PAGES = (1 << 2)
+I_DIRTY = I_DIRTY_SYNC | I_DIRTY_DATASYNC | I_DIRTY_PAGES
+I_SYNC = (1 << 7)
+
 MS_BORN = (1 << 29)
+
+S_IFMT   = 0o170000
+S_IFSOCK = 0o140000
+S_IFLNK  = 0o120000
+S_IFREG  = 0o100000
+S_IFBLK  = 0o060000
+S_IFDIR  = 0o040000
+S_IFCHR  = 0o020000
+S_IFIFO  = 0o010000
+
+INODE_TYPE_NAMES = [
+    (S_IFREG,  "regular file"),
+    (S_IFDIR,  "directory"),
+    (S_IFLNK,  "symlink"),
+    (S_IFBLK,  "block device"),
+    (S_IFCHR,  "char device"),
+    (S_IFIFO,  "fifo"),
+    (S_IFSOCK, "socket"),
+]
 
 page_caches = {}
 wb_caches = {}
@@ -1276,6 +1318,293 @@ def show_pagecache_sb(sb, options):
             print("CACHED_PAGES : %d" % (mapping.nrpages))
             show_inode_details(options)
 
+
+def get_inode_type_name(i_mode):
+    fmt = i_mode & S_IFMT
+    for mask, name in INODE_TYPE_NAMES:
+        if fmt == mask:
+            return name
+
+    return "other (0%o)" % fmt
+
+
+# Cached pages per inode, in buckets. The question this answers is whether a
+# filesystem's cache is held by a handful of large files or by a swarm of
+# small ones - which needs orders of magnitude, not even steps.
+PAGE_BUCKETS = [
+    (1,      "1 page"),
+    (4,      "2 - 4"),
+    (16,     "5 - 16"),
+    (64,     "17 - 64"),
+    (256,    "65 - 256"),
+    (1024,   "257 - 1K"),
+    (4096,   "1K - 4K"),
+    (16384,  "4K - 16K"),
+    (65536,  "16K - 64K"),
+    (262144, "64K - 256K"),
+    (None,   "over 256K"),
+]
+
+
+def get_page_bucket(pages):
+    for idx, (limit, label) in enumerate(PAGE_BUCKETS):
+        if limit is None or pages <= limit:
+            return idx
+
+    return len(PAGE_BUCKETS) - 1
+
+
+def get_inode_filename(inode):
+    """
+    Best-effort path for an inode, through its first dentry.
+
+    This runs a crash command per call, so it is only used for the handful
+    of inodes actually being listed - never for every inode on the
+    filesystem.
+    """
+    try:
+        dentry_addr = get_first_dentry_addr(inode)
+        if dentry_addr == 0:
+            return "<no dentry>"
+
+        return dentry_to_filename(readSU('struct dentry', dentry_addr))
+    except Exception:
+        return "<unknown>"
+
+
+def bytes_to_str(byte_size):
+    """
+    Compact human-readable size, for table columns.
+
+    Unlike pages_to_str() this keeps one decimal place: the whole point of
+    these tables is comparing consumers, and rounding 1.9 GB down to '1 GB'
+    loses the comparison.
+    """
+    if byte_size >= 1024 * 1024 * 1024:
+        return "%.1f GB" % (byte_size / 1024.0 / 1024 / 1024)
+    if byte_size >= 1024 * 1024:
+        return "%.1f MB" % (byte_size / 1024.0 / 1024)
+    if byte_size >= 1024:
+        return "%.1f KB" % (byte_size / 1024.0)
+
+    return "%d B" % byte_size
+
+
+def _print_stat_row(label, inodes, pages, total_pages, label_width=16):
+    percentage = (pages * 100.0 / total_pages) if total_pages > 0 else 0
+    bar = get_memory_bar(percentage, width=16)
+    print("  %-*s %9d %10d %10s %6.1f%%  %s" %
+          (label_width, label, inodes, pages, bytes_to_str(pages * page_size),
+           percentage, bar))
+    crashcolor.set_color(crashcolor.RESET)
+
+
+def show_pagecache_sb_stats(options, sb_addr):
+    """
+    Break down what is holding the page cache of one filesystem.
+
+    'fsinfo -r' says which superblock holds the pages. Given that
+    superblock's address it is usually the next question that matters:
+    which inodes inside it, what kind of files they are, and whether the
+    pages sit in a few big files or are spread thin across many small ones.
+    """
+    try:
+        sb = readSU("struct super_block", int(sb_addr, 16))
+        fs_type = sb.s_type.name
+    except Exception:
+        print("Error: '%s' is not a readable 'struct super_block' address" %
+              sb_addr)
+        return
+
+    top_n = options.top_count
+    if top_n <= 0:
+        top_n = 20
+
+    mount_path = dentry_to_filename(sb.s_root)
+    dev_major, dev_minor = get_dev_no(sb)
+
+    total_pages = 0
+    total_inodes = 0
+    cached_inodes = 0
+    cached_file_bytes = 0       # i_size of the inodes that hold cache
+    by_type = {}                # type name -> [inodes, pages]
+    buckets = [[0, 0] for _ in PAGE_BUCKETS]
+    dirty_inodes = dirty_pages = 0
+    writeback_inodes = 0
+    fully_cached = barely_cached = 0
+    sized_inodes = 0
+    top_heap = []               # bounded min-heap of the largest consumers
+
+    for inode in readSUListFromHead(sb.s_inodes,
+                                    "i_sb_list",
+                                    "struct inode",
+                                    maxel=50000000):
+        total_inodes = total_inodes + 1
+        try:
+            nrpages = inode.i_mapping.nrpages
+            i_state = inode.i_state
+        except Exception:
+            continue
+
+        if nrpages == 0 or (i_state & I_SKIP_STATE) != 0:
+            continue
+
+        try:
+            i_mode = inode.i_mode
+            i_size = inode.i_size
+        except Exception:
+            i_mode = i_size = 0
+
+        cached_inodes = cached_inodes + 1
+        total_pages = total_pages + nrpages
+        cached_file_bytes = cached_file_bytes + i_size
+
+        type_name = get_inode_type_name(i_mode)
+        if type_name not in by_type:
+            by_type[type_name] = [0, 0]
+        by_type[type_name][0] = by_type[type_name][0] + 1
+        by_type[type_name][1] = by_type[type_name][1] + nrpages
+
+        bucket = buckets[get_page_bucket(nrpages)]
+        bucket[0] = bucket[0] + 1
+        bucket[1] = bucket[1] + nrpages
+
+        if (i_state & I_DIRTY) != 0:
+            dirty_inodes = dirty_inodes + 1
+            dirty_pages = dirty_pages + nrpages
+        if (i_state & I_SYNC) != 0:
+            writeback_inodes = writeback_inodes + 1
+
+        # How much of the file is actually resident. A file cached at 100%
+        # was read whole; one cached at 2% is being sampled, and evicting
+        # it buys little.
+        if i_size > 0:
+            size_pages = (i_size + page_size - 1) // page_size
+            sized_inodes = sized_inodes + 1
+            resident = (nrpages * 100.0 / size_pages) if size_pages > 0 else 0
+            if resident >= 90:
+                fully_cached = fully_cached + 1
+            elif resident < 10:
+                barely_cached = barely_cached + 1
+
+        # cached_inodes is a unique increasing key, so tuple comparison
+        # never has to order the inode objects themselves
+        entry = (nrpages, cached_inodes, inode, i_mode, i_size, i_state)
+        if len(top_heap) < top_n:
+            heapq.heappush(top_heap, entry)
+        elif nrpages > top_heap[0][0]:
+            heapq.heapreplace(top_heap, entry)
+
+    print("=" * 80)
+    print("Page cache statistics for super_block 0x%x" % sb)
+    print("=" * 80)
+    print("  %-22s : %s" % ("Filesystem type", fs_type))
+    print("  %-22s : %s" % ("Device", sb.s_id))
+    print("  %-22s : %d:%d" % ("Device number", dev_major, dev_minor))
+    print("  %-22s : %s" % ("Mounted on", mount_path))
+    print("  %-22s : %d" % ("Block size", sb.s_blocksize))
+    print("  %-22s : %d (%s)" %
+          ("Cached pages", total_pages,
+           bytes_to_str(total_pages * page_size)))
+    print("  %-22s : %d of %d inodes on this filesystem" %
+          ("Inodes holding cache", cached_inodes, total_inodes))
+
+    if total_pages == 0:
+        print("-" * 80)
+        print("This filesystem is holding no page cache.")
+        print("=" * 80)
+        return
+
+    avg_pages = total_pages / float(cached_inodes)
+    print("  %-22s : %.1f pages (%s)" %
+          ("Average per inode", avg_pages,
+           bytes_to_str(int(avg_pages) * page_size)))
+
+    print("")
+    print("== Cache by file type ==")
+    print("  %-16s %9s %10s %10s %7s  %s" %
+          ("TYPE", "INODES", "PAGES", "BYTES", "%", "SHARE"))
+    print("  " + "-" * 76)
+    for type_name, (inodes, pages) in sorted(by_type.items(),
+                                             key=lambda kv: kv[1][1],
+                                             reverse=True):
+        _print_stat_row(type_name, inodes, pages, total_pages)
+
+    print("")
+    print("== Cached pages per inode ==")
+    print("  %-16s %9s %10s %10s %7s  %s" %
+          ("PAGES/INODE", "INODES", "PAGES", "BYTES", "%", "SHARE"))
+    print("  " + "-" * 76)
+    for idx, (limit, label) in enumerate(PAGE_BUCKETS):
+        inodes, pages = buckets[idx]
+        if inodes == 0:
+            continue
+        _print_stat_row(label, inodes, pages, total_pages)
+
+    print("")
+    print("== Cache density ==")
+    cached_bytes = total_pages * page_size
+    print("  %-30s : %s" % ("Size of the cached files",
+                            bytes_to_str(cached_file_bytes)))
+    print("  %-30s : %s" % ("Held in the page cache",
+                            bytes_to_str(cached_bytes)))
+    if cached_file_bytes > 0:
+        resident_pct = cached_bytes * 100.0 / cached_file_bytes
+        print("  %-30s : %.1f%%" % ("Resident share of those files",
+                                    resident_pct))
+    if sized_inodes > 0:
+        print("  %-30s : %d (%.1f%%)" %
+              ("Files cached 90% or more", fully_cached,
+               fully_cached * 100.0 / sized_inodes))
+        print("  %-30s : %d (%.1f%%)" %
+              ("Files cached under 10%", barely_cached,
+               barely_cached * 100.0 / sized_inodes))
+
+    if dirty_inodes > 0 or writeback_inodes > 0:
+        print("")
+        print("== Dirty and writeback ==")
+        crashcolor.set_color(crashcolor.YELLOW if dirty_inodes > 0
+                             else crashcolor.RESET)
+        print("  %-30s : %d inode(s), up to %d page(s) (%s)" %
+              ("Dirty", dirty_inodes, dirty_pages,
+               bytes_to_str(dirty_pages * page_size)))
+        crashcolor.set_color(crashcolor.RESET)
+        print("  %-30s : %d inode(s)" % ("Writeback in progress",
+                                         writeback_inodes))
+        print("  (the dirty page count is the whole cache of the dirty")
+        print("   inodes, an upper bound - not every page of them is dirty)")
+
+    print("")
+    print("== Top %d inodes by cached pages ==" % min(top_n, cached_inodes))
+    print("  %-18s %10s %10s %7s %10s %8s  %s" %
+          ("inode", "PAGES", "CACHED", "%", "SIZE", "RESIDENT", "FILE"))
+    print("  " + "-" * 92)
+    for nrpages, _seq, inode, i_mode, i_size, i_state in \
+            sorted(top_heap, reverse=True):
+        percentage = nrpages * 100.0 / total_pages
+        size_pages = (i_size + page_size - 1) // page_size
+        if size_pages > 0:
+            resident_str = "%7.1f%%" % min(100.0,
+                                           nrpages * 100.0 / size_pages)
+        else:
+            resident_str = "      --"
+
+        marks = ""
+        if (i_state & I_DIRTY) != 0:
+            marks = marks + " [dirty]"
+        if (i_state & I_SYNC) != 0:
+            marks = marks + " [writeback]"
+
+        filename = get_inode_filename(inode)
+        print("  0x%-16x %10d %10s %6.1f%% %10s %8s  %s%s" %
+              (inode, nrpages, bytes_to_str(nrpages * page_size), percentage,
+               bytes_to_str(i_size), resident_str, filename, marks))
+
+    print("=" * 80)
+    print("Total %d page(s) (%s) cached by %d inode(s) on %s" %
+          (total_pages, bytes_to_str(total_pages * page_size),
+           cached_inodes, mount_path))
+    print("=" * 80)
 
 
 BLOCK_SIZE_BITS = 10
@@ -1792,7 +2121,13 @@ def fsinfo():
                   help="Show negative dentries")
     op.add_option("-r", "--page_caches", dest="show_page_caches", default=0,
                   action="store_true",
-                  help="Show page caches")
+                  help="Show page caches per super_block. With a "
+                       "'struct super_block' address (hex), show what is "
+                       "consuming that filesystem's page cache")
+    op.add_option("--top", dest="top_count", default=20,
+                  action="store", type="int", metavar="N",
+                  help="With '-r <super_block>', number of inodes to list "
+                       "(default: 20)")
     op.add_option("-s", "--slab", dest="show_slab", default=0,
                   action="store_true",
                   help="Show all 'dentry' details in slab")
@@ -1839,7 +2174,10 @@ def fsinfo():
         show_cached_details(o)
         sys.exit(0)
     if (o.show_page_caches):
-        show_page_caches(o)
+        if len(args) > 0:
+            show_pagecache_sb_stats(o, args[0])
+        else:
+            show_page_caches(o)
         sys.exit(0)
     if (o.dumpe2fs != ""):
         show_dumpe2fs(o)
