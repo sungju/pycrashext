@@ -54,7 +54,7 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **devinfo** | Device information |
 | **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
 | **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style) |
-| **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss (needs remoteapi) |
+| **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss, with every match labelled `local` or `web` (needs remoteapi) |
 | **hangcheck** | Show hung (D-state) tasks with details |
 | **insights** | Run insights rules (needs remoteapi; currently deprecated) |
 | **ipcinfo** | IPC information |
@@ -66,6 +66,7 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **netinfo** | Network information |
 | **psinfo** | `ps`-like process information (`--aux`, `--ef`, stack search) |
 | **pstree** | Process list in tree format |
+| **rcuinfo** | RCU information (stalls, grace periods, node tree, per-CPU callbacks) |
 | **revs** | Reverse engineering helper (registers, instruction reference) |
 | **schedinfo** | Scheduling information |
 | **screen** | Screen handling (reset) |
@@ -81,6 +82,40 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 The `autocheck` command runs all rules under `source/rules/` against the current crash dump and reports any known issues it finds, along with KCS article links and resolution steps.
 
 Rules implement a standard interface (`add_rule()`, `run_rule()`, `is_major()`, `description()`) and can be added by dropping a new `.py` file into the `source/rules/` directory.
+
+## Finding Backported Patches
+
+`git find` answers the question that comes up on nearly every kernel case: *is
+this upstream fix in the kernel that crashed?* It looks the patch up in the
+upstream tree by commit ID or subject text, then cross-checks the RHEL tree
+matching the dump.
+
+```
+crash> git find <commit-id>
+crash> git find net/mlx5e: Fix crash moving to switchdev mode
+crash> git find <commit-id> --stat              # with a diffstat
+crash> git find <commit-id> --repos=rhel8,rhel9 # check other RHEL trees too
+```
+
+The query type is detected automatically — 7-40 hex characters are treated as a
+commit ID, anything else as subject text, which does not need quoting.
+
+When the local mirrors miss, the server also asks the public kernel sources
+(git.kernel.org cgit and the GitHub API). Every match is labelled **`local`** or
+**`web`** so there is no ambiguity about where it came from — a local mirror and
+a public tree often share a name such as `linux` or `torvalds`. Web matches are
+still cross-checked for backports against the local RHEL trees.
+
+```
+crash> git find <commit-id> --web      # ask the public sources too
+crash> git find <commit-id> --no-web   # local mirrors only
+```
+
+A commit reported as NOT FOUND exists neither in the local trees nor on the
+public sources — useful for checking a fix someone has quoted at you.
+
+The same command is available in [isos](https://github.com/sungju/isos) for
+sosreport analysis, against the same remoteapi server.
 
 ## Remote API Server
 
