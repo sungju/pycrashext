@@ -10,7 +10,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import os
-import crashhelper
+import netutil
 from optparse import OptionParser
 
 
@@ -60,11 +60,11 @@ def disasm():
             "source_only" : source_only}
     try:
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        response = crashhelper.urlopen_post(encode_url, encoded_data)
+        response = netutil.urlopen_post(encode_url, encoded_data)
         res = response.read().decode('utf-8')
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
         reason = getattr(e, "reason", None)
-        if reason is not None and crashhelper.is_dns_failure(reason):
+        if reason is not None and netutil.is_dns_failure(reason):
             res = "\tCannot resolve the server's hostname.\n" + \
                   "\tServer address is <" + encode_url + ">\n" + \
                   "\tIf the name resolves outside crash, set " + \

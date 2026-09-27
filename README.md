@@ -246,12 +246,23 @@ binary cannot do. Sockets work; only name lookup is broken. The other common
 cause is crash running in a chroot or container, such as a retrace server, with
 no `/etc/resolv.conf`.
 
-The commands handle this themselves: on a name-lookup failure they read
-`/etc/hosts` and, failing that, query the nameservers in `/etc/resolv.conf`
-directly over UDP, then retry against the resolved address with the original
-`Host:` header intact so name-based virtual hosts still work. Connection
-refused and timeouts are left alone — those are real failures and are reported
-as before.
+The commands handle this themselves. On a name-lookup failure they resolve the
+name without `getaddrinfo()`, cheapest first:
+
+1. `/etc/hosts`, read directly
+2. a resolver binary — `getent`, `dig`, `host`, `nslookup`, or the system
+   `python3`. These are dynamically linked, so NSS still works for them; this
+   is the step that rescues the static-interpreter case
+3. a DNS query straight to the nameservers in `/etc/resolv.conf`, over UDP,
+   for a host too stripped down to have any of those binaries
+
+The request is then retried against the resolved address with the original
+`Host:` header intact, so name-based virtual hosts still work. Connection
+refused, timeouts and HTTP errors are left alone — those are real failures and
+are reported exactly as before.
+
+When none of the three steps works, the error lists what each one tried, which
+usually identifies the cause on the spot.
 
 If even that cannot resolve the name, set `CRASHEXT_SERVER` to the address.
 Resolve it **on the host running crash**, not elsewhere, since split-horizon

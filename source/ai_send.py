@@ -12,7 +12,7 @@ import urllib.parse
 import urllib.error
 import socket
 import os
-import crashhelper
+import netutil
 from optparse import OptionParser
 
 
@@ -112,7 +112,7 @@ def ai_send():
     try:
         timeout_seconds = int(os.environ.get('AI_REQUEST_TIMEOUT', '30'))
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        response = crashhelper.urlopen_post(encode_url, encoded_data,
+        response = netutil.urlopen_post(encode_url, encoded_data,
                                             timeout_seconds)
         res = response.read().decode('utf-8')
         parsed = json.loads(res)
@@ -127,7 +127,7 @@ def ai_send():
             res = "\tServer is not reachable.\n" + \
                   "\tServer address is <" + encode_url + ">" + \
                   "\n" + orig_query
-        elif crashhelper.is_dns_failure(e.reason):
+        elif netutil.is_dns_failure(e.reason):
             res = "\tCannot resolve the server's hostname.\n" + \
                   "\tServer address is <" + encode_url + ">\n" + \
                   "\t" + str(e.reason) + "\n" + \

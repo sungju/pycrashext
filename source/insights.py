@@ -16,6 +16,7 @@ import time
 
 import crashcolor
 import crashhelper
+import netutil
 
 import json
 import base64
@@ -168,7 +169,7 @@ def exec_insights(o, args, cmd_path_list):
     data = {"data" : base64.b64encode(sysdata_str.encode()) }
     try:
         url_data = urllib.parse.urlencode(data)
-        response = crashhelper.urlopen_post(remoteapi_url, url_data.encode())
+        response = netutil.urlopen_post(remoteapi_url, url_data.encode())
         res = response.read()
     except Exception as e:
         res = "\tServer is not reachable.\n" + \

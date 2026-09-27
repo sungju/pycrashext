@@ -17,6 +17,7 @@ import urllib.error
 
 import crashcolor
 import crashhelper
+import netutil
 
 
 def git():
@@ -144,6 +145,7 @@ def get_kernel_version():
 def send_request(server_url, data, timeout, verbose):
     """POST the request to /api/git and print the server's response."""
     api_url = server_url + '/api/git'
+    trace = []
 
     try:
         if verbose:
@@ -151,16 +153,16 @@ def send_request(server_url, data, timeout, verbose):
             print("Timeout: %d seconds (%d minutes)" % (timeout, timeout // 60))
 
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        response = crashhelper.urlopen_post(api_url, encoded_data, timeout,
-                                            verbose)
+        response = netutil.urlopen_post(api_url, encoded_data, timeout,
+                                        verbose, trace)
         print(response.read().decode('utf-8'))
 
     except urllib.error.HTTPError as e:
         print("Error: Server returned status code %d" % e.code)
         print(e.read().decode('utf-8'))
     except urllib.error.URLError as e:
-        if crashhelper.is_dns_failure(e.reason):
-            crashhelper.print_dns_failure_help(api_url, e.reason)
+        if netutil.is_dns_failure(e.reason):
+            netutil.print_dns_failure_help(api_url, e.reason, trace)
             return
 
         print("\nServer is not reachable.")
