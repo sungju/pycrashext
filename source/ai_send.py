@@ -12,6 +12,7 @@ import urllib.parse
 import urllib.error
 import socket
 import os
+import crashhelper
 from optparse import OptionParser
 
 
@@ -111,8 +112,8 @@ def ai_send():
     try:
         timeout_seconds = int(os.environ.get('AI_REQUEST_TIMEOUT', '30'))
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        req = urllib.request.Request(encode_url, data=encoded_data, method='POST')
-        response = urllib.request.urlopen(req, timeout=timeout_seconds)
+        response = crashhelper.urlopen_post(encode_url, encoded_data,
+                                            timeout_seconds)
         res = response.read().decode('utf-8')
         parsed = json.loads(res)
     except socket.timeout:
@@ -126,6 +127,13 @@ def ai_send():
             res = "\tServer is not reachable.\n" + \
                   "\tServer address is <" + encode_url + ">" + \
                   "\n" + orig_query
+        elif crashhelper.is_dns_failure(e.reason):
+            res = "\tCannot resolve the server's hostname.\n" + \
+                  "\tServer address is <" + encode_url + ">\n" + \
+                  "\t" + str(e.reason) + "\n" + \
+                  "\tIf the name resolves outside crash, set " + \
+                  "CRASHEXT_SERVER to the\n\taddress instead - see " + \
+                  "'git find' for the full explanation.\n" + orig_query
         else:
             res = "\tServer request failed: " + str(e.reason) + \
                   "\n" + orig_query

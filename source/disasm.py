@@ -10,6 +10,7 @@ import urllib.request
 import urllib.parse
 import urllib.error
 import os
+import crashhelper
 from optparse import OptionParser
 
 
@@ -59,13 +60,20 @@ def disasm():
             "source_only" : source_only}
     try:
         encoded_data = urllib.parse.urlencode(data).encode('utf-8')
-        req = urllib.request.Request(encode_url, data=encoded_data, method='POST')
-        response = urllib.request.urlopen(req)
+        response = crashhelper.urlopen_post(encode_url, encoded_data)
         res = response.read().decode('utf-8')
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
-        res = "\tServer is not reachable.\n" + \
-              "\tServer address is <" + encode_url + ">" + \
-              "\n" + orig_asm
+        reason = getattr(e, "reason", None)
+        if reason is not None and crashhelper.is_dns_failure(reason):
+            res = "\tCannot resolve the server's hostname.\n" + \
+                  "\tServer address is <" + encode_url + ">\n" + \
+                  "\tIf the name resolves outside crash, set " + \
+                  "CRASHEXT_SERVER to the\n\taddress instead - see " + \
+                  "'git find' for the full explanation.\n" + orig_asm
+        else:
+            res = "\tServer is not reachable.\n" + \
+                  "\tServer address is <" + encode_url + ">" + \
+                  "\n" + orig_asm
     except:
         res = "\tUnexpected error:" + str(sys.exc_info()[0]) + \
               "\n" + orig_asm

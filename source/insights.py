@@ -168,8 +168,7 @@ def exec_insights(o, args, cmd_path_list):
     data = {"data" : base64.b64encode(sysdata_str.encode()) }
     try:
         url_data = urllib.parse.urlencode(data)
-        req = urllib.request.Request(remoteapi_url, url_data.encode())
-        response = urllib.request.urlopen(req)
+        response = crashhelper.urlopen_post(remoteapi_url, url_data.encode())
         res = response.read()
     except Exception as e:
         res = "\tServer is not reachable.\n" + \

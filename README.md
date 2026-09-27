@@ -236,6 +236,32 @@ $ crash
 
 See [`remoteapi/README.md`](remoteapi/README.md) for full setup instructions.
 
+### When the server name will not resolve
+
+A remoteapi command failing with `Name or service not known` (errno -2) while
+`curl` reaches the very same URL from the same shell is almost never a network
+problem. crash runs PyKdump's bundled Python, which is statically linked, and
+glibc resolves names by `dlopen()`ing the NSS modules — something a static
+binary cannot do. Sockets work; only name lookup is broken. The other common
+cause is crash running in a chroot or container, such as a retrace server, with
+no `/etc/resolv.conf`.
+
+The commands handle this themselves: on a name-lookup failure they read
+`/etc/hosts` and, failing that, query the nameservers in `/etc/resolv.conf`
+directly over UDP, then retry against the resolved address with the original
+`Host:` header intact so name-based virtual hosts still work. Connection
+refused and timeouts are left alone — those are real failures and are reported
+as before.
+
+If even that cannot resolve the name, set `CRASHEXT_SERVER` to the address.
+Resolve it **on the host running crash**, not elsewhere, since split-horizon
+DNS or a VPN may hand out a different answer there:
+
+```
+$ getent hosts myserver     # or: dig +short myserver
+$ export CRASHEXT_SERVER=http://<address>:5000
+```
+
 ## Environment Variables
 
 | Variable | Description |
