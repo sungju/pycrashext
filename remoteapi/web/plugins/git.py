@@ -65,20 +65,22 @@ ORIGIN_MARKERS = {
 # every section, so the reader can jump to the part they want instead of
 # counting indentation to work out what they are looking at.
 #
-# Only standard SGR codes are used. Where a terminal ignores dim, the label
-# simply renders plain against a bold value, which still reads correctly.
+# Only plain SGR colours are used for anything that has to be seen. Dim (2m)
+# is not reliable - Terminal.app and others ignore it - so it is kept for the
+# quoted commit message, where rendering as plain text is a harmless outcome,
+# and never for a field name that has to read as coloured.
 # As with ORIGIN_MARKERS, colour is decoration: every line says in words what
 # it is, because this output gets piped, logged and pasted into cases.
-FIND_RULE  = "\033[1;36m"   # bold cyan       - section rules and headings
-FIND_LABEL = "\033[2;37m"   # dim white       - field names
-FIND_VALUE = "\033[1;37m"   # bold white      - field values
-FIND_SHA   = "\033[1;33m"   # bold yellow     - commit ids
-FIND_URL   = "\033[4;36m"   # underlined cyan - links
-FIND_GOOD  = "\033[1;32m"   # bold green      - present / backported
-FIND_BAD   = "\033[1;31m"   # bold red        - missing / not found
-FIND_WARN  = "\033[33m"     # yellow          - notes and caveats
-FIND_BODY  = "\033[2m"      # dim             - quoted commit message
-FIND_PLAIN = ""             #                 - secondary values, left alone
+FIND_RULE  = "\033[1;36m"   # bold cyan          - section rules and headings
+FIND_LABEL = "\033[36m"     # cyan               - field names
+FIND_VALUE = "\033[1;37m"   # bold white         - field values
+FIND_SHA   = "\033[1;33m"   # bold yellow        - commit ids
+FIND_URL   = "\033[4;35m"   # underlined magenta - links
+FIND_GOOD  = "\033[1;32m"   # bold green         - present / backported
+FIND_BAD   = "\033[1;31m"   # bold red           - missing / not found
+FIND_WARN  = "\033[33m"     # yellow             - notes and caveats
+FIND_BODY  = "\033[2m"      # dim                - quoted commit message
+FIND_PLAIN = ""             #                    - secondary values, left alone
 FIND_RESET = "\033[0m"
 
 

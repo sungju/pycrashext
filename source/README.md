@@ -1690,11 +1690,17 @@ The report is read from the bottom up:
 | `running kernel` | Whether the kernel in the vmcore is at or above that release |
 
 The report is colour coded so a section can be found without reading it:
-bold cyan for the rules and section headings, dimmed field names against
-bold values, yellow for commit IDs, underlined cyan for links, and a dimmed
-commit message so a long one does not bury the verdicts under it. The two
-verdicts - `BACKPORTED` / `NOT BACKPORTED` and `PRESENT` / `NOT PRESENT` -
-are green when the fix is there and red when it is not.
+
+| Colour | What it marks |
+|---|---|
+| Bold cyan | Section rules and headings |
+| Cyan | Field names - `subject`, `author`, `date`, `url`, `message`, `first release`, `running kernel` |
+| Bold white | Field values, and the repository name on a backport line |
+| Bold yellow | Commit IDs |
+| Underlined magenta | Links |
+| Bold green / bold red | `BACKPORTED` / `NOT BACKPORTED` and `PRESENT` / `NOT PRESENT` |
+| Yellow | Notes, caveats and truncation markers |
+| Dimmed | The quoted commit message, so a long one does not bury the verdicts under it |
 
 Colour is decoration only. Every line still says in words what it is, so the
 report survives being piped, logged, or pasted into a case.
