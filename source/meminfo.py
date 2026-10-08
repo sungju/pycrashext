@@ -5272,18 +5272,22 @@ def show_oom_meminfo(op, meminfo_dict):
 
 def get_pid_ppid_map():
     """
-    Build a {pid: ppid} map from the task list in the dump.
+    Build {pid: ppid} and {pid: name} maps from the task list in the dump.
 
     The OOM task dump printed by the kernel has no parent column (it prints
     pid/uid/tgid only), so the parent relationship has to come from the live
     task_struct list instead.  Tasks that exited between the OOM event and the
     panic are simply absent here; callers must handle missing pids.
+
+    The name map is needed for ancestors that are not themselves in the dump
+    but are required to connect the tasks that are.
     """
     pid_ppid = {}
+    pid_name = {}
     try:
         init_task = readSymbol("init_task")
     except:
-        return pid_ppid
+        return pid_ppid, pid_name
 
     def record(task):
         try:
@@ -5297,6 +5301,11 @@ def get_pid_ppid_map():
             pid_ppid[pid] = int(parent.pid) if parent is not None else 0
         except:
             pid_ppid[pid] = 0
+        try:
+            if task.comm != 0:
+                pid_name[pid] = task.comm
+        except:
+            pass
 
     record(init_task)
     try:
@@ -5308,18 +5317,26 @@ def get_pid_ppid_map():
     except:
         pass
 
-    return pid_ppid
+    return pid_ppid, pid_name
 
 
-def build_oom_tree(oom_rows, pid_ppid):
+def build_oom_tree(oom_rows, pid_ppid, pid_name=None):
     """
     Turn the flat OOM row list into a parent/child forest.
 
     oom_rows is a list of {'pid', 'name', 'rss'} dicts taken straight from the
-    kernel's task dump.  Parents are resolved through pid_ppid; a row whose
-    parent is not itself in the dump becomes a root, so nothing is silently
-    dropped or re-parented onto an unrelated task.
+    kernel's task dump.
+
+    Ancestors that are missing from the dump but needed to connect tasks that
+    are present get synthesised as placeholder nodes carrying no RSS of their
+    own.  Without that step the tree collapses straight back into the flat
+    list it replaced: a cgroup-scoped OOM dumps only the tasks in that cgroup,
+    and even a global one is routinely read as an excerpt, so the usual case
+    is a screenful of daemons whose only common parent - pid 1 - was never
+    printed.  Attaching them to a marked placeholder shows the real shape
+    without inventing memory figures.
     """
+    pid_name = pid_name or {}
     nodes = {}
     for row in oom_rows:
         pid = row['pid']
@@ -5330,15 +5347,39 @@ def build_oom_tree(oom_rows, pid_ppid):
             'children': [],
             'total': row['rss'],
             'orphan': False,
+            'synthetic': False,
         }
+
+    # Walk each dumped task up to the top of its ancestry, materialising any
+    # ancestor that is missing.  Guarded against a cycle in the parent map.
+    for pid in list(nodes):
+        cur = pid
+        guard = set()
+        while cur not in guard:
+            guard.add(cur)
+            ppid = pid_ppid.get(cur)
+            if ppid is None or ppid == 0 or ppid == cur:
+                break
+            if ppid not in nodes:
+                nodes[ppid] = {
+                    'pid': ppid,
+                    'name': pid_name.get(ppid, '?'),
+                    'rss': 0,
+                    'children': [],
+                    'total': 0,
+                    'orphan': False,
+                    'synthetic': True,
+                }
+            cur = ppid
 
     roots = []
     for pid in sorted(nodes):
         node = nodes[pid]
         ppid = pid_ppid.get(pid)
         if ppid is None:
-            # pid not present in the task list at all - task already exited
-            node['orphan'] = True
+            # Not in the task list at all - the task had already exited.  A
+            # synthesised node is not flagged, it is already marked as such.
+            node['orphan'] = not node['synthetic']
             roots.append(node)
         elif ppid in nodes and ppid != pid:
             nodes[ppid]['children'].append(node)
@@ -5371,7 +5412,7 @@ def show_oom_process_tree(op, oom_rows, total_usage):
     if not oom_rows:
         return
 
-    pid_ppid = get_pid_ppid_map()
+    pid_ppid, pid_name = get_pid_ppid_map()
     if not pid_ppid:
         crashcolor.set_color(crashcolor.YELLOW)
         print("Could not read the task list from this dump -"
@@ -5383,8 +5424,9 @@ def show_oom_process_tree(op, oom_rows, total_usage):
         show_oom_memory_usage(op, fallback, total_usage)
         return
 
-    nodes, roots = build_oom_tree(oom_rows, pid_ppid)
+    nodes, roots = build_oom_tree(oom_rows, pid_ppid, pid_name)
     orphans = sum(1 for n in nodes.values() if n['orphan'])
+    synthetic = sum(1 for n in nodes.values() if n['synthetic'])
 
     system_meminfo = get_meminfo_dict()
     system_total_mem_bytes = system_meminfo.get('MemTotal', 0) * 1024
@@ -5395,18 +5437,33 @@ def show_oom_process_tree(op, oom_rows, total_usage):
     glyph_vert = " |  " if ascii_mode else " │  "
     glyph_space = "    "
 
+    # Pick which dumped tasks to show by their own RSS, the same ranking the
+    # flat table uses, then pull in whatever ancestors are needed to place
+    # them.  Capping roots instead would be meaningless now that a tree
+    # usually hangs off a single synthesised pid 1.
+    real_pids = [n['pid'] for n in nodes.values() if not n['synthetic']]
+    min_number = getattr(op, 'oom_top', 10)
+    if op.all or min_number >= len(real_pids):
+        keep = set(nodes)
+    else:
+        top = sorted((nodes[p] for p in real_pids),
+                     key=lambda n: n['rss'], reverse=True)[:min_number]
+        keep = set()
+        for node in top:
+            cur = node['pid']
+            while cur is not None and cur not in keep:
+                keep.add(cur)
+                parent = pid_ppid.get(cur)
+                cur = parent if parent in nodes and parent != cur else None
+    hidden = len(real_pids) - sum(1 for p in keep if not nodes[p]['synthetic'])
+
     width = 72
     print("=" * width)
     print("%-44s %12s %12s" % ("PROCESS TREE (name/pid)", "RSS", "SUBTREE"))
     print("-" * width)
 
-    # Only cap the roots; once a root is shown its whole subtree is shown, so
-    # --oom-top counts top-level entries rather than truncating mid-branch.
+    roots = [r for r in roots if r['pid'] in keep]
     roots.sort(key=lambda n: n['total'], reverse=True)
-    min_number = getattr(op, 'oom_top', 10)
-    if op.all:
-        min_number = len(roots)
-    print_count = min(len(roots), min_number)
 
     def emit(root):
         # Explicit stack rather than recursion: fork chains in a real dump can
@@ -5419,31 +5476,36 @@ def show_oom_process_tree(op, oom_rows, total_usage):
             label = "%s(%d)" % (node['name'], node['pid'])
             if node['orphan']:
                 label += " *"
+            children = sorted((c for c in node['children']
+                               if c['pid'] in keep),
+                              key=lambda n: n['total'], reverse=True)
+            skipped = len(node['children']) - len(children)
+            if skipped > 0:
+                label += " (+%d)" % skipped
             text = head + label
             if len(text) > 44:
                 text = text[:41] + "..."
+            # A synthesised ancestor owns no memory; printing 0 would read as
+            # a measurement rather than an absence.
+            own = "-" if node['synthetic'] else get_size_str(node['rss'], True)
             subtree = get_size_str(node['total'], True) if node['children'] \
                       else ""
-            print("%-44s %12s %12s" % (text,
-                                       get_size_str(node['rss'], True),
-                                       subtree))
+            print("%-44s %12s %12s" % (text, own, subtree))
             crashcolor.set_color(crashcolor.RESET)
 
             child_prefix = "" if is_root else \
                 prefix + (glyph_space if is_last else glyph_vert)
-            children = sorted(node['children'],
-                              key=lambda n: n['total'], reverse=True)
             # Pushed in reverse so the largest child is popped (printed) first
             # and the last child still gets the closing glyph.
             for i in range(len(children) - 1, -1, -1):
                 stack.append((children[i], child_prefix,
                               i == len(children) - 1, False))
 
-    for i in range(0, print_count):
-        emit(roots[i])
+    for root in roots:
+        emit(root)
 
-    if print_count < len(roots):
-        print("\t<... %d more top-level entries>" % (len(roots) - print_count))
+    if hidden > 0:
+        print("\t<... %d smaller tasks not shown; -a shows all>" % hidden)
     print("=" * width)
     print("Total memory usage from processes = %s" %
           get_size_str(total_usage, True))
@@ -5451,10 +5513,13 @@ def show_oom_process_tree(op, oom_rows, total_usage):
         total_percentage = (total_usage * 100.0 / system_total_mem_bytes)
         print("\tNotes) %.2f percent from total system memory(%s)" %
               (total_percentage, get_size_str(system_total_mem_bytes, True)))
+    if synthetic > 0:
+        print("\t%d parent task(s) shown with '-' were not in the OOM dump;"
+              " they connect the tasks that were" % synthetic)
     if orphans > 0:
         crashcolor.set_color(crashcolor.YELLOW)
-        print("\t%d of %d tasks (*) were not in the dump's task list -"
-              " shown as roots" % (orphans, len(nodes)))
+        print("\t%d task(s) marked '*' were not in the dump's task list -"
+              " shown as roots" % orphans)
         crashcolor.set_color(crashcolor.RESET)
     crashcolor.set_color(crashcolor.RESET)
 
