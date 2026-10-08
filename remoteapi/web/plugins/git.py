@@ -90,19 +90,27 @@ def find_rule(width=80):
 
 
 def find_heading(text):
-    """A section heading for the find report."""
-    return FIND_RULE + " " + text + FIND_RESET
+    """
+    A section heading for the find report.
+
+    Upper cased here rather than at the call sites, so every heading in the
+    report gets the same treatment whoever adds the next one.
+    """
+    return FIND_RULE + " " + text.upper() + FIND_RESET
 
 
 def find_field(label, value, indent="    ", width=14, colour=FIND_VALUE):
     """
     One 'label : value' line for the find report.
 
-    The label is dimmed and the value highlighted, so a run of fields reads
-    as a column of answers with captions, rather than the single block of
-    one colour these reports used to be.
+    The label is upper cased and coloured, the value left in its own case and
+    highlighted, so a run of fields reads as a column of answers with captions
+    rather than the single block of one colour these reports used to be.
+
+    Case is applied here for the same reason as in find_heading: a caller
+    cannot forget it.
     """
-    return "%s%s%-*s :%s %s%s%s" % (indent, FIND_LABEL, width, label,
+    return "%s%s%-*s :%s %s%s%s" % (indent, FIND_LABEL, width, label.upper(),
                                     FIND_RESET, colour, value, FIND_RESET)
 
 GITHUB_API = 'https://api.github.com'
@@ -1225,7 +1233,7 @@ def format_message_body(body, indent, max_lines=20):
 
     # The body is quoted material, not a finding. Dimming it keeps a long
     # commit message from burying the verdict lines that follow it.
-    out = [indent + FIND_LABEL + "%-14s :" % "message" + FIND_RESET]
+    out = [indent + FIND_LABEL + "%-14s :" % "MESSAGE" + FIND_RESET]
     shown = body_lines[:max_lines]
     for line in shown:
         out.append(indent + "    " + FIND_BODY + line + FIND_RESET)

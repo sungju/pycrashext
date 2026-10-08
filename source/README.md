@@ -96,7 +96,7 @@ crash> insights
 ===========================================================================
 RULE ID : softlockup_find_get_pages|FIND_GET_PAGES_SOFTLOCKUP
 	ERROR KEY      : FIND_GET_PAGES_SOFTLOCKUP
-	Kernel version : 2.6.32-696.23.1.el6.x86_64
+	KERNEL VERSION : 2.6.32-696.23.1.el6.x86_64
 	Message        : The system had softlockup due to find_get_pages() bug
 	KCS            : https://access.redhat.com/solutions/3390081
 
@@ -1647,33 +1647,33 @@ Use `--commit=` or `--subject=` when the automatic choice is wrong, for example 
 ```
 crash> git find <commit-id>
 ================================================================================
- Git Find Results
+ GIT FIND RESULTS
 ================================================================================
- Query          : 0dd3ee311255
- Match mode     : commit
- Kernel version : 5.14.0-427.13.1.el9_4.x86_64
- Upstream repo  : upstream
- Backport check : rhel9
+ QUERY          : 0dd3ee311255
+ MATCH MODE     : commit
+ KERNEL VERSION : 5.14.0-427.13.1.el9_4.x86_64
+ UPSTREAM REPO  : upstream
+ BACKPORT CHECK : rhel9
 ================================================================================
 
 [1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (upstream)
-    subject        : net/mlx5e: Fix crash moving to switchdev mode
-    author         : A Developer <dev@example.com>
-    date           : 2024-03-11T10:00:00+00:00
-    url            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
-    message        :
+    SUBJECT        : net/mlx5e: Fix crash moving to switchdev mode
+    AUTHOR         : A Developer <dev@example.com>
+    DATE           : 2024-03-11T10:00:00+00:00
+    URL            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    MESSAGE        :
         Moving to switchdev mode with bonded VFs crashed because the uplink
         representor was freed before the bond netdev was unregistered.
         Hold a reference until the notifier has run.
-    first release  : v6.9-rc1
+    FIRST RELEASE  : v6.9-rc1
     rhel9 : BACKPORTED as ed390b904be9941b19c149bdc2320697b3f7996e
-        matched by     : upstream commit ID referenced in commit message
-        url            : https://gitlab.com/redhat/rhel/src/kernel/rhel-9/-/commit/ed390b904be9941b19c149bdc2320697b3f7996e
-        first release  : kernel-5.14.0-427.el9
-        running kernel : PRESENT (5.14.0-427.13.1.el9_4.x86_64 >= kernel-5.14.0-427.el9)
+        MATCHED BY     : upstream commit ID referenced in commit message
+        URL            : https://gitlab.com/redhat/rhel/src/kernel/rhel-9/-/commit/ed390b904be9941b19c149bdc2320697b3f7996e
+        FIRST RELEASE  : kernel-5.14.0-427.el9
+        RUNNING KERNEL : PRESENT (5.14.0-427.13.1.el9_4.x86_64 >= kernel-5.14.0-427.el9)
 
 ================================================================================
- Complete - 1 match
+ COMPLETE - 1 MATCH
 ================================================================================
 ```
 
@@ -1681,20 +1681,20 @@ The report is read from the bottom up:
 
 | Line | Meaning |
 |---|---|
-| `url` | Link to the commit, built from the repository's own `origin` remote |
-| `message` | The commit message body, minus `Signed-off-by:` and similar trailers |
-| `first release` (upstream) | Earliest upstream tag containing the commit, so the kernel version the fix landed in |
+| `URL` | Link to the commit, built from the repository's own `origin` remote |
+| `MESSAGE` | The commit message body, minus `Signed-off-by:` and similar trailers |
+| `FIRST RELEASE` (upstream) | Earliest upstream tag containing the commit, so the kernel version the fix landed in |
 | `BACKPORTED as <sha>` | The matching commit found in the RHEL tree |
-| `matched by` | How the match was made - see below |
-| `first release` (rhel) | Earliest `kernel-*` tag in the RHEL tree containing the backport |
-| `running kernel` | Whether the kernel in the vmcore is at or above that release |
+| `MATCHED BY` | How the match was made - see below |
+| `FIRST RELEASE` (rhel) | Earliest `kernel-*` tag in the RHEL tree containing the backport |
+| `RUNNING KERNEL` | Whether the kernel in the vmcore is at or above that release |
 
 The report is colour coded so a section can be found without reading it:
 
 | Colour | What it marks |
 |---|---|
 | Bold cyan | Section rules and headings |
-| Cyan | Field names - `subject`, `author`, `date`, `url`, `message`, `first release`, `running kernel` |
+| Cyan | Field names, upper cased - `SUBJECT`, `AUTHOR`, `DATE`, `URL`, `MESSAGE`, `FIRST RELEASE`, `RUNNING KERNEL` |
 | Bold white | Field values, and the repository name on a backport line |
 | Bold yellow | Commit IDs |
 | Underlined magenta | Links |
@@ -1707,7 +1707,7 @@ report survives being piped, logged, or pasted into a case.
 
 The message body makes the match self-explanatory - you can tell whether a commit is the one you were after without a second `git show`. It is capped at 20 lines; use `--message-lines=<n>` to change that, `--no-message` to drop it, or `--patch` to see the whole thing along with the diff.
 
-The `url` line is derived from `remote.origin.url` in the repository the commit came from, so it points at the tree that was actually cloned rather than a guessed location. kernel.org cgit, GitHub, GitLab and googlesource URLs are recognised; for any other host, and for a clone with no usable remote, the line is left out rather than guessed at.
+The `URL` line is derived from `remote.origin.url` in the repository the commit came from, so it points at the tree that was actually cloned rather than a guessed location. kernel.org cgit, GitHub, GitLab and googlesource URLs are recognised; for any other host, and for a clone with no usable remote, the line is left out rather than guessed at.
 
 Backports are matched in two ways, strongest first:
 
@@ -1720,10 +1720,10 @@ Backports are matched in two ways, strongest first:
 crash> git find <commit-id>
 ...
 [1/1] a2a1cc5465226c2f270f06a041a6d77385d6df6d  (upstream)
-    subject        : net: never backported fix
-    author         : A Developer <dev@example.com>
-    date           : 2024-03-11T10:00:00+00:00
-    first release  : v6.10
+    SUBJECT        : net: never backported fix
+    AUTHOR         : A Developer <dev@example.com>
+    DATE           : 2024-03-11T10:00:00+00:00
+    FIRST RELEASE  : v6.10
     rhel9 : NOT BACKPORTED (no matching commit found)
 ```
 
@@ -1742,7 +1742,7 @@ NOT FOUND: no commit matches this commit ID.
   The local mirror may also be out of date - rerun with
   --update to fetch the latest before searching.
 
- Searched
+ SEARCHED
     upstream   /srv/kernel-src/upstream
                HEAD 3e5c1f9a... 2025-09-02T11:24:07+00:00
     rhel9      /srv/kernel-src/rhel9
@@ -1797,28 +1797,28 @@ A commit found this way is still cross-checked against the local RHEL trees, so 
 ```
 crash> git find <commit-id>
 ================================================================================
- Git Find Results
+ GIT FIND RESULTS
 ================================================================================
- Query          : 0dd3ee311255
- Match mode     : commit
- Kernel version : 5.14.0-427.13.1.el9_4.x86_64
- Upstream repo  : upstream
- Backport check : rhel9
- Web lookup     : on local miss
+ QUERY          : 0dd3ee311255
+ MATCH MODE     : commit
+ KERNEL VERSION : 5.14.0-427.13.1.el9_4.x86_64
+ UPSTREAM REPO  : upstream
+ BACKPORT CHECK : rhel9
+ WEB LOOKUP     : on local miss
 ================================================================================
 
 ================================================================================
- Found on public kernel sources
+ FOUND ON PUBLIC KERNEL SOURCES
 ================================================================================
 The local mirror does not have this commit - it may be newer than
 the last fetch, or live in a tree that is not cloned here.
 
 [1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (kernel.org/torvalds)
-    subject        : net/mlx5e: Fix crash moving to switchdev mode
-    author         : A Developer <dev@example.com>
-    date           : Mon, 11 Mar 2024 10:00:00 +0000
-    url            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
-    message        :
+    SUBJECT        : net/mlx5e: Fix crash moving to switchdev mode
+    AUTHOR         : A Developer <dev@example.com>
+    DATE           : Mon, 11 Mar 2024 10:00:00 +0000
+    URL            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    MESSAGE        :
         Moving to switchdev mode with bonded VFs crashed because the uplink
         representor was freed before the bond netdev was unregistered.
         Hold a reference until the notifier has run.
