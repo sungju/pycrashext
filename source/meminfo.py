@@ -5536,7 +5536,7 @@ def show_oom_memory_usage(op, oom_dict, total_usage):
             print(format_str % (pname, get_size_str(mem_usage, True)))
         crashcolor.set_color(crashcolor.RESET)
 
-    if print_count < len(sorted_oom_dict) - 1:
+    if print_count < len(sorted_oom_dict):
         print("\t<...>")
     print("=" * separator_width)
     print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
