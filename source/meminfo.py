@@ -5270,6 +5270,195 @@ def show_oom_meminfo(op, meminfo_dict):
     print("%s" % ('~' * 46))
 
 
+def get_pid_ppid_map():
+    """
+    Build a {pid: ppid} map from the task list in the dump.
+
+    The OOM task dump printed by the kernel has no parent column (it prints
+    pid/uid/tgid only), so the parent relationship has to come from the live
+    task_struct list instead.  Tasks that exited between the OOM event and the
+    panic are simply absent here; callers must handle missing pids.
+    """
+    pid_ppid = {}
+    try:
+        init_task = readSymbol("init_task")
+    except:
+        return pid_ppid
+
+    def record(task):
+        try:
+            pid = int(task.pid)
+        except:
+            return
+        parent = getattr(task, "real_parent", None)
+        if parent is None:
+            parent = getattr(task, "parent", None)
+        try:
+            pid_ppid[pid] = int(parent.pid) if parent is not None else 0
+        except:
+            pid_ppid[pid] = 0
+
+    record(init_task)
+    try:
+        for task in readSUListFromHead(init_task.tasks,
+                                       "tasks",
+                                       "struct task_struct",
+                                       maxel=1000000):
+            record(task)
+    except:
+        pass
+
+    return pid_ppid
+
+
+def build_oom_tree(oom_rows, pid_ppid):
+    """
+    Turn the flat OOM row list into a parent/child forest.
+
+    oom_rows is a list of {'pid', 'name', 'rss'} dicts taken straight from the
+    kernel's task dump.  Parents are resolved through pid_ppid; a row whose
+    parent is not itself in the dump becomes a root, so nothing is silently
+    dropped or re-parented onto an unrelated task.
+    """
+    nodes = {}
+    for row in oom_rows:
+        pid = row['pid']
+        nodes[pid] = {
+            'pid': pid,
+            'name': row['name'],
+            'rss': row['rss'],
+            'children': [],
+            'total': row['rss'],
+            'orphan': False,
+        }
+
+    roots = []
+    for pid in sorted(nodes):
+        node = nodes[pid]
+        ppid = pid_ppid.get(pid)
+        if ppid is None:
+            # pid not present in the task list at all - task already exited
+            node['orphan'] = True
+            roots.append(node)
+        elif ppid in nodes and ppid != pid:
+            nodes[ppid]['children'].append(node)
+        else:
+            roots.append(node)
+
+    # Aggregate subtree RSS bottom-up.  Iterative to avoid recursion limits on
+    # pathological trees (deep fork chains show up in real dumps).
+    order = []
+    stack = list(roots)
+    seen = set()
+    while stack:
+        node = stack.pop()
+        if node['pid'] in seen:
+            continue
+        seen.add(node['pid'])
+        order.append(node)
+        stack.extend(node['children'])
+    for node in reversed(order):
+        node['total'] = node['rss'] + sum(c['total'] for c in node['children'])
+
+    return nodes, roots
+
+
+def show_oom_process_tree(op, oom_rows, total_usage):
+    """
+    Render the OOM task dump as a process tree using parent links recovered
+    from the dump's task list.
+    """
+    if not oom_rows:
+        return
+
+    pid_ppid = get_pid_ppid_map()
+    if not pid_ppid:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Could not read the task list from this dump -"
+              " cannot build a process tree.")
+        crashcolor.set_color(crashcolor.RESET)
+        fallback = {}
+        for row in oom_rows:
+            fallback[row['name']] = fallback.get(row['name'], 0) + row['rss']
+        show_oom_memory_usage(op, fallback, total_usage)
+        return
+
+    nodes, roots = build_oom_tree(oom_rows, pid_ppid)
+    orphans = sum(1 for n in nodes.values() if n['orphan'])
+
+    system_meminfo = get_meminfo_dict()
+    system_total_mem_bytes = system_meminfo.get('MemTotal', 0) * 1024
+
+    ascii_mode = getattr(op, 'ascii_mode', False)
+    glyph_branch = " |- " if ascii_mode else " ├─ "
+    glyph_last = " `- " if ascii_mode else " └─ "
+    glyph_vert = " |  " if ascii_mode else " │  "
+    glyph_space = "    "
+
+    width = 72
+    print("=" * width)
+    print("%-44s %12s %12s" % ("PROCESS TREE (name/pid)", "RSS", "SUBTREE"))
+    print("-" * width)
+
+    # Only cap the roots; once a root is shown its whole subtree is shown, so
+    # --oom-top counts top-level entries rather than truncating mid-branch.
+    roots.sort(key=lambda n: n['total'], reverse=True)
+    min_number = getattr(op, 'oom_top', 10)
+    if op.all:
+        min_number = len(roots)
+    print_count = min(len(roots), min_number)
+
+    def emit(root):
+        # Explicit stack rather than recursion: fork chains in a real dump can
+        # be thousands deep, which would overflow the interpreter stack.
+        stack = [(root, "", True, True)]
+        while stack:
+            node, prefix, is_last, is_root = stack.pop()
+            head = "" if is_root else prefix + (glyph_last if is_last
+                                                else glyph_branch)
+            label = "%s(%d)" % (node['name'], node['pid'])
+            if node['orphan']:
+                label += " *"
+            text = head + label
+            if len(text) > 44:
+                text = text[:41] + "..."
+            subtree = get_size_str(node['total'], True) if node['children'] \
+                      else ""
+            print("%-44s %12s %12s" % (text,
+                                       get_size_str(node['rss'], True),
+                                       subtree))
+            crashcolor.set_color(crashcolor.RESET)
+
+            child_prefix = "" if is_root else \
+                prefix + (glyph_space if is_last else glyph_vert)
+            children = sorted(node['children'],
+                              key=lambda n: n['total'], reverse=True)
+            # Pushed in reverse so the largest child is popped (printed) first
+            # and the last child still gets the closing glyph.
+            for i in range(len(children) - 1, -1, -1):
+                stack.append((children[i], child_prefix,
+                              i == len(children) - 1, False))
+
+    for i in range(0, print_count):
+        emit(roots[i])
+
+    if print_count < len(roots):
+        print("\t<... %d more top-level entries>" % (len(roots) - print_count))
+    print("=" * width)
+    print("Total memory usage from processes = %s" %
+          get_size_str(total_usage, True))
+    if system_total_mem_bytes > 0:
+        total_percentage = (total_usage * 100.0 / system_total_mem_bytes)
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_bytes, True)))
+    if orphans > 0:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("\t%d of %d tasks (*) were not in the dump's task list -"
+              " shown as roots" % (orphans, len(nodes)))
+        crashcolor.set_color(crashcolor.RESET)
+    crashcolor.set_color(crashcolor.RESET)
+
+
 def show_oom_memory_usage(op, oom_dict, total_usage):
     # Get system's total memory for percentage calculation
     system_meminfo = get_meminfo_dict()
@@ -5454,6 +5643,7 @@ def show_oom_events(op):
         pid_index = -1
         pname_index = -1
         oom_dict = {}
+        oom_rows = []
         meminfo_dict = {}
         cgroup_dict = {}
         total_usage = 0
@@ -5614,7 +5804,10 @@ def show_oom_events(op):
                     for key in cgroup_dict:
                         print("  " + cgroup_dict[key])
 
-                show_oom_memory_usage(op, oom_dict, total_usage)
+                if getattr(op, 'oom_tree', False):
+                    show_oom_process_tree(op, oom_rows, total_usage)
+                else:
+                    show_oom_memory_usage(op, oom_dict, total_usage)
                 if op.details:
                     show_oom_meminfo(op, meminfo_dict)
                 oom_invoked = False
@@ -5625,6 +5818,7 @@ def show_oom_events(op):
                 pid_index = -1
                 pname_index = -1
                 oom_dict = {}
+                oom_rows = []
                 meminfo_dict = {}
                 cgroup_dict = {}
                 total_usage = 0
@@ -5640,6 +5834,12 @@ def show_oom_events(op):
                 rss = int(words[rss_index]) * page_size
                 total_usage = total_usage + rss
                 pname = words[pname_index]
+                try:
+                    oom_rows.append({'pid': int(pid),
+                                     'name': pname,
+                                     'rss': rss})
+                except ValueError:
+                    pass
                 if op.all:
                     pname = pname + (" (%s)" % pid)
                 if pname in oom_dict:
@@ -5988,6 +6188,12 @@ def meminfo():
     op.add_option("--oom-count", dest="oom_count", default=0,
                   action="store", type="int",
                   help="Limit number of OOM events to display")
+    op.add_option("--oom-tree", dest="oom_tree", default=0,
+                  action="store_true",
+                  help="show the OOM task dump as a process tree")
+    op.add_option("--oom-ascii", dest="ascii_mode", default=0,
+                  action="store_true",
+                  help="use ASCII instead of Unicode glyphs in --oom-tree")
     op.add_option("--oom-top", dest="oom_top", default=10,
                   action="store", type="int",
                   help="Show top N memory consumers (default: 10)")
