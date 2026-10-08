@@ -61,6 +61,48 @@ ORIGIN_MARKERS = {
     'web':   ("\033[35m", "web"),      # magenta
 }
 
+# Palette for the 'find' report. One colour per kind of thing, held across
+# every section, so the reader can jump to the part they want instead of
+# counting indentation to work out what they are looking at.
+#
+# Only standard SGR codes are used. Where a terminal ignores dim, the label
+# simply renders plain against a bold value, which still reads correctly.
+# As with ORIGIN_MARKERS, colour is decoration: every line says in words what
+# it is, because this output gets piped, logged and pasted into cases.
+FIND_RULE  = "\033[1;36m"   # bold cyan       - section rules and headings
+FIND_LABEL = "\033[2;37m"   # dim white       - field names
+FIND_VALUE = "\033[1;37m"   # bold white      - field values
+FIND_SHA   = "\033[1;33m"   # bold yellow     - commit ids
+FIND_URL   = "\033[4;36m"   # underlined cyan - links
+FIND_GOOD  = "\033[1;32m"   # bold green      - present / backported
+FIND_BAD   = "\033[1;31m"   # bold red        - missing / not found
+FIND_WARN  = "\033[33m"     # yellow          - notes and caveats
+FIND_BODY  = "\033[2m"      # dim             - quoted commit message
+FIND_PLAIN = ""             #                 - secondary values, left alone
+FIND_RESET = "\033[0m"
+
+
+def find_rule(width=80):
+    """A full width section rule for the find report."""
+    return FIND_RULE + "=" * width + FIND_RESET
+
+
+def find_heading(text):
+    """A section heading for the find report."""
+    return FIND_RULE + " " + text + FIND_RESET
+
+
+def find_field(label, value, indent="    ", width=14, colour=FIND_VALUE):
+    """
+    One 'label : value' line for the find report.
+
+    The label is dimmed and the value highlighted, so a run of fields reads
+    as a column of answers with captions, rather than the single block of
+    one colour these reports used to be.
+    """
+    return "%s%s%-*s :%s %s%s%s" % (indent, FIND_LABEL, width, label,
+                                    FIND_RESET, colour, value, FIND_RESET)
+
 GITHUB_API = 'https://api.github.com'
 GITHUB_REPO = 'torvalds/linux'
 GITHUB_ACCEPT = 'application/vnd.github+json'
@@ -1073,32 +1115,30 @@ def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, inden
 
     Returns a list of description lines prefixed with the given indent.
     """
-    GREEN = "\033[32m"
-    RED = "\033[31m"
-    RESET = "\033[0m"
-
     if not check_tags:
         return []
 
     tag, key, kind = earliest_release_tag(repo_path, sha, timeout=timeout)
     if tag is None:
-        return [indent + "first release  : none (not in any tagged release yet)"]
+        return [find_field("first release",
+                           "none (not in any tagged release yet)",
+                           indent=indent, colour=FIND_WARN)]
 
-    lines = [indent + "first release  : %s" % tag]
+    lines = [find_field("first release", tag, indent=indent)]
     if kind == 'rhel' and parse_kernel_version is not None:
         current = parse_kernel_version(kernel_version)
         if current is not None:
-            # Same colouring as the BACKPORTED / NOT BACKPORTED verdicts this
-            # sits under: the verdict word carries the colour, the detail in
-            # brackets stays plain so the version numbers remain readable.
+            # The verdict word carries the colour; the versions behind it stay
+            # plain, because that is what the reader checks once the colour has
+            # told them which case they are in.
             if current >= key:
-                lines.append(indent + "running kernel : " +
-                             GREEN + "PRESENT" + RESET +
-                             " (%s >= %s)" % (kernel_version, tag))
+                verdict = FIND_GOOD + "PRESENT" + FIND_RESET + \
+                          " (%s >= %s)" % (kernel_version, tag)
             else:
-                lines.append(indent + "running kernel : " +
-                             RED + "NOT PRESENT" + RESET +
-                             " (%s is older than %s)" % (kernel_version, tag))
+                verdict = FIND_BAD + "NOT PRESENT" + FIND_RESET + \
+                          " (%s is older than %s)" % (kernel_version, tag)
+            lines.append(find_field("running kernel", verdict, indent=indent,
+                                    colour=FIND_PLAIN))
     return lines
 
 
@@ -1181,14 +1221,17 @@ def format_message_body(body, indent, max_lines=20):
     if not body_lines:
         return []
 
-    out = [indent + "message :"]
+    # The body is quoted material, not a finding. Dimming it keeps a long
+    # commit message from burying the verdict lines that follow it.
+    out = [indent + FIND_LABEL + "%-14s :" % "message" + FIND_RESET]
     shown = body_lines[:max_lines]
     for line in shown:
-        out.append(indent + "    " + line)
+        out.append(indent + "    " + FIND_BODY + line + FIND_RESET)
     hidden = len(body_lines) - len(shown)
     if hidden > 0:
-        out.append(indent + "    ... (%d more line%s, use --patch to see it all)" %
-                   (hidden, "s" if hidden != 1 else ""))
+        out.append(indent + "    " + FIND_WARN +
+                   "... (%d more line%s, use --patch to see it all)" %
+                   (hidden, "s" if hidden != 1 else "") + FIND_RESET)
     return out
 
 
@@ -1378,7 +1421,7 @@ def web_find(query, mode, max_count, timeout):
     return matches, notes
 
 
-def format_commit_block(index, total, commit, label, colors, url='', max_body_lines=20,
+def format_commit_block(index, total, commit, label, url='', max_body_lines=20,
                         origin='local'):
     """
     Format the header block describing one matched commit.
@@ -1388,16 +1431,20 @@ def format_commit_block(index, total, commit, label, colors, url='', max_body_li
     and a public tree routinely carry the same name, so the origin is spelled
     out on every match rather than left to the section it appears under.
     """
-    YELLOW, CYAN, BOLD_WHITE, RESET = colors
     marker_colour, marker = ORIGIN_MARKERS.get(origin, ORIGIN_MARKERS['local'])
     lines = []
-    lines.append(YELLOW + "[%d/%d] %s  " % (index, total, commit['sha']) +
-                 marker_colour + "(%s: %s)" % (marker, label) + RESET)
-    lines.append("    subject : " + BOLD_WHITE + commit['subject'] + RESET)
-    lines.append("    author  : %s" % commit['author'])
-    lines.append("    date    : %s" % commit['date'])
+    # The match header carries the sha, so it gets the sha colour and sits
+    # unindented: it is the line that starts a new block.
+    lines.append(FIND_SHA + "[%d/%d] %s" % (index, total, commit['sha']) +
+                 FIND_RESET + "  " +
+                 marker_colour + "(%s: %s)" % (marker, label) + FIND_RESET)
+    lines.append(find_field("subject", commit['subject']))
+    # Author and date are context, not the answer to anything, so they stay
+    # plain and let the subject above them carry the weight.
+    lines.append(find_field("author", commit['author'], colour=FIND_PLAIN))
+    lines.append(find_field("date", commit['date'], colour=FIND_PLAIN))
     if url:
-        lines.append("    url     : " + CYAN + url + RESET)
+        lines.append(find_field("url", url, colour=FIND_URL))
     lines.extend(format_message_body(commit.get('body', ''), "    ", max_body_lines))
     return lines
 
@@ -1415,15 +1462,6 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
     when the local mirrors come up empty, 'always' on every search, 'never'.
     body_lines caps how much of each commit message is shown; 0 hides it.
     """
-    YELLOW = "\033[33m"
-    CYAN = "\033[36m"
-    GREEN = "\033[32m"
-    RED = "\033[31m"
-    BOLD_WHITE = "\033[1;37m"
-    RESET = "\033[0m"
-    colors = (YELLOW, CYAN, BOLD_WHITE, RESET)
-    separator = "=" * 80
-
     out = []
 
     upstream_name, upstream_path, skipped = find_upstream_repo(base_dir, upstream_pref)
@@ -1457,29 +1495,34 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         # --verbose defeats the option.
         for name, path in [(upstream_name, upstream_path)] + backport_repos:
             ok, msg = git_checkout_latest(path, timeout=timeout)
-            colour = CYAN if ok else RED
-            out.append(colour + "[update %s] %s" % (name, msg) + RESET)
+            colour = FIND_RULE if ok else FIND_BAD
+            out.append(colour + "[update %s] %s" % (name, msg) + FIND_RESET)
         out.append("")
 
     # Auto-detect what kind of query this is
     if mode == 'auto':
         mode = 'commit' if COMMIT_ID_RE.match(query) else 'subject'
 
-    out.append(BOLD_WHITE + separator + RESET)
-    out.append(BOLD_WHITE + "Git Find Results" + RESET)
-    out.append(CYAN + "Query          : %s" % query + RESET)
-    out.append(CYAN + "Match mode     : %s" % mode + RESET)
-    out.append(CYAN + "Kernel version : %s" % kernel_version + RESET)
-    out.append(CYAN + "Upstream repo  : local %s%s" %
-               (upstream_name, " (%s)" % upstream_path if verbose else "") + RESET)
+    out.append(find_rule())
+    out.append(find_heading("Git Find Results"))
+    out.append(find_rule())
+    out.append(find_field("Query", query, indent=" "))
+    out.append(find_field("Match mode", mode, indent=" "))
+    out.append(find_field("Kernel version", kernel_version, indent=" "))
+    out.append(find_field("Upstream repo", "local %s%s" %
+                          (upstream_name,
+                           " (%s)" % upstream_path if verbose else ""),
+                          indent=" "))
     if backport_repos:
-        out.append(CYAN + "Backport check : local %s" %
-                   ', '.join(n for n, _p in backport_repos) + RESET)
-    out.append(CYAN + "Web lookup     : %s" %
-               ("off (PYCRASHEXT_NO_WEB)" if web_is_disabled() else
-                {'always': 'always', 'never': 'off'}.get(use_web,
-                                                         'on local miss')) + RESET)
-    out.append(BOLD_WHITE + separator + RESET)
+        out.append(find_field("Backport check", "local %s" %
+                              ', '.join(n for n, _p in backport_repos),
+                              indent=" "))
+    out.append(find_field("Web lookup",
+                          "off (PYCRASHEXT_NO_WEB)" if web_is_disabled() else
+                          {'always': 'always', 'never': 'off'}.get(
+                              use_web, 'on local miss'),
+                          indent=" "))
+    out.append(find_rule())
     out.append("")
 
     # Collect matches, remembering which repository each came from
@@ -1518,8 +1561,9 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
             web_matches, web_notes = web_find(query, mode, max_count, web_timeout)
 
     if not matches and not web_matches:
-        out.append(RED + "NOT FOUND: no commit matches this %s." %
-                   ("commit ID" if mode == 'commit' else "subject text") + RESET)
+        out.append(FIND_BAD + "NOT FOUND: no commit matches this %s." %
+                   ("commit ID" if mode == 'commit' else "subject text") +
+                   FIND_RESET)
         out.append("")
         if mode == 'commit':
             out.append("  The commit ID does not exist in '%s'%s." %
@@ -1538,28 +1582,34 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
             out.append("  The local mirror may also be out of date - rerun with")
             out.append("  --update to fetch the latest before searching.")
         out.append("")
-        out.append("  Searched:")
-        local_marker = ORIGIN_MARKERS['local'][1]
-        web_marker = ORIGIN_MARKERS['web'][1]
+        out.append(find_heading("Searched"))
+        local_colour, local_marker = ORIGIN_MARKERS['local']
+        web_colour, web_marker = ORIGIN_MARKERS['web']
         for name, path in [(upstream_name, upstream_path)] + backport_repos:
             rc, head, _err = run_git(path, ['log', '--max-count=1', '--format=%H %cI'],
                                      timeout=60)
             state = head.strip() if rc == 0 and head.strip() else "unreadable"
-            out.append("    %-5s %-22s %s" % (local_marker, name, path))
-            out.append("    %-5s %-22s HEAD %s" % ("", "", state))
+            out.append("    " + local_colour + "%-5s" % local_marker +
+                       FIND_RESET + " " + FIND_VALUE + "%-22s" % name +
+                       FIND_RESET + " " + path)
+            out.append("    %-5s %-22s " % ("", "") +
+                       FIND_LABEL + "HEAD " + state + FIND_RESET)
         if use_web != 'never' and not web_is_disabled():
             if mode == 'commit':
                 for name, base in CGIT_TREES:
-                    out.append("    %-5s %-22s %s" % (web_marker, name, base))
-            out.append("    %-5s %-22s https://github.com/%s" %
-                       (web_marker, 'github', GITHUB_REPO))
+                    out.append("    " + web_colour + "%-5s" % web_marker +
+                               FIND_RESET + " " + FIND_VALUE + "%-22s" % name +
+                               FIND_RESET + " " + base)
+            out.append("    " + web_colour + "%-5s" % web_marker + FIND_RESET +
+                       " " + FIND_VALUE + "%-22s" % 'github' + FIND_RESET +
+                       " https://github.com/%s" % GITHUB_REPO)
         for note in web_notes:
-            out.append("  " + YELLOW + "web: %s" % note + RESET)
-        out.append(BOLD_WHITE + separator + RESET)
+            out.append("  " + FIND_WARN + "web: %s" % note + FIND_RESET)
+        out.append(find_rule())
         return '\n'.join(out)
 
     for idx, (repo_name, repo_path, commit) in enumerate(matches, 1):
-        out.extend(format_commit_block(idx, len(matches), commit, repo_name, colors,
+        out.extend(format_commit_block(idx, len(matches), commit, repo_name,
                                        url=repo_browse_url(repo_path, commit['sha']),
                                        max_body_lines=body_lines, origin='local'))
         out.extend(describe_presence(repo_path, commit['sha'], kernel_version,
@@ -1570,15 +1620,19 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                 backport, method = find_backport(path, commit['sha'],
                                                  commit['subject'], timeout=timeout)
                 if backport is None:
-                    out.append("    %s : " % name + RED + "NOT BACKPORTED" + RESET +
+                    out.append("    " + FIND_VALUE + name + FIND_RESET + " : " +
+                               FIND_BAD + "NOT BACKPORTED" + FIND_RESET +
                                " (no matching commit found)")
                     continue
-                out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
-                           " as %s" % backport['sha'])
-                out.append("        matched by     : %s" % method)
+                out.append("    " + FIND_VALUE + name + FIND_RESET + " : " +
+                           FIND_GOOD + "BACKPORTED" + FIND_RESET + " as " +
+                           FIND_SHA + backport['sha'] + FIND_RESET)
+                out.append(find_field("matched by", method, indent="        ",
+                                      colour=FIND_PLAIN))
                 backport_url = repo_browse_url(path, backport['sha'])
                 if backport_url:
-                    out.append("        url            : " + CYAN + backport_url + RESET)
+                    out.append(find_field("url", backport_url,
+                                          indent="        ", colour=FIND_URL))
                 out.extend(describe_presence(path, backport['sha'], kernel_version,
                                              check_tags, timeout, "        "))
 
@@ -1592,15 +1646,17 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
         out.append("")
 
     if web_matches:
-        out.append(BOLD_WHITE + "Found on public kernel sources" + RESET)
+        out.append(find_rule())
+        out.append(find_heading("Found on public kernel sources"))
+        out.append(find_rule())
         if not matches:
-            out.append(YELLOW + "The local mirror does not have this commit - it may be "
+            out.append(FIND_WARN + "The local mirror does not have this commit - it may be "
                        "newer than\nthe last fetch, or live in a tree that is not "
-                       "cloned here." + RESET)
+                       "cloned here." + FIND_RESET)
         out.append("")
 
         for idx, (source, commit) in enumerate(web_matches, 1):
-            out.extend(format_commit_block(idx, len(web_matches), commit, source, colors,
+            out.extend(format_commit_block(idx, len(web_matches), commit, source,
                                            url=commit.get('url', ''),
                                            max_body_lines=body_lines, origin='web'))
 
@@ -1611,29 +1667,34 @@ def find_command(query, mode, kernel_version, base_dir, upstream_pref, extra_rep
                     backport, method = find_backport(path, commit['sha'],
                                                      commit['subject'], timeout=timeout)
                     if backport is None:
-                        out.append("    %s : " % name + RED + "NOT BACKPORTED" + RESET +
-                                   " (no matching commit found)")
+                        out.append("    " + FIND_VALUE + name + FIND_RESET +
+                                   " : " + FIND_BAD + "NOT BACKPORTED" +
+                                   FIND_RESET + " (no matching commit found)")
                         continue
-                    out.append("    %s : " % name + GREEN + "BACKPORTED" + RESET +
-                               " as %s" % backport['sha'])
-                    out.append("        matched by     : %s" % method)
+                    out.append("    " + FIND_VALUE + name + FIND_RESET +
+                               " : " + FIND_GOOD + "BACKPORTED" + FIND_RESET +
+                               " as " + FIND_SHA + backport['sha'] + FIND_RESET)
+                    out.append(find_field("matched by", method,
+                                          indent="        ", colour=FIND_PLAIN))
                     backport_url = repo_browse_url(path, backport['sha'])
                     if backport_url:
-                        out.append("        url            : " + CYAN + backport_url + RESET)
+                        out.append(find_field("url", backport_url,
+                                              indent="        ",
+                                              colour=FIND_URL))
                     out.extend(describe_presence(path, backport['sha'], kernel_version,
                                                  check_tags, timeout, "        "))
             out.append("")
 
     for note in web_notes:
-        out.append(YELLOW + "web: %s" % note + RESET)
+        out.append(FIND_WARN + "web: %s" % note + FIND_RESET)
     if web_notes:
         out.append("")
 
     total = len(matches) + len(web_matches)
-    out.append(BOLD_WHITE + separator + RESET)
-    out.append(BOLD_WHITE + "Complete - %d match%s" %
-               (total, "es" if total != 1 else "") + RESET)
-    out.append(BOLD_WHITE + separator + RESET)
+    out.append(find_rule())
+    out.append(find_heading("Complete - %d match%s" %
+                            (total, "es" if total != 1 else "")))
+    out.append(find_rule())
     return '\n'.join(out)
 
 

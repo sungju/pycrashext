@@ -1647,20 +1647,21 @@ Use `--commit=` or `--subject=` when the automatic choice is wrong, for example 
 ```
 crash> git find <commit-id>
 ================================================================================
-Git Find Results
-Query          : 0dd3ee311255
-Match mode     : commit
-Kernel version : 5.14.0-427.13.1.el9_4.x86_64
-Upstream repo  : upstream
-Backport check : rhel9
+ Git Find Results
+================================================================================
+ Query          : 0dd3ee311255
+ Match mode     : commit
+ Kernel version : 5.14.0-427.13.1.el9_4.x86_64
+ Upstream repo  : upstream
+ Backport check : rhel9
 ================================================================================
 
 [1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (upstream)
-    subject : net/mlx5e: Fix crash moving to switchdev mode
-    author  : A Developer <dev@example.com>
-    date    : 2024-03-11T10:00:00+00:00
-    url     : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
-    message :
+    subject        : net/mlx5e: Fix crash moving to switchdev mode
+    author         : A Developer <dev@example.com>
+    date           : 2024-03-11T10:00:00+00:00
+    url            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    message        :
         Moving to switchdev mode with bonded VFs crashed because the uplink
         representor was freed before the bond netdev was unregistered.
         Hold a reference until the notifier has run.
@@ -1672,7 +1673,7 @@ Backport check : rhel9
         running kernel : PRESENT (5.14.0-427.13.1.el9_4.x86_64 >= kernel-5.14.0-427.el9)
 
 ================================================================================
-Complete - 1 match
+ Complete - 1 match
 ================================================================================
 ```
 
@@ -1687,6 +1688,16 @@ The report is read from the bottom up:
 | `matched by` | How the match was made - see below |
 | `first release` (rhel) | Earliest `kernel-*` tag in the RHEL tree containing the backport |
 | `running kernel` | Whether the kernel in the vmcore is at or above that release |
+
+The report is colour coded so a section can be found without reading it:
+bold cyan for the rules and section headings, dimmed field names against
+bold values, yellow for commit IDs, underlined cyan for links, and a dimmed
+commit message so a long one does not bury the verdicts under it. The two
+verdicts - `BACKPORTED` / `NOT BACKPORTED` and `PRESENT` / `NOT PRESENT` -
+are green when the fix is there and red when it is not.
+
+Colour is decoration only. Every line still says in words what it is, so the
+report survives being piped, logged, or pasted into a case.
 
 The message body makes the match self-explanatory - you can tell whether a commit is the one you were after without a second `git show`. It is capped at 20 lines; use `--message-lines=<n>` to change that, `--no-message` to drop it, or `--patch` to see the whole thing along with the diff.
 
@@ -1703,9 +1714,9 @@ Backports are matched in two ways, strongest first:
 crash> git find <commit-id>
 ...
 [1/1] a2a1cc5465226c2f270f06a041a6d77385d6df6d  (upstream)
-    subject : net: never backported fix
-    author  : A Developer <dev@example.com>
-    date    : 2024-03-11T10:00:00+00:00
+    subject        : net: never backported fix
+    author         : A Developer <dev@example.com>
+    date           : 2024-03-11T10:00:00+00:00
     first release  : v6.10
     rhel9 : NOT BACKPORTED (no matching commit found)
 ```
@@ -1725,7 +1736,7 @@ NOT FOUND: no commit matches this commit ID.
   The local mirror may also be out of date - rerun with
   --update to fetch the latest before searching.
 
-  Searched:
+ Searched
     upstream   /srv/kernel-src/upstream
                HEAD 3e5c1f9a... 2025-09-02T11:24:07+00:00
     rhel9      /srv/kernel-src/rhel9
@@ -1780,25 +1791,28 @@ A commit found this way is still cross-checked against the local RHEL trees, so 
 ```
 crash> git find <commit-id>
 ================================================================================
-Git Find Results
-Query          : 0dd3ee311255
-Match mode     : commit
-Kernel version : 5.14.0-427.13.1.el9_4.x86_64
-Upstream repo  : upstream
-Backport check : rhel9
-Web lookup     : on local miss
+ Git Find Results
+================================================================================
+ Query          : 0dd3ee311255
+ Match mode     : commit
+ Kernel version : 5.14.0-427.13.1.el9_4.x86_64
+ Upstream repo  : upstream
+ Backport check : rhel9
+ Web lookup     : on local miss
 ================================================================================
 
-Found on public kernel sources
+================================================================================
+ Found on public kernel sources
+================================================================================
 The local mirror does not have this commit - it may be newer than
 the last fetch, or live in a tree that is not cloned here.
 
 [1/1] 0dd3ee31125508cd67f7e7172247f05b7fd1753a  (kernel.org/torvalds)
-    subject : net/mlx5e: Fix crash moving to switchdev mode
-    author  : A Developer <dev@example.com>
-    date    : Mon, 11 Mar 2024 10:00:00 +0000
-    url     : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
-    message :
+    subject        : net/mlx5e: Fix crash moving to switchdev mode
+    author         : A Developer <dev@example.com>
+    date           : Mon, 11 Mar 2024 10:00:00 +0000
+    url            : https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=0dd3ee31125508cd67f7e7172247f05b7fd1753a
+    message        :
         Moving to switchdev mode with bonded VFs crashed because the uplink
         representor was freed before the bond netdev was unregistered.
         Hold a reference until the notifier has run.
