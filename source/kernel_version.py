@@ -15,26 +15,34 @@ def parse_kernel_version(ver_str):
         ver_str: Kernel version string (e.g. "5.14.0-123.el9.x86_64")
 
     Returns:
-        A tuple (rhel_ver, major, minor, patch, release) of ints, or None
-        if the string is not a recognizable RHEL kernel version.
+        A tuple (rhel_ver, major, minor, patch, release), or None if the
+        string is not a recognizable RHEL kernel version.
 
         rhel_ver: RHEL major version (e.g. 9 for el9)
         major, minor, patch: Kernel version numbers
-        release: Build release number (the numeric part before .elN)
+        release: Tuple of ints for the full dotted build release before .elN,
+                 e.g. (553, 146, 1) for 4.18.0-553.146.1.el8_10
+
+    The release has to keep every component. RHEL ships its whole z-stream
+    under one release number - 553.5.1, 553.40.1 and 553.159.1 are all 553 -
+    so reducing it to that leading number makes every z-stream in a release
+    compare equal, and any >= test between two of them answers True.
     """
     if not ver_str or not isinstance(ver_str, str):
         return None
 
-    # Match: major.minor.patch-release[.extra].elN[_minor][.arch]
+    # Match: major.minor.patch-release[.release...].elN[_minor][.arch]
     # Handles dotted release numbers like 425.3.1.el8 and minor variants like el9_5
     m = re.search(
-        r'^(\d+)\.(\d+)\.(\d+)-(\d+)[.\d]*\.el(\d+)(?:_\d+)?',
+        r'^(\d+)\.(\d+)\.(\d+)-(\d+(?:\.\d+)*)\.el(\d+)(?:_\d+)?',
         ver_str.strip()
     )
     if not m:
         return None
 
-    major, minor, patch, release, rhel_ver = (int(x) for x in m.groups())
+    major, minor, patch = (int(m.group(i)) for i in (1, 2, 3))
+    release = tuple(int(x) for x in m.group(4).split('.'))
+    rhel_ver = int(m.group(5))
     return (rhel_ver, major, minor, patch, release)
 
 
