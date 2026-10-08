@@ -1073,6 +1073,10 @@ def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, inden
 
     Returns a list of description lines prefixed with the given indent.
     """
+    GREEN = "\033[32m"
+    RED = "\033[31m"
+    RESET = "\033[0m"
+
     if not check_tags:
         return []
 
@@ -1084,12 +1088,17 @@ def describe_presence(repo_path, sha, kernel_version, check_tags, timeout, inden
     if kind == 'rhel' and parse_kernel_version is not None:
         current = parse_kernel_version(kernel_version)
         if current is not None:
+            # Same colouring as the BACKPORTED / NOT BACKPORTED verdicts this
+            # sits under: the verdict word carries the colour, the detail in
+            # brackets stays plain so the version numbers remain readable.
             if current >= key:
-                lines.append(indent + "running kernel : PRESENT (%s >= %s)" %
-                             (kernel_version, tag))
+                lines.append(indent + "running kernel : " +
+                             GREEN + "PRESENT" + RESET +
+                             " (%s >= %s)" % (kernel_version, tag))
             else:
-                lines.append(indent + "running kernel : NOT PRESENT "
-                             "(%s is older than %s)" % (kernel_version, tag))
+                lines.append(indent + "running kernel : " +
+                             RED + "NOT PRESENT" + RESET +
+                             " (%s is older than %s)" % (kernel_version, tag))
     return lines
 
 
