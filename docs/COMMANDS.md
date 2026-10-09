@@ -58,6 +58,7 @@ All commands are invoked inside the crash utility as `epython <command>.py [opti
   - [screen](#screen)
   - [caseinfo](#caseinfo)
   - [git](#git)
+  - [kvercmp](#kvercmp)
 
 ---
 
@@ -1051,6 +1052,34 @@ git log -Sclip_push --max-count=5           # Search for commits touching 'clip_
 git show abc123def --stat                    # Show commit with diffstat
 git log -Sinit_new_ldt --repos=rhel9,upstream  # Search specific repos
 git log --author="Linus" --max-count=3      # Search by author
+```
+
+---
+
+### kvercmp
+
+Is a fix already in this dump's kernel? Compares the dump's kernel release
+with the fixed kernels an errata or KCS article lists, under one set of rules:
+only the same RHEL major counts; a fix in the kernel's own minor release (the
+same release number, e.g. 553 for every `4.18.0-553.*.el8_10` build) is
+compared in full, so `553.5.1` is older than `553.77.1`; a fix from an earlier
+minor release only gives `LIKELY_FIXED`, to confirm with `git log`.
+
+**Usage:** `kvercmp [-k <kernel>] <fixed kernel>...`
+
+| Option | Long Form | Description |
+|--------|-----------|-------------|
+| `-k` | `--kernel` | Check this kernel instead of the dump's own release |
+
+Prints each version as parsed, the verdict, and a last line
+`KVERCMP verdict=<FIXED|LIKELY_FIXED|NOT_FIXED|NO_MATCH|UNKNOWN> current=... fix=...`.
+The same report runs without crash: `python3 source/kernel_version.py <kernel> <fixed kernel>...`.
+
+#### Examples
+
+```
+kvercmp kernel-4.18.0-425.3.1.el8 kernel-4.18.0-372.32.1.el8_6 kernel-5.14.0-162.6.1.el9_1
+kvercmp -k 4.18.0-553.5.1.el8_10 kernel-4.18.0-553.77.1.el8_10
 ```
 
 ---
