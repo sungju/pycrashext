@@ -59,6 +59,8 @@ All commands are invoked inside the crash utility as `epython <command>.py [opti
   - [caseinfo](#caseinfo)
   - [git](#git)
   - [kvercmp](#kvercmp)
+  - [logscan](#logscan)
+  - [preempt](#preempt)
 
 ---
 
@@ -342,6 +344,10 @@ pstree -A                # ASCII mode for terminals without Unicode
 ```
 
 ### hangcheck
+
+`hangcheck -g` groups the D-state tasks by where they wait (the first two
+frames below the scheduler, e.g. `io_schedule < blk_mq_get_tag`) from one
+`foreach UN bt`, with one example backtrace per top group as printed.
 
 Detect and analyze processes in D-state (uninterruptible sleep) and zombie state.
 
@@ -1053,6 +1059,32 @@ git show abc123def --stat                    # Show commit with diffstat
 git log -Sinit_new_ldt --repos=rhel9,upstream  # Search specific repos
 git log --author="Linus" --max-count=3      # Search by author
 ```
+
+---
+
+### logscan
+
+Which known kernel-log signatures this dump holds: panic, sysrq/NMI, oops,
+corruption (`list_del corruption`, `refcount_t`, bad page state), stack
+overflow, atomic context, OOM (cgroup, no killable process), soft/hard
+lockup, hung tasks, RCU stalls, NETDEV watchdog, conntrack full, storage
+transport errors, MCE/EDAC, hypervisor. For each: count, first and last
+`log` line number, what it points to, then the first and last lines exactly
+as `log` prints them. A panic made by a detection sysctl
+(`softlockup_panic`, `hung_task_panic`, `panic_on_oom`) gets a reroute note.
+
+**Usage:** `logscan [-a]` (`-a` prints every matching line). The catalogue is
+`source/logsig.py`, which also runs on a saved log: `python3 source/logsig.py <file>`.
+
+---
+
+### preempt
+
+Decodes `preempt_count`: preempt-disable depth, serving a softirq, bottom
+halves disabled, hardirq nesting, NMI, and whether that is atomic context.
+
+**Usage:** `preempt <value>...` or `preempt -l` (every preempt_count the kernel
+log prints, each after its line). Also `python3 source/preemptcount.py <value>...`.
 
 ---
 

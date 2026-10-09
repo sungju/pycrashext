@@ -8,6 +8,7 @@ from pykdump.API import *
 from LinuxDump import Tasks
 
 import crashcolor
+import btgroup
 
 from datetime import datetime
 
@@ -200,6 +201,10 @@ def show_zombie_tasks():
 
 
 def hangcheck_display(options, args):
+    if getattr(options, 'group', False):
+        # Where the D-state tasks wait, grouped (one 'foreach UN bt' call).
+        print(btgroup.report(exec_crash_command("foreach UN bt"), command="foreach UN bt"))
+        return
     get_task_list(options, args)
 
     hung_task_timeout_usecs = readSymbol("sysctl_hung_task_timeout_secs") * 1000000
@@ -301,6 +306,11 @@ def hangcheck_main():
                   dest="threshold",
                   default=0,
                   help="Only show tasks in D state longer than N seconds")
+    op.add_option("-g", "--group",
+                  action="store_true",
+                  dest="group",
+                  default=False,
+                  help="Group D-state tasks by where they wait (the frames below the scheduler)")
     op.add_option("-z", "--zombie",
                   action="store_true",
                   dest="zombie",

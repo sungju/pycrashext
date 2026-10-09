@@ -197,6 +197,18 @@
 			"desc"    : "Is a fix already in this kernel?",
 			"options" : "-h   - list available options",
 			"help"    : "Compares this dump's kernel with the fixed kernels an errata or KCS lists\n\n kvercmp <fixed kernel>...   e.g. kvercmp kernel-4.18.0-425.3.1.el8\n -k <kernel>                 check another kernel instead"
+		},
+		{
+			"command" : "logscan",
+			"desc"    : "Known kernel log signatures",
+			"options" : "-h   - list available options",
+			"help"    : "Counts the kernel log messages that decide how a crash is analysed and prints their first and last lines\n\n -a   - print every matching line"
+		},
+		{
+			"command" : "preempt",
+			"desc"    : "Decode preempt_count",
+			"options" : "-h   - list available options",
+			"help"    : "Decodes preempt_count values\n\n preempt <value>...   decode values\n -l                   decode every preempt_count the kernel log prints"
 		}
 	]
 }
