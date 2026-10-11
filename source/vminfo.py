@@ -8,6 +8,7 @@ from pykdump.API import *
 from LinuxDump import Tasks, percpu
 
 import crashcolor
+import overcommit
 import re
 
 
@@ -143,18 +144,19 @@ def kvm_mem(options):
                     num_pages * crash.PAGESIZE,
                     num_pages * crash.PAGESIZE / 1024 / 1024 / 1024))
 
-                # Target page count — field name varies across kernel versions
-                # (num_desired in newer kernels, may be absent in older ones)
-                for _target_field in ("num_desired", "num_pfns"):
-                    try:
-                        num_desired = int(getattr(vb, _target_field))
-                        print("required target (pages)    = %d" % num_desired)
-                        print("required target (bytes)    = %d, (%.2fGB)" % (
-                            num_desired * crash.PAGESIZE,
-                            num_desired * crash.PAGESIZE / 1024 / 1024 / 1024))
-                        break
-                    except Exception:
-                        continue
+                # The host's target lives in virtio config space, not in
+                # struct virtio_balloon (num_pfns is only the size of the
+                # batch being inflated/deflated), so it is shown only when
+                # a kernel carries a num_desired field.
+                try:
+                    num_desired = int(vb.num_desired)
+                    print("required target (pages)    = %d" % num_desired)
+                    print("required target (bytes)    = %d, (%.2fGB)" % (
+                        num_desired * crash.PAGESIZE,
+                        num_desired * crash.PAGESIZE / 1024 / 1024 / 1024))
+                except Exception:
+                    print("required target            = <in virtio config "
+                          "space, not in the dump>")
                 crashcolor.set_color(crashcolor.RESET)
 
                 if options.show_details:
@@ -351,11 +353,25 @@ HYPERVISOR_NAMES = {
 
 
 def oc_get_hypervisor():
-    """Return (name, is_virt) from x86_hyper_type, else X86_FEATURE_HYPERVISOR."""
+    """
+    Return (name, is_virt) from x86_hyper_type (4.15+), x86_hyper->name
+    (RHEL7 and older), else X86_FEATURE_HYPERVISOR.
+    """
     if symbol_exists("x86_hyper_type"):
         try:
             val = int(readSymbol("x86_hyper_type"))
             return HYPERVISOR_NAMES.get(val, "type %d" % val), (val != 0)
+        except Exception:
+            pass
+    # RHEL7 knows only VMware, Hyper-V, Xen and KVM; any other hypervisor
+    # leaves x86_hyper NULL and is found by the CPUID bit below.
+    if symbol_exists("x86_hyper"):
+        try:
+            if int(readSymbol("x86_hyper")) != 0:
+                out = exec_crash_command("p x86_hyper->name")
+                m = re.search(r'"([^"]*)"', out)
+                if m:
+                    return m.group(1), True
         except Exception:
             pass
     try:
@@ -367,11 +383,30 @@ def oc_get_hypervisor():
     return "native (bare metal)", False
 
 
+CPUTIME_DEFAULTS = {
+    "CPUTIME_USER": 0, "CPUTIME_NICE": 1, "CPUTIME_SYSTEM": 2,
+    "CPUTIME_SOFTIRQ": 3, "CPUTIME_IRQ": 4, "CPUTIME_IDLE": 5,
+    "CPUTIME_IOWAIT": 6, "CPUTIME_STEAL": 7, "CPUTIME_GUEST": 8,
+    "CPUTIME_GUEST_NICE": 9,
+}
+
+
+def oc_cputime_index(name):
+    try:
+        return int(EnumInfo("enum cpu_usage_stat")[name])
+    except Exception:
+        return CPUTIME_DEFAULTS[name]
+
+
 def oc_get_steal_state():
     """Return (enabled, steal_by_cpu). enabled is True/False/None.
 
-    steal_by_cpu maps cpu -> (steal_ns, total_ns); empty when unavailable.
-    On VMware steal accounting is usually off, so steal reads 0 regardless.
+    steal_by_cpu maps cpu -> (steal, total); empty when unavailable.  total
+    is every cpustat bucket except guest and guest_nice, which are already
+    inside user and nice, so it tracks the vCPU's wall time (tickless idle
+    is added back on idle exit) and steal / total reads like CPU Ready.
+    The ratio is unit-free, so it reads the same whether cputime is ns or
+    jiffies.  On VMware steal accounting is usually off, so steal reads 0.
     """
     enabled = None
     if symbol_exists("paravirt_steal_enabled"):
@@ -382,20 +417,35 @@ def oc_get_steal_state():
 
     steal = {}
     if symbol_exists("kernel_cpustat"):
-        idx = 7
-        try:
-            idx = int(EnumInfo("enum cpu_usage_stat")["CPUTIME_STEAL"])
-        except Exception:
-            pass
+        idx = oc_cputime_index("CPUTIME_STEAL")
+        total_idx = [oc_cputime_index(name) for name in (
+            "CPUTIME_USER", "CPUTIME_NICE", "CPUTIME_SYSTEM",
+            "CPUTIME_SOFTIRQ", "CPUTIME_IRQ", "CPUTIME_IDLE",
+            "CPUTIME_IOWAIT", "CPUTIME_STEAL")]
         try:
             for cpu, addr in enumerate(percpu.get_cpu_var("kernel_cpustat")):
                 kcs = readSU("struct kernel_cpustat", addr)
                 buckets = [int(x) for x in kcs.cpustat]
                 if idx < len(buckets):
-                    steal[cpu] = (buckets[idx], sum(buckets))
+                    steal[cpu] = (buckets[idx],
+                                  sum(buckets[i] for i in total_idx
+                                      if i < len(buckets)))
         except Exception:
             pass
     return enabled, steal
+
+
+def oc_get_crash_info():
+    """DATE, UPTIME and PANIC lines from 'sys', as crash prints them."""
+    info = {}
+    try:
+        for line in exec_crash_command("sys").splitlines():
+            key, sep, val = line.partition(":")
+            if sep and key.strip() in ("DATE", "UPTIME", "PANIC"):
+                info[key.strip()] = val.strip()
+    except Exception:
+        pass
+    return info
 
 
 def oc_get_loadavg():
@@ -435,6 +485,18 @@ def oc_get_totalram_pages():
     return -1
 
 
+def oc_vmballoon_uncounted():
+    """
+    True when vmw_balloon does not go through balloon_compaction, so it
+    never counts BALLOON_INFLATE: struct vmballoon has no b_dev_info before
+    RHEL9.
+    """
+    try:
+        return member_offset("struct vmballoon", "b_dev_info") < 0
+    except Exception:
+        return True
+
+
 def oc_find_virtio_balloon():
     """Return the first registered struct virtio_balloon, or None."""
     try:
@@ -466,8 +528,12 @@ def oc_get_balloon_pages():
     """
     Return balloon data for the detected driver, or None.
 
-    The result contains alloc, target, kind, symbol, address and raw_command.
-    target is -1 when the driver exposes no target.
+    The result contains alloc, target, kind, symbol, address, raw_command
+    and out_of_totalram.  target is -1 when the driver exposes no target.
+    out_of_totalram is True when the driver takes ballooned pages out of
+    totalram_pages (Hyper-V from RHEL8; virtio without DEFLATE_ON_OOM), so
+    the guest's configured RAM is totalram_pages + alloc; vmw_balloon leaves
+    them in.  'balloon_stats' is the Xen balloon (include/xen/balloon.h).
     """
     try:
         if symbol_exists("balloon"):
@@ -490,6 +556,7 @@ def oc_get_balloon_pages():
                 "address": addr,
                 "raw_command":
                     "struct vmballoon.size,target,stats 0x%x -d" % addr,
+                "out_of_totalram": False,
             }
         if symbol_exists("balloon_stats"):
             b = readSymbol("balloon_stats")
@@ -502,10 +569,11 @@ def oc_get_balloon_pages():
             return {
                 "alloc": int(b.current_pages),
                 "target": int(b.target_pages),
-                "kind": "VMware",
+                "kind": "Xen",
                 "symbol": "balloon_stats",
                 "address": addr,
                 "raw_command": "struct balloon_stats 0x%x -d" % addr,
+                "out_of_totalram": False,
             }
     except Exception:
         pass
@@ -526,18 +594,27 @@ def oc_get_balloon_pages():
                 "address": addr,
                 "raw_command":
                     "struct hv_dynmem_device 0x%x -d" % addr,
+                # hv_balloon adjusts managed pages from RHEL8 on, not in
+                # RHEL7; x86_hyper_type (4.15+) tells the two apart.
+                "out_of_totalram": symbol_exists("x86_hyper_type"),
             }
     except Exception:
         pass
     vb = oc_find_virtio_balloon()
     if vb is not None:
+        # The host's target is in virtio config space; num_pfns is only the
+        # batch in flight, so it must not stand in for a target.
         target = -1
-        for field in ("num_desired", "num_pfns"):
-            try:
-                target = int(getattr(vb, field))
-                break
-            except Exception:
-                continue
+        try:
+            target = int(vb.num_desired)
+        except Exception:
+            pass
+        # VIRTIO_BALLOON_F_DEFLATE_ON_OOM (bit 2): pages stay in totalram.
+        deflate_on_oom = False
+        try:
+            deflate_on_oom = bool((int(vb.vdev.features) >> 2) & 1)
+        except Exception:
+            pass
         try:
             return {
                 "alloc": int(vb.num_pages),
@@ -547,6 +624,7 @@ def oc_get_balloon_pages():
                 "address": int(vb),
                 "raw_command":
                     "struct virtio_balloon 0x%x -d" % int(vb),
+                "out_of_totalram": not deflate_on_oom,
             }
         except Exception:
             pass
@@ -682,17 +760,23 @@ def oc_task_context(task_addr):
     return "kernel", out
 
 
+TASK_NOLOAD = 0x400
+
+
 def oc_collect_task_states():
     """
     Return a task-state census and raw rows for runnable/uninterruptible tasks.
 
     Load average includes both runnable and uninterruptible tasks.  The split
     prevents a large D-state I/O pile-up from being mislabeled CPU overcommit.
+    TASK_IDLE (UNINTERRUPTIBLE | NOLOAD) threads, idle kworkers and RCU
+    kthreads among them, are not in the load and are counted as 'noload'.
     """
     result = {
         "total": 0,
         "running": 0,
         "uninterruptible": 0,
+        "noload": 0,
         "other": 0,
         "running_rows": [],
         "uninterruptible_rows": [],
@@ -720,6 +804,8 @@ def oc_collect_task_states():
             if state == 0:
                 result["running"] += 1
                 result["running_rows"].append(row)
+            elif state & 0x2 and state & TASK_NOLOAD:
+                result["noload"] += 1
             elif state & 0x2:
                 result["uninterruptible"] += 1
                 result["uninterruptible_rows"].append(row)
@@ -740,6 +826,9 @@ VM_EVENT_NAMES = (
     "PGSCAN_DIRECT_NORMAL", "PGSCAN_DIRECT_MOVABLE",
     "ALLOCSTALL_DMA", "ALLOCSTALL_DMA32", "ALLOCSTALL_NORMAL",
     "ALLOCSTALL_MOVABLE",
+    # Pages the host took/gave back through balloon_compaction (virtio and
+    # newer vmw_balloon; not Hyper-V or the RHEL7 vmw_balloon).
+    "BALLOON_INFLATE", "BALLOON_DEFLATE",
 )
 
 
@@ -805,62 +894,17 @@ def oc_get_memory_snapshot(show_details=False):
     return data
 
 
-LOG_PATTERNS = {
-    "CPU stall": (
-        "soft lockup", "rcu_sched detected stalls",
-        "rcu_preempt detected stalls", "rcu: info: rcu_",
-    ),
-    "Clock/timer": (
-        "clocksource watchdog", "timekeeping watchdog",
-        "hrtimer: interrupt took", "nohz: local_softirq_pending",
-    ),
-    "Memory": (
-        "invoked oom-killer", "out of memory:", "oom-kill:",
-        "page allocation failure",
-    ),
-    "Storage": (
-        "blk_update_request: i/o error", "buffer i/o error",
-        "timing out command", "rejecting i/o to offline device",
-        "resetting link", "abort command",
-    ),
-}
-
-
-def oc_get_log_evidence():
+def oc_get_log():
     """
-    Return (matches, contexts) for historical stall symptoms in the log.
+    Time-anchored kernel log analysis (overcommit.analyse_log), or None.
 
-    Log records widen the observation window beyond the final snapshot.  They
-    remain supporting evidence because the same messages can have guest-local
-    causes.  contexts contains the matching line plus two surrounding lines so
-    detailed output does not have to print the entire kernel log.
+    Log records widen the observation window beyond the final snapshot, and
+    their timestamps say whether a symptom was at crash time or weeks ago.
     """
-    matches = dict((name, []) for name in LOG_PATTERNS)
-    contexts = dict((name, []) for name in LOG_PATTERNS)
     try:
-        raw = exec_crash_command("log")
+        return overcommit.analyse_log(exec_crash_command("log").splitlines())
     except Exception:
-        return matches, contexts
-    lines = raw.splitlines()
-    matched_indexes = dict((name, set()) for name in LOG_PATTERNS)
-    for index, line in enumerate(lines):
-        lower = line.lower()
-        for name, patterns in LOG_PATTERNS.items():
-            if any(pattern in lower for pattern in patterns):
-                matches[name].append(line)
-                matched_indexes[name].add(index)
-    for name, indexes in matched_indexes.items():
-        shown = set()
-        for index in indexes:
-            shown.update(range(max(0, index - 2),
-                               min(len(lines), index + 3)))
-        previous = None
-        for index in sorted(shown):
-            if previous is not None and index > previous + 1:
-                contexts[name].append(("... unrelated log lines ...", False))
-            contexts[name].append((lines[index], index in indexes))
-            previous = index
-    return matches, contexts
+        return None
 
 
 def oc_related_excerpt(raw, patterns, before=1, after=1):
@@ -1084,6 +1128,12 @@ def oc_get_inflight_requests():
 VCPU_CLOCK_LAG_SEC = 1.0
 # A run-queue at/above this depth is treated as a CPU-pressure hotspot.
 DEEP_RUNQ = 8
+# Steal as a share of a vCPU's time since boot; the bar of CPU Ready.
+STEAL_PCT = 5.0
+# Load and runnable tasks per vCPU above which demand exceeds the vCPUs.
+LOAD_RATIO = 1.25
+# Share of guest swap in use counted as guest memory pressure.
+SWAP_HEAVY_RATIO = 0.25
 # Detailed output is intentionally bounded: it is an evidence excerpt, not a
 # replacement for the underlying crash commands.
 DETAIL_CPU_LIMIT = 8
@@ -1091,20 +1141,67 @@ DETAIL_TASK_LIMIT = 10
 DETAIL_REQUEST_LIMIT = 10
 DETAIL_BACKTRACE_LIMIT = 4
 DETAIL_LOG_LINE_LIMIT = 40
+SUMMARY_ROW_LIMIT = 12
+
+OVERALL_TEXT = {
+    "CONFIRMED": "the host reclaimed this guest's memory (see Memory)",
+    "LIKELY": "a host-only signal fired; confirm with the host metrics below",
+    "POSSIBLE": "only symptoms guest-local causes also produce; this dump "
+                "cannot decide, check the host",
+    "UNKNOWN": "no host-only signal could be read; check the host",
+    "NO EVIDENCE": "nothing host-specific fired; read the blind spots "
+                   "before ruling overcommit out",
+    "NOT A VM": "virtualization not detected; the signals show guest "
+                "pressure only",
+}
+
+
+def oc_status_color(status, kind=None):
+    if status in ("CONFIRMED", "LIKELY") or (status == overcommit.HIT
+                                              and kind == overcommit.HOST):
+        return crashcolor.LIGHTRED
+    if status in ("POSSIBLE", overcommit.HIT):
+        return crashcolor.YELLOW
+    if status == "UNKNOWN":
+        return crashcolor.LIGHTCYAN
+    return crashcolor.RESET
+
+
+def oc_print_signal(sig):
+    print("  [", end="")
+    crashcolor.set_color(oc_status_color(sig.state, sig.kind))
+    print("%-4s" % sig.state, end="")
+    crashcolor.set_color(crashcolor.RESET)
+    print("] " + overcommit.format_signal(sig))
+
+
+def oc_cpu_list(rows, fmt, limit=3):
+    text = ", ".join(fmt(r) for r in rows[:limit])
+    if len(rows) > limit:
+        text += " +%d more" % (len(rows) - limit)
+    return text
 
 
 def show_overcommit(options):
     """
     Infer hypervisor CPU/memory overcommit from a single vmcore.
 
-    CPU steal is invisible to a guest that does not account it (VMware), so
-    this correlates direct guest-visible signals (steal, stale vCPU scheduler
-    clocks and ballooning) with supporting symptoms (load/runqueues, task
-    states, storage queues, VM reclaim counters and historical kernel logs).
+    Every check becomes an overcommit.Signal.  Host-only signals (steal,
+    a vCPU tick that stopped in user mode, a user task far past its CFS
+    slice, a soft lockup while idle/user, a balloon) decide their domain;
+    non-specific CPU symptoms raise it to POSSIBLE at most; guest-side
+    pressure is shown for context and never counted.  The report then names
+    what the guest cannot see and where to confirm it on the host.
     """
+    HIT, MISS, NA = overcommit.HIT, overcommit.MISS, overcommit.NA
+    HOST, SUPPORT, CONTEXT = (overcommit.HOST, overcommit.SUPPORT,
+                              overcommit.CONTEXT)
+    S = overcommit.Signal
+
     show_all = bool(getattr(options, "show_all", False))
     details = bool(getattr(options, "show_details", False)) or show_all
     hyper_name, is_virt = oc_get_hypervisor()
+    crash_info = oc_get_crash_info()
     steal_enabled, steal_by_cpu = oc_get_steal_state()
     loadavg = oc_get_loadavg()
     avenrun_raw = oc_get_avenrun_raw()
@@ -1113,6 +1210,7 @@ def show_overcommit(options):
     online_n = len(rows) if rows else sys_info.CPUS
     total_runnable = sum(r["nr_running"] for r in rows if r["nr_running"] >= 0)
     max_runq = max((r["nr_running"] for r in rows), default=0)
+    deepest_cpu = max(rows, key=lambda r: r["nr_running"])["cpu"] if rows else -1
     deep = [r for r in rows if r["nr_running"] >= DEEP_RUNQ]
     clock_lagged = sorted(
         [r for r in rows
@@ -1121,14 +1219,16 @@ def show_overcommit(options):
          and not r["curr"].startswith("swapper")],
         key=lambda r: r["clock_lag"], reverse=True)
 
-    max_steal_pct = 0.0
     steal_pct_by_cpu = {}
-    for (st, tt) in steal_by_cpu.values():
-        if tt:
-            max_steal_pct = max(max_steal_pct, 100.0 * st / tt)
-    for cpu, (st, tt) in steal_by_cpu.items():
-        if tt:
-            steal_pct_by_cpu[cpu] = 100.0 * st / tt
+    for cpu, (st, total) in steal_by_cpu.items():
+        if total:
+            steal_pct_by_cpu[cpu] = 100.0 * st / total
+    max_steal_pct = max(steal_pct_by_cpu.values(), default=0.0)
+    steal_total = sum(st for st, total in steal_by_cpu.values())
+    # Without paravirt_steal_enabled, all-zero steal cannot be told apart
+    # from a hypervisor that never reports it.
+    steal_visible = bool(steal_by_cpu) and (
+        steal_enabled is True or (steal_enabled is None and steal_total > 0))
 
     # A user task consuming scheduler time far beyond the configured CFS
     # latency while peers wait means its guest preemption tick did not run.
@@ -1143,7 +1243,7 @@ def show_overcommit(options):
     task_contexts = {}
     context_rows = []
     seen_tasks = set()
-    for r in clock_lagged[:12] + over_slice[:12]:
+    for r in clock_lagged + over_slice[:12]:
         if r["task"] in seen_tasks:
             continue
         seen_tasks.add(r["task"])
@@ -1157,20 +1257,22 @@ def show_overcommit(options):
     for r in context_rows:
         mode, bt_raw = oc_task_context(r["task"])
         task_contexts[r["task"]] = (mode or "?", bt_raw)
+
+    def mode_of(r):
+        return task_contexts.get(r["task"], ("?", ""))[0]
+
     for r in over_slice[:12]:
-        mode = task_contexts.get(r["task"], ("?", ""))[0]
         factor = (r["oncpu"] * 1000.0 / slice_ms) if slice_ms else 0.0
-        if mode == "user":
+        if mode_of(r) == "user":
             user_violations.append((r, factor))
-    user_clock_lagged = [
-        r for r in clock_lagged
-        if task_contexts.get(r["task"], ("?", ""))[0] == "user"]
+    user_clock_lagged = [r for r in clock_lagged if mode_of(r) == "user"]
+    other_clock_lagged = [r for r in clock_lagged if mode_of(r) != "user"]
 
     task_states = oc_collect_task_states()
     balloon = oc_get_balloon_pages()
     memory = oc_get_memory_snapshot(details)
     vm_events = oc_get_vm_events()
-    log_evidence, log_contexts = oc_get_log_evidence()
+    log = oc_get_log()
     inflight, oldest_io, request_rows = oc_get_inflight_requests()
     scsi_hosts = oc_get_scsi_hosts(request_rows)
     iowait_pct = oc_get_iowait_pct()
@@ -1186,26 +1288,12 @@ def show_overcommit(options):
 
     load_ratio = (
         loadavg[0] / online_n if loadavg and online_n else 0.0)
-    load_high = bool(loadavg and online_n
-                     and loadavg[0] > online_n * 1.25)
-    runnable_high = total_runnable > online_n * 1.25 if online_n else False
-    cpu_direct = (
-        max_steal_pct >= 5.0 or bool(user_clock_lagged)
-        or bool(user_violations))
-    cpu_supporting = (
-        bool(clock_lagged) or max_runq >= DEEP_RUNQ
-        or (load_high and runnable_high))
-    if cpu_direct:
-        cpu_status = "LIKELY"
-    elif cpu_supporting:
-        cpu_status = "POSSIBLE"
-    else:
-        cpu_status = "NO EVIDENCE"
+    runnable_ratio = total_runnable / online_n if online_n else 0.0
+    load_high = bool(loadavg and online_n and load_ratio > LOAD_RATIO)
+    runnable_high = runnable_ratio > LOAD_RATIO
 
     balloon_active = bool(balloon and balloon["alloc"] > 0)
-    balloon_current = bool(
-        balloon_active
-        and (balloon["target"] < 0 or balloon["target"] > 0))
+    gib_per_page = crash.PAGESIZE / 1024.0 ** 3
     direct_reclaim = sum(
         val for name, val in vm_events.items()
         if name.startswith("PGSCAN_DIRECT"))
@@ -1219,245 +1307,343 @@ def show_overcommit(options):
             0, memory["swap_total_pages"] - memory["swap_free_pages"])
     swap_heavy = bool(
         swap_used_pages > 0 and memory["swap_total_pages"] > 0
-        and swap_used_pages >= memory["swap_total_pages"] * 0.25)
-    guest_memory_pressure = swap_heavy or bool(log_evidence["Memory"])
-    if balloon_current:
-        memory_status = "HOST RECLAIM"
-    elif balloon_active:
-        memory_status = "RECENT RECLAIM"
-    elif guest_memory_pressure:
-        memory_status = "GUEST PRESSURE"
-    else:
-        memory_status = "NO EVIDENCE"
+        and swap_used_pages >= memory["swap_total_pages"] * SWAP_HEAVY_RATIO)
 
-    if storage_busy:
-        storage_status = "PRESSURE"
-    elif inflight >= 0 or scsi_hosts:
-        storage_status = "CLEAR"
+    # ------------------------------------------------------------------
+    # Signals
+    # ------------------------------------------------------------------
+    signals = []
+    steal_bar = ">= %.0f%% of vCPU time" % STEAL_PCT
+    if not steal_by_cpu:
+        signals.append(S("CPU", HOST, "vCPU time stolen (steal)", NA,
+                         "kernel_cpustat unavailable", steal_bar))
+    elif not steal_visible:
+        signals.append(S("CPU", HOST, "vCPU time stolen (steal)", NA,
+                         "not exported (paravirt_steal_enabled=0)"
+                         if steal_enabled is False else
+                         "all zero; hypervisor may not export it",
+                         steal_bar))
     else:
-        storage_status = "UNKNOWN"
+        worst = max(steal_pct_by_cpu, key=steal_pct_by_cpu.get,
+                    default=-1)
+        signals.append(S("CPU", HOST, "vCPU time stolen (steal)",
+                         HIT if max_steal_pct >= STEAL_PCT else MISS,
+                         "worst CPU%d %.1f%% since boot"
+                         % (worst, max_steal_pct), steal_bar))
 
-    if not is_virt:
-        overall_status = "NOT A VM"
-    elif cpu_status == "LIKELY" or balloon_current:
-        overall_status = "LIKELY"
-    elif (cpu_status == "POSSIBLE" or balloon_active
-          or storage_busy or guest_memory_pressure):
-        overall_status = "POSSIBLE"
+    lag_bar = ">= %.1fs behind peers, runq >= 2" % VCPU_CLOCK_LAG_SEC
+    if not rows:
+        signals.append(S("CPU", HOST, "vCPU tick stalled in user mode", NA,
+                         "runqueues unreadable", lag_bar))
+        signals.append(S("CPU", HOST, "user task far past its CFS slice", NA,
+                         "runqueues unreadable"))
     else:
-        overall_status = "NO EVIDENCE"
+        signals.append(S("CPU", HOST, "vCPU tick stalled in user mode",
+                         HIT if user_clock_lagged else MISS,
+                         oc_cpu_list(user_clock_lagged,
+                                     lambda r: "CPU%d %.1fs"
+                                     % (r["cpu"], r["clock_lag"]))
+                         or "none", lag_bar))
+        signals.append(S("CPU", HOST, "user task far past its CFS slice",
+                         HIT if user_violations else MISS,
+                         oc_cpu_list(user_violations,
+                                     lambda rf: "CPU%d %s(%d) %.1fs = %.0fx"
+                                     % (rf[0]["cpu"], rf[0]["curr"],
+                                        rf[0]["pid"], rf[0]["oncpu"], rf[1]))
+                         or "none",
+                         ">= %.1fs on CPU with waiters" % oncpu_min_sec))
 
-    def set_status_color(status):
-        if status in ("LIKELY", "HOST RECLAIM", "PRESSURE"):
-            crashcolor.set_color(crashcolor.RED)
-        elif status in ("POSSIBLE", "RECENT RECLAIM", "GUEST PRESSURE"):
-            crashcolor.set_color(crashcolor.YELLOW)
+    # Log signals count only within the window before the end of the log:
+    # a snapshot stun months ago says nothing about this crash.
+    window = overcommit.duration_text(overcommit.LOG_WINDOW_SEC)
+    quiet_bar = ("watchdog fired while the CPU idled or ran user code, "
+                 "within %s of end of log" % window)
+    if log is None:
+        signals.append(S("CPU", HOST, "soft lockup while idle/user", NA,
+                         "kernel log unavailable", quiet_bar))
+    elif not overcommit.timed(log):
+        signals.append(S("CPU", HOST, "soft lockup while idle/user", NA,
+                         "log has no timestamps", quiet_bar))
+    else:
+        quiet = [s for s in log["softlockups"]
+                 if s["where"] in ("idle", "user")]
+        near_quiet = [s for s in quiet if s["time"] is not None
+                      and s["time"] >= log["end"] - log["window"]]
+        if near_quiet:
+            value = "%d (%s), last %s" % (
+                len(near_quiet),
+                oc_cpu_list(near_quiet, lambda s: "CPU%d %s"
+                            % (s["cpu"], s["where"])),
+                overcommit.age_text(log, near_quiet[-1]["time"]))
+        elif quiet:
+            value = "none in last %s (%d older, last %s)" % (
+                window, len(quiet), overcommit.age_text(log, quiet[-1]["time"]))
+        elif log["softlockups"]:
+            value = "none (%d in kernel code or unknown)" % len(
+                log["softlockups"])
         else:
-            crashcolor.set_color(crashcolor.RESET)
+            value = "none"
+        signals.append(S("CPU", HOST, "soft lockup while idle/user",
+                         HIT if near_quiet else MISS, value, quiet_bar))
 
-    def summary_row(domain, status, text):
+    if loadavg:
+        value = "load1 %.2fx, runnable %.2fx per vCPU" % (load_ratio,
+                                                           runnable_ratio)
+        if load_high and not runnable_high:
+            value += "; load is mostly D-state"
+        signals.append(S("CPU", SUPPORT, "CPU demand above vCPUs",
+                         HIT if load_high and runnable_high else MISS,
+                         value, "both > %.2fx" % LOAD_RATIO))
+    else:
+        signals.append(S("CPU", SUPPORT, "CPU demand above vCPUs", NA,
+                         "avenrun unavailable"))
+    if rows:
+        signals.append(S("CPU", SUPPORT, "deep runqueue",
+                         HIT if max_runq >= DEEP_RUNQ else MISS,
+                         "%d on CPU%d; %d CPU(s) at/above %d"
+                         % (max_runq, deepest_cpu, len(deep), DEEP_RUNQ),
+                         ">= %d" % DEEP_RUNQ))
+        signals.append(S("CPU", SUPPORT, "vCPU clock lag, kernel/unknown mode",
+                         HIT if other_clock_lagged else MISS,
+                         oc_cpu_list(other_clock_lagged,
+                                     lambda r: "CPU%d %.1fs %s"
+                                     % (r["cpu"], r["clock_lag"], mode_of(r)))
+                         or "none",
+                         "kernel code may have had interrupts off"))
+    if log is not None and not overcommit.timed(log):
+        signals.append(S("CPU", SUPPORT, "log stall evidence near crash", NA,
+                         "log has no timestamps"))
+    elif log is not None:
+        bursts = log["bursts"]
+        near_bursts = [b for b in bursts
+                       if b[0]["time"] >= log["end"] - log["window"]]
+        if near_bursts:
+            big = max(near_bursts,
+                      key=lambda b: len(set(s["cpu"] for s in b)))
+            value = "%d burst(s); largest %d CPUs, %s" % (
+                len(near_bursts), len(set(s["cpu"] for s in big)),
+                overcommit.age_text(log, big[0]["time"]))
+        elif bursts:
+            value = "none in last %s (%d older)" % (window, len(bursts))
+        else:
+            value = "none"
+        signals.append(S("CPU", SUPPORT, "multi-CPU soft lockup burst",
+                         HIT if near_bursts else MISS, value,
+                         "2+ CPUs within %.0fs, within %s of end of log"
+                         % (overcommit.BURST_SPAN_SEC, window)))
+        near = []
+        older = 0
+        last_time = None
+        for name in overcommit.CPU_LOG_CATEGORIES:
+            events = log["categories"][name]
+            n = len(overcommit.recent(log, events))
+            older += len(events) - n
+            if n:
+                near.append("%s %d" % (name, n))
+            if events and (last_time is None or
+                           (events[-1][1] or 0) > last_time):
+                last_time = events[-1][1]
+        if near:
+            value = "%s; last %s" % (", ".join(near),
+                                     overcommit.age_text(log, last_time))
+        elif older:
+            value = "none in last %s (%d older, last %s)" % (
+                window, older, overcommit.age_text(log, last_time))
+        else:
+            value = "none"
+        signals.append(S("CPU", SUPPORT, "stall/timer messages near crash",
+                         HIT if near else MISS, value,
+                         "within %s of end of log" % window))
+
+    if balloon is None:
+        signals.append(S("Memory", HOST, "balloon holds guest memory now",
+                         NA, "no balloon driver found", proof=True))
+    else:
+        alloc = balloon["alloc"]
+        target = balloon["target"]
+        ram = memory["totalram_pages"]
+        if ram > 0 and balloon.get("out_of_totalram"):
+            ram += alloc
+        value = "%s %.2f GiB" % (balloon["kind"], alloc * gib_per_page)
+        if ram > 0:
+            value += " (%.1f%% of RAM)" % (100.0 * alloc / ram)
+        if target < 0:
+            value += ", target not in dump"
+        else:
+            value += ", target %.2f GiB (%s)" % (
+                target * gib_per_page,
+                "inflating" if target > alloc else
+                "deflating" if target < alloc else "steady")
+        signals.append(S("Memory", HOST, "balloon holds guest memory now",
+                         HIT if alloc > 0 else MISS, value, "> 0",
+                         proof=True))
+    if "BALLOON_INFLATE" not in vm_events:
+        signals.append(S("Memory", HOST, "balloon inflated since boot", NA,
+                         "counter not in this kernel", proof=True))
+    elif balloon is not None and balloon["kind"] in ("Hyper-V", "Xen"):
+        signals.append(S("Memory", HOST, "balloon inflated since boot", NA,
+                         "the %s balloon does not count it" % balloon["kind"],
+                         proof=True))
+    elif (balloon is not None and balloon["kind"] == "VMware"
+          and oc_vmballoon_uncounted()):
+        signals.append(S("Memory", HOST, "balloon inflated since boot", NA,
+                         "this vmw_balloon (before RHEL9) does not count it",
+                         proof=True))
+    else:
+        inflated = vm_events["BALLOON_INFLATE"]
+        deflated = vm_events.get("BALLOON_DEFLATE", 0)
+        value = ("inflated %.2f GiB, deflated %.2f GiB"
+                 % (inflated * gib_per_page, deflated * gib_per_page))
+        signals.append(S("Memory", HOST, "balloon inflated since boot",
+                         HIT if inflated else MISS,
+                         value if inflated else "0", "> 0", proof=True))
+
+    if memory["swap_total_pages"] > 0:
+        signals.append(S("Guest", CONTEXT, "guest swap in use",
+                         HIT if swap_heavy else MISS,
+                         "%d of %d pages (%.0f%%)"
+                         % (max(swap_used_pages, 0),
+                            memory["swap_total_pages"],
+                            100.0 * max(swap_used_pages, 0)
+                            / memory["swap_total_pages"]),
+                         ">= %.0f%%" % (SWAP_HEAVY_RATIO * 100)))
+    if vm_events:
+        signals.append(S("Guest", CONTEXT, "guest reclaim stalls",
+                         HIT if allocstall else MISS,
+                         "%d allocation stalls, %d direct scans, %d OOM kills"
+                         % (allocstall, direct_reclaim,
+                            vm_events.get("OOM_KILL", 0)),
+                         "since boot"))
+    if log is not None:
+        for name, label in (("memory", "OOM/allocation failure in log"),
+                            ("storage", "storage errors in log")):
+            events = log["categories"][name]
+            signals.append(S("Guest", CONTEXT, label,
+                             HIT if overcommit.recent(log, events) else MISS,
+                             overcommit.category_summary(log, name)
+                             or "none",
+                             "within %s of end of log"
+                             % overcommit.duration_text(log["window"])))
+    if inflight >= 0 or scsi_hosts:
+        value = "%d HBA command(s), " % total_host_busy
+        if inflight >= 0:
+            value += "%d request(s), oldest %.1fs" % (inflight, oldest_io)
+        else:
+            value += "block request walk unavailable"
+        if host_failed_total:
+            value += ", %d failed" % host_failed_total
+        signals.append(S("Guest", CONTEXT, "outstanding/aged storage I/O",
+                         HIT if storage_busy else MISS, value,
+                         ">= 8 HBA cmds, >= 16 requests or >= 1s old"))
+
+    cpu_status = overcommit.domain_verdict(signals, "CPU")
+    memory_status = overcommit.domain_verdict(signals, "Memory")
+    overall_status = (overcommit.overall_verdict([cpu_status, memory_status])
+                      if is_virt else "NOT A VM")
+
+    # ------------------------------------------------------------------
+    # Report
+    # ------------------------------------------------------------------
+    def verdict_row(domain, status, text):
         print("  %-8s " % domain, end="")
-        set_status_color(status)
-        print("%-14s" % status, end="")
+        crashcolor.set_color(oc_status_color(status))
+        print("%-12s" % status, end="")
         crashcolor.set_color(crashcolor.RESET)
         print(text)
 
-    cpu_summary = []
-    if max_steal_pct >= 5.0:
-        cpu_summary.append("steal %.1f%%" % max_steal_pct)
-    if user_clock_lagged:
-        cpu_summary.append(
-            "%d contended user-mode vCPU clock(s) lagged, max %.1fs"
-            % (len(user_clock_lagged),
-               user_clock_lagged[0]["clock_lag"]))
-    elif clock_lagged:
-        cpu_summary.append("%d contended vCPU clock(s) lagged, max %.1fs"
-                           % (len(clock_lagged),
-                              clock_lagged[0]["clock_lag"]))
-    if user_violations:
-        cpu_summary.append("%d user task(s) exceeded CFS slice"
-                           % len(user_violations))
-    if not cpu_summary and cpu_supporting:
-        cpu_summary.append("load %.2fx, deepest runqueue %d"
-                           % (load_ratio, max_runq))
-    if not cpu_summary:
-        cpu_summary.append("no direct CPU-starvation signal")
-
-    mem_summary = "no balloon activity"
-    if balloon:
-        alloc = balloon["alloc"]
-        target = balloon["target"]
-        gib_per_page = crash.PAGESIZE / 1024.0 ** 3
-        percent = -1.0
-        if memory["totalram_pages"] > 0:
-            percent = 100.0 * alloc / memory["totalram_pages"]
-        mem_summary = "%s balloon %.2f GiB" % (
-            balloon["kind"], alloc * gib_per_page)
-        if percent >= 0:
-            mem_summary += " (%.1f%% of guest RAM)" % percent
-        if target > alloc:
-            mem_summary += ", target rising"
-        elif target == 0 and alloc > 0:
-            mem_summary += ", target is zero/deflating"
-
-    storage_summary = "storage walkers unavailable"
-    if inflight >= 0 or scsi_hosts:
-        storage_summary = "%d HBA command(s), " % total_host_busy
-        if inflight >= 0:
-            storage_summary += "%d block request(s), oldest %.1fs" % (
-                inflight, oldest_io)
-        else:
-            storage_summary += "block request walk unavailable"
-
     crashcolor.set_color(crashcolor.LIGHTCYAN)
     print("Hypervisor overcommit assessment")
-    print("===============================")
+    print("================================")
     crashcolor.set_color(crashcolor.RESET)
     steal_label = {
         True: "enabled",
         False: "disabled/unavailable to guest",
         None: "unknown",
     }[steal_enabled]
-    print("Guest       : %s; %d vCPU(s); steal accounting %s"
+    print("Guest  : %s; %d vCPU(s); steal accounting %s"
           % (hyper_name, online_n, steal_label))
-    if not is_virt:
-        print("Scope       : hypervisor not detected; results below are guest "
-              "pressure only")
+    if crash_info:
+        print("Crash  : %s; uptime %s"
+              % (crash_info.get("DATE", "?"), crash_info.get("UPTIME", "?")))
+        if crash_info.get("PANIC"):
+            print("Panic  : %s" % crash_info["PANIC"])
 
-    print("\nAssessment")
-    print("----------")
-    summary_row("CPU", cpu_status, "; ".join(cpu_summary))
-    summary_row("Memory", memory_status, mem_summary)
-    summary_row("Storage", storage_status, storage_summary)
+    print("\nAnswer")
+    print("------")
+    verdict_row("CPU", cpu_status,
+                overcommit.answer_text(signals, "CPU", cpu_status))
+    verdict_row("Memory", memory_status,
+                overcommit.answer_text(signals, "Memory", memory_status))
     print("  " + "-" * 72)
-    summary_row("Overall", overall_status,
-                "single-vmcore inference; confirm with host metrics")
+    verdict_row("Overall", overall_status, OVERALL_TEXT[overall_status])
 
-    print("\nEvidence")
-    print("--------")
-    print("CPU")
-    if loadavg:
-        recent = loadavg[2] > 0 and loadavg[0] > loadavg[2] * 2
-        print("  Load        %.2f / %.2f / %.2f over %d vCPUs (%.2fx)%s"
-              % (loadavg[0], loadavg[1], loadavg[2], online_n, load_ratio,
-                 "; recent pile-up" if recent else ""))
-    else:
-        print("  Load        unavailable")
-    print("  Runqueues   %d runnable; %.1f/vCPU; deepest %d; %d hot (>= %d)"
-          % (total_runnable,
-             total_runnable / online_n if online_n else 0.0,
-             max_runq, len(deep), DEEP_RUNQ))
-    if task_states["total"]:
-        print("  Task states %d runnable, %d uninterruptible (D), %d total"
-              % (task_states["running"],
-                 task_states["uninterruptible"], task_states["total"]))
-        if load_high and not runnable_high:
-            print("              high load is not matched by runnable work; "
-                  "D-state/I/O is a better fit")
-    if steal_enabled is False:
-        print("  Steal       unavailable: paravirt_steal_enabled=0")
-    elif steal_by_cpu:
-        print("  Steal       maximum %.1f%% since boot" % max_steal_pct)
-    else:
-        print("  Steal       unavailable")
+    sections = (
+        (HOST, "Host-only signals (one HIT decides its domain)"),
+        (SUPPORT, "Consistent with overcommit, not specific "
+                  "(raise CPU to POSSIBLE at most)"),
+        (CONTEXT, "Guest-side pressure (context only; never changes "
+                  "the answer)"),
+    )
+    for kind, title in sections:
+        mine = [s for s in signals if s.kind == kind]
+        if not mine:
+            continue
+        print("\n" + title)
+        for sig in mine:
+            oc_print_signal(sig)
+
+    if clock_lagged or over_slice or (log and log["softlockups"]):
+        print("\nImplicated vCPUs")
     if clock_lagged:
         print("  Clock lag   contended vCPU clocks stopped relative to peers:")
         print("                CPU      lag    runq  mode    task(pid)")
-        for r in clock_lagged[:12]:
-            mode = task_contexts.get(r["task"], ("?", ""))[0]
+        for r in clock_lagged[:SUMMARY_ROW_LIMIT]:
             print("               %4d %8.3fs %5d  %-6s  %s(%d)"
                   % (r["cpu"], r["clock_lag"], r["nr_running"],
-                     mode, r["curr"], r["pid"]))
-        if len(clock_lagged) > 12:
-            print("               ... %d more" % (len(clock_lagged) - 12))
+                     mode_of(r), r["curr"], r["pid"]))
+        if len(clock_lagged) > SUMMARY_ROW_LIMIT:
+            print("               ... %d more"
+                  % (len(clock_lagged) - SUMMARY_ROW_LIMIT))
     if over_slice:
         print("  CFS slices  target %.1fms; long current tasks with waiters:"
               % slice_ms)
         print("                CPU task(pid)                on-CPU   x slice  mode")
         for r in over_slice[:8]:
-            mode = task_contexts.get(r["task"], ("?", ""))[0]
             factor = (
                 r["oncpu"] * 1000.0 / slice_ms if slice_ms else 0.0)
             print("               %4d %-23s %7.3fs %8.0fx  %s"
                   % (r["cpu"], ("%s(%d)" % (r["curr"], r["pid"]))[:23],
-                     r["oncpu"], factor, mode))
+                     r["oncpu"], factor, mode_of(r)))
+    if log and log["softlockups"]:
+        print("  Soft lockups (most recent last):")
+        print("                CPU  stuck  where   at        "
+              "RIP function / task")
+        shown = log["softlockups"][-SUMMARY_ROW_LIMIT:]
+        if len(log["softlockups"]) > len(shown):
+            print("               ... %d older"
+                  % (len(log["softlockups"]) - len(shown)))
+        for s in shown:
+            print("               %4d %5ds  %-6s  %-9s %s"
+                  % (s["cpu"], s["stuck"], s["where"],
+                     overcommit.duration_text(log["end"] - s["time"])
+                     + " ago" if s["time"] is not None
+                     and log["end"] is not None else "?",
+                     s["func"] or s["comm"]))
+    if task_states["total"]:
+        print("\nTask states %d runnable, %d uninterruptible (D), "
+              "%d TASK_IDLE (not in load), %d total"
+              % (task_states["running"], task_states["uninterruptible"],
+                 task_states["noload"], task_states["total"]))
 
-    print("\nMemory")
-    if balloon:
-        alloc = balloon["alloc"]
-        target = balloon["target"]
-        gib_per_page = crash.PAGESIZE / 1024.0 ** 3
-        print("  Balloon     %s: %d pages (%.2f GiB), target %s"
-              % (balloon["kind"], alloc, alloc * gib_per_page,
-                 ("%d pages" % target) if target >= 0 else "unavailable"))
-    else:
-        print("  Balloon     no supported active balloon device found")
-    if memory["swap_total_pages"] >= 0:
-        print("  Guest swap  %s / %d pages used"
-              % (str(swap_used_pages) if swap_used_pages >= 0 else "?",
-                 memory["swap_total_pages"]))
-    if vm_events:
-        print("  VM events   direct scans %d; allocation stalls %d; "
-              "OOM kills %d (all cumulative)"
-              % (direct_reclaim, allocstall,
-                 vm_events.get("OOM_KILL", 0)))
-
-    print("\nStorage")
-    if scsi_hosts:
-        print("  Virtual HBA %d host(s); %d command(s) outstanding; "
-              "%d failed/recovery"
-              % (len(scsi_hosts), total_host_busy, host_failed_total))
-    else:
-        print("  Virtual HBA unavailable or no SCSI hosts")
-    if inflight >= 0:
-        print("  Block layer %d request(s) in flight; oldest %.1fs"
-              % (inflight, oldest_io))
-    else:
-        print("  Block layer request walk unavailable")
-    if iowait_pct is not None:
-        print("  iowait      %.1f%% of accounted CPU time since boot"
-              % iowait_pct)
-
-    log_counts = [
-        "%s=%d" % (name, len(lines))
-        for name, lines in log_evidence.items() if lines]
-    print("\nHistorical kernel log")
-    if log_counts:
-        print("  Matches     %s" % ", ".join(log_counts))
-        print("              supporting symptoms only; see -d for exact lines")
-    else:
-        print("  Matches     no selected CPU/clock/memory/storage stall messages")
-
-    print("\nInterpretation")
-    print("--------------")
-    if not is_virt:
-        print("No hypervisor conclusion: virtualization was not detected. "
-              "The domain data")
-        print("above can still identify a guest-local or bare-metal stall.")
-    elif overall_status == "NO EVIDENCE":
-        print("No clear hypervisor-overcommit signature is present in this "
-              "snapshot.")
-    else:
-        if cpu_status == "LIKELY":
-            print("* CPU: steal or a user-mode clock/slice violation is strong "
-                  "evidence")
-            print("  that the hypervisor withheld vCPU time.")
-        elif cpu_status == "POSSIBLE":
-            print("* CPU: load/runqueue pressure is compatible with "
-                  "overcommit, but not specific to it.")
-        if memory_status in ("HOST RECLAIM", "RECENT RECLAIM"):
-            print("* Memory: an inflated balloon proves hypervisor-directed "
-                  "guest reclaim.")
-        elif memory_status == "GUEST PRESSURE":
-            print("* Memory: reclaim/swap/OOM data proves guest pressure only, "
-                  "not host pressure.")
-        if storage_busy:
-            print("* Storage: aged/outstanding I/O is compatible with shared "
-                  "datastore contention,")
-            print("  but guest/device faults can produce the same snapshot.")
-    if steal_enabled is False and is_virt:
-        print("Confirm CPU with host CPU-ready/co-stop data; guest steal "
-              "accounting is disabled.")
+    print("\nBlind spots")
+    for spot in overcommit.blind_spots(hyper_name, steal_visible,
+                                       balloon is not None, log):
+        print("  - " + spot)
+    if is_virt:
+        print("\nTo confirm on the host")
+        for check in overcommit.host_checks(hyper_name,
+                                            crash_info.get("DATE", "")):
+            print("  - " + check)
 
     if not details:
         print("\nUse -d with --overcommit to show related raw fields, nearby "
@@ -1476,7 +1662,7 @@ def show_overcommit(options):
     print("=> related/triggering data; unmarked lines are surrounding context")
 
     direct_cpu_ids = set(
-        cpu for cpu, pct in steal_pct_by_cpu.items() if pct >= 5.0)
+        cpu for cpu, pct in steal_pct_by_cpu.items() if pct >= STEAL_PCT)
     direct_cpu_ids.update(r["cpu"] for r in user_clock_lagged)
     direct_cpu_ids.update(r["cpu"] for r, factor in user_violations)
     all_related_cpu_ids = set(direct_cpu_ids)
@@ -1485,7 +1671,7 @@ def show_overcommit(options):
     all_related_cpu_ids.update(r["cpu"] for r in over_slice)
     all_related_cpu_ids.update(
         cpu for cpu, pct in steal_pct_by_cpu.items() if pct >= 1.0)
-    if not all_related_cpu_ids and cpu_supporting:
+    if not all_related_cpu_ids and (load_high or max_runq >= DEEP_RUNQ):
         all_related_cpu_ids.update(
             r["cpu"] for r in sorted(
                 rows, key=lambda row: row["nr_running"],
@@ -1544,40 +1730,43 @@ def show_overcommit(options):
             if cpu in related_cpu_ids]
         if shown_steal_cpus:
             print("   %4s %20s %20s %9s"
-                  % ("CPU", "CPUTIME_STEAL", "CPUTIME_TOTAL", "steal%"))
+                  % ("CPU", "CPUTIME_STEAL", "total (no guest)",
+                     "steal%"))
         for cpu in shown_steal_cpus:
-            st, tt = steal_by_cpu[cpu]
+            st, total = steal_by_cpu[cpu]
             pct = steal_pct_by_cpu.get(cpu, 0.0)
-            line = "%4d %20d %20d %8.3f%%" % (cpu, st, tt, pct)
+            line = "%4d %20d %20d %8.3f%%" % (cpu, st, total, pct)
             oc_print_related_line(
                 line, True,
-                crashcolor.LIGHTRED if pct >= 5.0 else crashcolor.YELLOW)
+                crashcolor.LIGHTRED if pct >= STEAL_PCT
+                else crashcolor.YELLOW)
         omitted = len(steal_by_cpu) - len(shown_steal_cpus)
         if omitted:
             print("   ... %d unselected CPU steal row(s) omitted" % omitted)
 
-    print("\n[How to extract runqueue timing data manually]")
-    print("  For a given CPU N and its current task:")
-    print("    crash> runq -c N                                "
-          "# runqueue summary for CPU N")
-    print("    crash> struct rq.clock,clock_task <rq_addr>     "
-          "# rq clock fields (nanoseconds)")
-    print("    crash> p ((struct rq *)&runqueues+N)->clock      "
-          "# alternative: rq.clock directly")
-    print("    crash> struct task_struct.se <task_addr>         "
-          "# scheduler entity (exec_start)")
-    print("    crash> struct sched_info.last_arrival <task_addr>"
-          "# when task was placed on-CPU")
-    print("    crash> bt <task_addr>                            "
-          "# backtrace of current task")
-    print("  Derived fields:")
-    print("    on-CPU       = (rq.clock - curr->sched_info.last_arrival) "
-          "/ 1e9  seconds")
-    print("    current-exec = (rq.clock_task - curr->se.exec_start)     "
-          "/ 1e9  seconds")
-    print("    clock-lag    = (max(all rq.Timestamp) - this rq.Timestamp)"
-          " / 1e9  seconds")
-    print("    depth        = rq.nr_running")
+    if show_all:
+        print("\n[How to extract runqueue timing data manually]")
+        print("  For a given CPU N and its current task:")
+        print("    crash> runq -c N                                "
+              "# runqueue summary for CPU N")
+        print("    crash> struct rq.clock,clock_task <rq_addr>     "
+              "# rq clock fields (nanoseconds)")
+        print("    crash> p ((struct rq *)&runqueues+N)->clock      "
+              "# alternative: rq.clock directly")
+        print("    crash> struct task_struct.se <task_addr>         "
+              "# scheduler entity (exec_start)")
+        print("    crash> struct sched_info.last_arrival <task_addr>"
+              "# when task was placed on-CPU")
+        print("    crash> bt <task_addr>                            "
+              "# backtrace of current task")
+        print("  Derived fields:")
+        print("    on-CPU       = (rq.clock - curr->sched_info.last_arrival) "
+              "/ 1e9  seconds")
+        print("    current-exec = (rq.clock_task - curr->se.exec_start)     "
+              "/ 1e9  seconds")
+        print("    clock-lag    = (max(all rq.Timestamp) - this rq.Timestamp)"
+              " / 1e9  seconds")
+        print("    depth        = rq.nr_running")
 
     print("\n[Per-vCPU runqueue fields; clocks are raw nanoseconds]")
     print("   %4s %5s %3s %16s %16s %16s %16s %9s %s"
@@ -1599,14 +1788,14 @@ def show_overcommit(options):
             oc_print_related_line(line, True, color)
         else:
             oc_print_related_line(line, False)
-    if not shown_cpu_ids:
+    if not shown_cpu_ids and not show_all:
         print("   <no per-vCPU row met an overcommit evidence threshold>")
     if related_cpu_overflow:
         print("   ... %d additional related CPU row(s) omitted"
               % related_cpu_overflow)
     unrelated_omitted = (
         len(available_cpu_ids - shown_cpu_ids - all_related_cpu_ids))
-    if unrelated_omitted > 0:
+    if unrelated_omitted > 0 and not show_all:
         print("   ... %d unrelated CPU row(s) omitted"
               % unrelated_omitted)
     print("sysctl scheduler slice = %.3f ms" % slice_ms)
@@ -1663,9 +1852,11 @@ def show_overcommit(options):
                       % omitted)
 
     print("\n[Task-state rows]")
-    print("total=%d running=%d uninterruptible=%d other=%d"
+    print("total=%d running=%d uninterruptible=%d noload(TASK_IDLE)=%d "
+          "other=%d"
           % (task_states["total"], task_states["running"],
-             task_states["uninterruptible"], task_states["other"]))
+             task_states["uninterruptible"], task_states["noload"],
+             task_states["other"]))
     related_task_addrs = set(r["task"] for r in context_rows)
     selected_running = [
         row for row in task_states["running_rows"]
@@ -1697,14 +1888,18 @@ def show_overcommit(options):
     memory_line = "totalram_pages=%d total_swap_pages=%d nr_swap_pages=%d" % (
         memory["totalram_pages"], memory["swap_total_pages"],
         memory["swap_free_pages"])
+    if balloon is not None:
+        memory_line += " balloon_out_of_totalram=%s" % bool(
+            balloon.get("out_of_totalram"))
     oc_print_related_line(
         memory_line, balloon_active or swap_heavy,
-        crashcolor.LIGHTRED if balloon_current else crashcolor.YELLOW)
+        crashcolor.LIGHTRED if balloon_active else crashcolor.YELLOW)
     nonzero_events = [
         (name, vm_events[name]) for name in sorted(vm_events)
         if vm_events[name] != 0]
     for name, value in nonzero_events:
-        color = (crashcolor.LIGHTRED if name == "OOM_KILL" and value
+        color = (crashcolor.LIGHTRED
+                 if name in ("OOM_KILL", "BALLOON_INFLATE") and value
                  else crashcolor.YELLOW)
         oc_print_related_line("%-28s %d" % (name, value), True, color)
     zero_events = len(vm_events) - len(nonzero_events)
@@ -1718,8 +1913,7 @@ def show_overcommit(options):
                 balloon_raw,
                 ("size", "target", "current_pages", "target_pages",
                  "num_pages_ballooned", "num_pages", "num_desired",
-                 "num_pfns", "refused", "retry", "rate_",
-                 "schedule_delay"),
+                 "refused", "retry", "rate_", "schedule_delay"),
                 before=1, after=1)
         except Exception as e:
             print("<unavailable: %s>" % str(e))
@@ -1774,19 +1968,29 @@ def show_overcommit(options):
     omitted = len(request_rows) - len(aged_requests)
     if omitted:
         print("   ... %d younger block request row(s) omitted" % omitted)
+    if iowait_pct is not None:
+        print("iowait = %.1f%% of accounted CPU time since boot" % iowait_pct)
 
     print("\n[Kernel log matches with two surrounding lines]")
-    for name in LOG_PATTERNS:
-        context = log_contexts[name]
-        if not context:
-            continue
-        print("\n%s (%d match(es))" % (name, len(log_evidence[name])))
-        shown_context = context[-DETAIL_LOG_LINE_LIMIT:]
-        omitted = len(context) - len(shown_context)
-        if omitted:
-            print("   ... %d older context line(s) omitted" % omitted)
-        for line, related in shown_context:
-            oc_print_related_line(line, related)
+    if log is None:
+        print("   <log unavailable>")
+    else:
+        if log["end"] is not None:
+            print("log covers %.1fs .. %.1fs after boot"
+                  % (log["start"], log["end"]))
+        for name, _ in overcommit.LOG_CATEGORIES:
+            events = log["categories"][name]
+            if not events:
+                continue
+            print("\n%s (%s)" % (name, overcommit.category_summary(log, name)))
+            context = overcommit.excerpt(
+                log["lines"], set(index for index, t in events))
+            shown_context = context[-DETAIL_LOG_LINE_LIMIT:]
+            omitted = len(context) - len(shown_context)
+            if omitted:
+                print("   ... %d older context line(s) omitted" % omitted)
+            for line, related in shown_context:
+                oc_print_related_line(line, related)
 
 
 def vminfo():
@@ -1797,14 +2001,15 @@ def vminfo():
                        "data and context)")
     op.add_option("-a", "--all", dest="show_all", default=0,
                   action="store_true",
-                  help="Show full details for all runqueues (implies -d)")
+                  help="Show full details for all runqueues and how to "
+                       "extract their timing fields (implies -d)")
     op.add_option("-c", "--context", dest="show_context", default=0,
                   action="store_true",
                   help="Show VM Context")
     op.add_option("-o", "--overcommit", dest="overcommit", default=0,
                   action="store_true",
-                  help="Assess hypervisor CPU/memory/storage overcommit "
-                       "evidence")
+                  help="Assess hypervisor CPU/memory overcommit, signal "
+                       "by signal")
 
     (o, args) = op.parse_args()
 

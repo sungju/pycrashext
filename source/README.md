@@ -1203,43 +1203,73 @@ It provides virtual-machine related information. With no option it shows the hyp
 
 `vminfo --overcommit` infers **hypervisor CPU/memory overcommit** from a single vmcore. This is aimed at the case where a guest suddenly shows very high load or soft lockups but per-CPU frequency (`cpuinfo --speed`) looks fine—the classic signature of the host descheduling the guest's vCPUs (CPU *steal*).
 
-The report separates direct host-controlled evidence from nonspecific guest symptoms:
+Every check is printed as a signal with its value and the threshold it was held to, marked `HIT`, `miss` or `n/a` (could not be read in this dump), so the answer can be traced back to what decided it. Signals come in three kinds:
 
-- CPU steal (when the hypervisor exports it), contended vCPU scheduler clocks that lag behind their peers, and user-mode tasks that exceed the CFS scheduling interval while work is queued.
-- Load/runqueue pressure plus a runnable-versus-uninterruptible task census. This avoids treating D-state I/O load as CPU overcommit.
-- VMware, Hyper-V, and KVM/virtio memory balloons, with the reclaimed share of guest RAM.
-- Guest swap/reclaim/compaction/OOM counters, SCSI and block-layer queues, iowait, and historical stall messages retained in the kernel log. These corroborate pressure but are not presented as proof of host overcommit because guest-local faults can produce them too.
+- **Host-only** — only the hypervisor can produce them. One `HIT` decides its domain: `LIKELY` for CPU, `CONFIRMED` for memory (a balloon is a fact, not an inference).
+  - CPU steal as a share of each vCPU's time since boot (all `kernel_cpustat` buckets except guest time, which is already in user). This reads like CPU Ready and is held to the same 5% bar.
+  - A vCPU tick that stopped (runqueue clock ≥ 1s behind its peers, work queued) while the vCPU ran user code.
+  - A user task far past its CFS slice while others wait.
+  - A soft lockup, within 10 minutes of the end of the log, that the watchdog reported while the CPU idled (idle RIP *and* the idle task) or ran user code. Such a CPU cannot starve its own watchdog, so the vCPU did not run. This is the only guest-side trace of a stall of *every* vCPU at once (snapshot/vMotion stun, co-stop), which clock lag cannot show. The RIP is tied to its report through the register dump's `CPU: N PID:` header. A halt RIP in any other task is a KVM paravirt spinlock wait (`kvm_wait`), which is counted as kernel code.
+  - A balloon holding guest memory now (VMware, Hyper-V, Xen, virtio), and `BALLOON_INFLATE` since boot (`n/a` for drivers that do not count it: Hyper-V, Xen, and vmw_balloon before RHEL9).
+- **Consistent with overcommit, not specific** — load and runnable tasks per vCPU, deep runqueues, clock lag outside user mode, multi-CPU soft-lockup bursts, and stall/timer messages within 10 minutes of the end of the log. They raise CPU to `POSSIBLE` at most.
+- **Guest-side pressure** — guest swap, reclaim stalls, OOM and storage errors in the log, and outstanding/aged storage I/O. Shown for context, never counted.
+
+Log evidence is anchored to the end of the log, so a soft lockup or OOM from weeks earlier is reported as such ("none in last 10m (1 older, 149d before end of log)") rather than as evidence at crash time. A log without timestamps gives `n/a`. `TASK_IDLE` threads are counted apart from D-state, since they are not in the load average. The report ends with what this guest cannot see (blind spots) and where to confirm on the host.
 
 ```
 crash> vminfo --overcommit
 Hypervisor overcommit assessment
-===============================
-Guest       : VMware; 48 vCPU(s); steal accounting disabled/unavailable to guest
+================================
+Guest  : VMware; 48 vCPU(s); steal accounting disabled/unavailable to guest
+Crash  : Mon Oct 12 10:00:00 2026; uptime 12 days, 03:14:07
+Panic  : "softlockup: hung tasks"
 
-Assessment
-----------
-  CPU      LIKELY        2 contended user-mode vCPU clock(s) lagged, max 6.7s
-  Memory   HOST RECLAIM  VMware balloon 11.22 GiB (23.4% of guest RAM)
-  Storage  PRESSURE      18 HBA command(s), 21 block request(s), oldest 3.4s
+Answer
+------
+  CPU      LIKELY      host-only signal: vCPU tick stalled in user mode; soft lockup while idle/user
+  Memory   CONFIRMED   host-only signal: balloon holds guest memory now
   ------------------------------------------------------------------------
-  Overall  LIKELY        single-vmcore inference; confirm with host metrics
+  Overall  CONFIRMED   the host reclaimed this guest's memory (see Memory)
 
-Evidence
---------
-CPU
-  Load        200.03 / 48.38 / 17.34 over 48 vCPUs (4.17x); recent pile-up
-  Runqueues   809 runnable; 16.9/vCPU; deepest 67; 29 hot (>= 8)
-  Task states 812 runnable, 31 uninterruptible (D), 3264 total
-  Steal       unavailable: paravirt_steal_enabled=0
-  Clock lag   contended vCPU clocks stopped relative to peers:
-                CPU      lag    runq  mode    task(pid)
-                  1    6.741s    21  user    cssdagent(1234)
-                 20    3.426s    17  user    cssdmonitor(5678)
+Host-only signals (one HIT decides its domain)
+  [n/a ] CPU    vCPU time stolen (steal)             not exported (paravirt_steal_enabled=0)  (>= 5% of vCPU time)
+  [HIT ] CPU    vCPU tick stalled in user mode       CPU1 6.7s, CPU20 3.4s  (>= 1.0s behind peers, runq >= 2)
+  [miss] CPU    user task far past its CFS slice     none  (>= 0.5s on CPU with waiters)
+  [HIT ] CPU    soft lockup while idle/user          3 (CPU1 user, CPU7 idle, CPU20 user), last 4s before end of log  (watchdog fired while the CPU idled or ran user code, within 10m of end of log)
+  [HIT ] Memory balloon holds guest memory now       VMware 11.22 GiB (23.4% of RAM), target 11.22 GiB (steady)  (> 0)
+  [HIT ] Memory balloon inflated since boot          inflated 14.02 GiB, deflated 2.80 GiB  (> 0)
+
+Consistent with overcommit, not specific (raise CPU to POSSIBLE at most)
+  [HIT ] CPU    CPU demand above vCPUs               load1 4.17x, runnable 16.85x per vCPU  (both > 1.25x)
+  [HIT ] CPU    deep runqueue                        67 on CPU5; 29 CPU(s) at/above 8  (>= 8)
+  [miss] CPU    vCPU clock lag, kernel/unknown mode  none  (kernel code may have had interrupts off)
+  [HIT ] CPU    multi-CPU soft lockup burst          1 burst(s); largest 3 CPUs, 4s before end of log  (2+ CPUs within 2s, within 10m of end of log)
+  [HIT ] CPU    stall/timer messages near crash      soft lockup 3, clock/timer 2; last 4s before end of log  (within 10m of end of log)
+
+Guest-side pressure (context only; never changes the answer)
+  [miss] Guest  guest swap in use                    1024 of 1048576 pages (0%)  (>= 25%)
+  [HIT ] Guest  guest reclaim stalls                 12 allocation stalls, 48210 direct scans, 0 OOM kills  (since boot)
+  [miss] Guest  OOM/allocation failure in log        none  (within 10m of end of log)
+  [miss] Guest  storage errors in log                none  (within 10m of end of log)
+  [HIT ] Guest  outstanding/aged storage I/O         18 HBA command(s), 21 request(s), oldest 3.4s  (>= 8 HBA cmds, >= 16 requests or >= 1s old)
+...
+Blind spots
+  - steal is not exported to this guest: CPU ready/wait time is invisible, CPU findings are inferred
+  - a stall of every vCPU at once (snapshot or vMotion stun, co-stop) moves all runqueue clocks together, so clock lag cannot show it; only soft lockups while idle/user can
+  - host-level swapping or compression of guest memory is never visible inside the guest
+
+To confirm on the host
+  - vCenter/esxtop for this VM around Mon Oct 12 10:00:00 2026: CPU Ready > 5% per vCPU (> 1000 ms per 20 s sample), Co-Stop > 3%, Balloon, Swapped and Compressed > 0
+  - sosreport of this guest: isos 'vmware' (vm.cpu.contention.cpu, guest.mem.ballooned/swapped, sar %steal)
 ```
 
-The normal report leads with a compact per-domain assessment. Add `-d` (`vminfo --overcommit -d`) for a bounded, evidence-focused raw appendix. It shows the worst implicated CPU/task/request rows and relevant structure fields, includes nearby CPU, backtrace, structure, and kernel-log context, and marks triggering lines with `=>` plus terminal color. Each candidate-task backtrace also includes its runqueue depth, scheduler-clock on-CPU/current-execution duration, clock lag, and the raw clock fields behind those calculations. Omission counts make the filtering explicit.
+Between the signals and the blind spots, the report lists the implicated vCPUs: the clock-lag and CFS-slice tables and each soft lockup with where the CPU was and its RIP function. Add `-d` (`vminfo --overcommit -d`) for a bounded, evidence-focused raw appendix. It shows the worst implicated CPU/task/request rows and relevant structure fields, includes nearby CPU, backtrace, structure and kernel-log context, and marks triggering lines with `=>` plus terminal color. Each candidate-task backtrace also includes its runqueue depth, scheduler-clock on-CPU/current-execution duration, clock lag, and the raw clock fields behind those calculations. Omission counts make the filtering explicit. `-a` shows every runqueue and the crash commands for extracting the runqueue timing fields by hand.
 
-The verdict remains inferential on hypervisors that hide steal, so confirm CPU findings against the host's own metrics (for example, VMware CPU-ready/co-stop). An inflated balloon is direct evidence of hypervisor-directed memory reclaim; storage queues and guest VM-pressure counters are supporting evidence only.
+The verdict logic and the log timeline are in `overcommit.py` (checks in `overcommit_test.py`, runnable with python3). The log part also runs on a saved kernel log:
+
+```
+$ python3 source/overcommit.py vmcore-dmesg.txt
+```
 
 ### timeinfo ###
 It provides time related information. For now, it is providing clock source details.

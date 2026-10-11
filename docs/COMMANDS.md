@@ -792,19 +792,28 @@ Virtual machine and hypervisor information including overcommit assessment.
 | Option | Long Form | Description |
 |--------|-----------|-------------|
 | `-d` | `--details` | Show details (with --overcommit, append related raw values) |
-| `-a` | `--all` | Show full details for all runqueues (implies -d) |
+| `-a` | `--all` | Show full details for all runqueues and how to extract their timing fields (implies -d) |
 | `-c` | `--context` | Show VM context |
-| `-o` | `--overcommit` | Assess hypervisor CPU/memory/storage overcommit |
+| `-o` | `--overcommit` | Assess hypervisor CPU/memory overcommit, signal by signal |
 
 #### Examples
 
 ```
 vminfo                 # Show VM overview
-vminfo -o              # Assess overcommit ratios
+vminfo -o              # Overcommit verdict, signals, blind spots
 vminfo -o -d           # Overcommit with raw values
 vminfo -c              # Show VM context
 vminfo -a              # Show all runqueue details
 ```
+
+`--overcommit` prints every check as a signal (`HIT`, `miss`, `n/a`) with its
+value and threshold. Host-only signals decide (steal, a vCPU tick stalled in
+user mode, a user task far past its CFS slice, a soft lockup while idle/user,
+a balloon). Load, runqueues and stall bursts only make CPU `POSSIBLE`, and
+guest swap, OOM and storage never change the answer. Log evidence is timed
+against the end of the log. The verdict logic is in `source/overcommit.py`,
+which isos's `vmware` command shares. Its log part also runs on a saved log:
+`python3 source/overcommit.py <file>`.
 
 ---
 
