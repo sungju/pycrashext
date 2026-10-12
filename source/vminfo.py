@@ -1010,31 +1010,13 @@ def oc_get_scsi_hosts(request_rows=None):
         if row[2] in ("active", "softirq"):
             active_by_queue[row[1]] = active_by_queue.get(row[1], 0) + 1
     try:
-        sp = readSymbol("shost_class").p
-        shost_dev_off = member_offset("struct Scsi_Host", "shost_dev")
-        if shost_dev_off < 0:
-            return hosts
-        # knode_class lives in struct device up to 5.0 (RHEL8) and in
-        # struct device_private from 5.1 (RHEL9/10).
-        dev_knode_off = member_offset("struct device", "knode_class")
-        priv_knode_off = member_offset("struct device_private",
-                                       "knode_class")
-        if dev_knode_off < 0 and priv_knode_off < 0:
-            return hosts
+        # pykdump knows every shost_class layout (class.p went away in
+        # RHEL 9.5 and upstream 6.4).
+        from LinuxDump.scsi import get_scsi_hosts
         has_sdev_busy = \
             member_offset("struct scsi_device", "device_busy") >= 0
-        for knode in readSUListFromHead(sp.klist_devices.k_list, "n_node",
-                                        "struct klist_node"):
+        for shost in get_scsi_hosts() or []:
             try:
-                if dev_knode_off >= 0:
-                    dev = readSU("struct device",
-                                 int(knode) - dev_knode_off)
-                else:
-                    dev_priv = readSU("struct device_private",
-                                      int(knode) - priv_knode_off)
-                    dev = dev_priv.device
-                shost = readSU("struct Scsi_Host",
-                               int(dev) - shost_dev_off)
                 member_busy = 0
                 active_busy = 0
                 ndev = 0

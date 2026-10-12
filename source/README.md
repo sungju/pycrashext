@@ -322,6 +322,36 @@ SB: 0xffff880431d47800, frozen=SB_FREEZE_COMPLETE, /tmp/ (dm-6) [ext3], ()
 SB: 0xffff880431d49800, frozen=SB_FREEZE_COMPLETE, /var/ (dm-4) [ext3], ()
 ```
 
+`fsinfo -z` (`--frozen`) answers whether a freeze is blocking the system and who is involved:
+- the frozen superblocks, with their mount points and with who holds the freeze on kernels that record it (`freeze_holders`);
+- the tasks blocked behind a freeze, by level. They are found from `foreach UN bt` frames, which works on RHEL7, 8 and 9 alike:
+  - on RHEL7/8, an out-of-line `__sb_start_write`;
+  - on RHEL9, where it is inline, the percpu-rwsem wait directly under a function that takes freeze protection itself. Other users of that lock, such as cgroup writes, CPU and memory hotplug, are not counted.
+- tasks freezing or thawing now (`freeze_super`, `thaw_super`), told apart;
+- the freeze agents (vmtoolsd, qemu-ga, hv_vss_daemon, fsfreeze), matched by thread-group leader so a named thread still counts, and whether any of their threads is blocked;
+- hung-task reports in the kernel log whose stack is a freeze wait. These show a freeze even after it was thawed.
+
+```
+crash> fsinfo -z
+Filesystem freeze assessment
+============================
+Answer : AGENT BLOCKED  freeze agent vmtoolsd(900) has a thread blocked behind the freeze; if it holds the freeze it cannot thaw (snapshot quiesce self-deadlock)
+
+Frozen filesystems
+  SB_FREEZE_COMPLETE   / (dm-0, xfs)  sb 0xffff888812340000  held by userspace
+
+Tasks blocked by a freeze (from 'foreach UN bt')
+  write         2  java(4321) in mnt_want_write, gdbus(905) in vfs_write
+
+Freeze agents
+  vmtoolsd          900  IN  VMware Tools  BLOCKED behind the freeze: gdbus(905)
+
+Kernel log
+  1 hung-task report(s), 1 of them freeze waits; last 30s before end of log
+```
+
+The classification is in `fsfreeze.py` (checks in `fsfreeze_test.py`), which isos's `freezeinfo` shares. It also runs on saved logs: `python3 source/fsfreeze.py messages vmcore-dmesg.txt`.
+
 Below is showing dumpe2fs style of information. (Only ext4 at this stage)
 
 ```

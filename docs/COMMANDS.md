@@ -404,10 +404,12 @@ Filesystem information including dentries, inodes, page caches, swap, and open f
 | `-S` | `--swap` | | Show swap usage |
 | `-t` | `--task` | | Show task-related information |
 | `-p` | `--dumpe2fs` | | Show dumpe2fs-like information |
+| `-z` | `--frozen` | | Is a filesystem freeze blocking the system (`-d` adds backtraces) |
 
 #### Examples
 
 ```
+fsinfo -z                       # Freeze verdict: frozen fs, blocked tasks, agents
 fsinfo -c                       # Show dentry/inode caches
 fsinfo -r                       # Show page caches
 fsinfo -S                       # Show swap usage
@@ -525,6 +527,7 @@ Device information for block devices, character devices, and IOMMU/IOTLB.
 | `-d` | `--details` | Show detailed information |
 | `-i` | `--iotlb` | Show IOTLB information |
 | `-q` | `--requests` | Show request details |
+| `-p` | `--pvio` | Paravirtual I/O rings: what the host has not completed (`-d` adds structure addresses) |
 
 #### Examples
 
@@ -533,7 +536,37 @@ devinfo -b               # Show block devices
 devinfo -c               # Show character devices
 devinfo -b -d            # Detailed block device info
 devinfo -i               # Show IOTLB info
+devinfo -p               # virtio / pvscsi / VMBus rings: host or guest side?
 ```
+
+`--pvio` reads the rings a paravirtual device shares with the host: virtio
+split virtqueues, VMware pvscsi `rings_state`, and Hyper-V VMBus channels
+(storvsc, netvsc). It counts three things:
+- HOST: what the guest posted and the host has not completed. For storvsc
+  this is the device's `num_outstanding_req`, because the host reads a
+  request off the ring at once and keeps it until it completes.
+- GUEST: what the host completed and the guest has not processed.
+- KICK: what the guest added without notifying the host.
+
+It combines these with the age of the oldest block request the device holds.
+The age is measured from dispatch (`jiffies - deadline + timeout`), per queue
+for virtio-blk and per device otherwise. The answer is the worst state:
+- `BROKEN`
+- `HOST STALLED` (≥ 30s) or `HOST SLOW` (≥ 5s): the host stopped completing
+  I/O, for example a datastore or backend stall.
+- `GUEST NOT PROCESSING`: a lost interrupt or a stuck completion handler.
+  It is named only when the host holds nothing.
+- `GUEST NOT NOTIFIED`: only when every entry the host holds is unkicked.
+- `IN FLIGHT` or `IDLE`
+
+Receive and event queues hold buffers for the host to fill and are not
+judged. Devices are found through pykdump's bus and SCSI-host walks, so RHEL
+9.5 and later work too. Structures that live in modules
+(`struct vring_virtqueue` from virtio_ring, `pvscsi_adapter`,
+`storvsc_device`, VMBus from hv_vmbus, and virtio itself on RHEL7) need that
+module's debuginfo. Without it the row says what to load with `mod -s`, and
+the answer never reports an all-clear for a ring it could not read. The
+ring arithmetic is in `source/pvring.py`, with checks in `pvring_test.py`.
 
 ### modinfo
 

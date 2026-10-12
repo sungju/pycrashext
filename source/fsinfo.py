@@ -613,6 +613,277 @@ def detect_frozen_fs_deadlocks(sb_list, options=None):
     print("")
 
 
+# ---------------------------------------------------------------------------
+# --frozen: is a filesystem freeze blocking this system, and who froze it?
+# The classification and log parsing live in fsfreeze.py (shared with isos).
+# ---------------------------------------------------------------------------
+
+FROZEN_EXAMPLE_LIMIT = 4
+FROZEN_DETAIL_LIMIT = 10
+
+FREEZE_HOLDER_NAMES = ((1, "kernel"), (2, "userspace"))
+
+
+def _frozen_superblocks():
+    """[(frozen, mount_path, s_id, fstype, sb, holders)] for frozen sbs."""
+    rows = []
+    mountpoints = _sb_mountpoints()
+    has_writers = member_offset('struct super_block', 's_writers') >= 0
+    has_holders = member_offset('struct sb_writers', 'freeze_holders') >= 0
+    for sb in readSUListFromHead(sym2addr("super_blocks"), "s_list",
+                                 "struct super_block"):
+        try:
+            if has_writers:
+                frozen = int(sb.s_writers.frozen)
+            elif member_offset('struct super_block', 's_frozen') >= 0:
+                frozen = int(sb.s_frozen)
+            else:
+                continue
+        except Exception:
+            continue
+        if frozen <= 0:
+            continue
+        holders = None
+        if has_holders:
+            try:
+                bits = int(sb.s_writers.freeze_holders)
+                holders = ", ".join(n for b, n in FREEZE_HOLDER_NAMES
+                                    if bits & b) or "none"
+            except Exception:
+                pass
+        mount_path = mountpoints.get(int(sb))
+        if mount_path is None:
+            try:
+                mount_path = dentry_to_filename(sb.s_root)
+            except Exception:
+                mount_path = "?"
+        rows.append((frozen, mount_path, str(sb.s_id), str(sb.s_type.name),
+                     sb, holders))
+    return rows
+
+
+def _sb_mountpoints():
+    """superblock address -> mount point, from crash 'mount' (each sb's own
+    root dentry is just '/')."""
+    points = {}
+    try:
+        for line in exec_crash_command("mount").splitlines():
+            w = line.split()
+            if len(w) >= 5:
+                try:
+                    points.setdefault(int(w[1], 16), w[4])
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+    return points
+
+
+def _thread_groups():
+    """pid -> tgid, and tgid -> the thread-group leader's comm."""
+    tgid_of, leader = {}, {}
+    try:
+        for t in Tasks.TaskTable().allThreads():
+            try:
+                pid, tgid = int(t.pid), int(t.tgid)
+            except Exception:
+                continue
+            tgid_of[pid] = tgid
+            if pid == tgid:
+                leader[tgid] = str(t.comm)
+    except Exception:
+        pass
+    return tgid_of, leader
+
+
+def _ps_states():
+    """pid -> (state, comm) from crash 'ps'."""
+    states = {}
+    try:
+        for line in exec_crash_command("ps").splitlines():
+            w = line.replace(">", " ", 1).split()
+            if len(w) >= 9 and w[0].isdigit():
+                states[int(w[0])] = (w[4], " ".join(w[8:]))
+    except Exception:
+        pass
+    return states
+
+
+def show_frozen_summary(options):
+    """
+    Answer whether a filesystem freeze is blocking the system: frozen
+    superblocks, the tasks blocked behind a freeze (from 'foreach UN bt'
+    frames, which find them on RHEL7, 8 and 9 alike, whichever wait list
+    the kernel uses), tasks freezing or thawing now, the freeze agents
+    (vmtoolsd, qemu-ga, hv_vss_daemon, fsfreeze) by thread-group leader,
+    and hung-task reports in the kernel log whose stack is a freeze wait.
+    """
+    import btgroup
+    import fsfreeze
+
+    frozen = _frozen_superblocks()
+    try:
+        tasks = btgroup.parse_foreach_bt(exec_crash_command("foreach UN bt"))
+    except Exception:
+        tasks = []
+    waiters = []
+    freezers = []
+    for pid, comm, frames, raw in tasks:
+        kind, level = fsfreeze.classify(frames)
+        if kind == "waiter":
+            waiters.append((pid, comm, level, frames, raw))
+        elif kind == "freezer":
+            freezers.append((pid, comm, frames, raw, level))
+    states = _ps_states()
+    tgid_of, leader = _thread_groups()
+    # Agents by their thread-group leader: glib names its threads, so a
+    # blocked vmtoolsd thread need not be called vmtoolsd.
+    agents = sorted((tgid, comm, states.get(tgid, ("?", ""))[0])
+                    for tgid, comm in leader.items()
+                    if comm in fsfreeze.AGENT_COMMS)
+    if not leader:
+        agents = sorted((pid, comm, st) for pid, (st, comm) in states.items()
+                        if comm in fsfreeze.AGENT_COMMS)
+    waiter_groups = {}
+    for w in waiters:
+        waiter_groups.setdefault(tgid_of.get(w[0], w[0]), []).append(w)
+    freezer_groups = set(tgid_of.get(f[0], f[0]) for f in freezers)
+    blocked_agents = [a for a in agents if a[0] in waiter_groups]
+    try:
+        log_lines = exec_crash_command("log").splitlines()
+    except Exception:
+        log_lines = []
+    reports = fsfreeze.hung_reports(log_lines)
+    blocked_reports = [r for r in reports if r["kind"] == "waiter"]
+    log_end = None
+    for line in reversed(log_lines):
+        log_end = fsfreeze.line_time(line)
+        if log_end:
+            break
+
+    thawing = [f for f in freezers if f[4] == "thaw"]
+    if frozen and blocked_agents:
+        status = "AGENT BLOCKED"
+        text = ("freeze agent %s has a thread blocked behind the freeze; if "
+                "it holds the freeze it cannot thaw (snapshot quiesce "
+                "self-deadlock)" % ", ".join("%s(%d)" % (c, p)
+                                            for p, c, s in blocked_agents))
+    elif thawing:
+        status = "THAW STUCK"
+        text = ("%d task(s) are thawing and waiting (thaw_super needs "
+                "s_umount, which a frozen writer may hold)" % len(thawing))
+    elif freezers:
+        status = "FREEZE STUCK"
+        text = ("%d task(s) are freezing and waiting; a freeze waits for "
+                "every writer to drain" % len(freezers))
+    elif frozen and waiters:
+        status = "FROZEN, BLOCKING"
+        text = "%d task(s) wait for a thaw" % len(waiters)
+    elif frozen:
+        status = "FROZEN"
+        text = "no task waits on it yet"
+    elif waiters:
+        status = "WAITING, NOT FROZEN"
+        text = ("%d task(s) are in a freeze wait but no superblock is frozen "
+                "(a thaw in progress?)" % len(waiters))
+    elif blocked_reports:
+        status = "EARLIER FREEZE"
+        text = ("%d hung-task report(s) in the log were freeze waits; nothing "
+                "is frozen now" % len(blocked_reports))
+    else:
+        status = "NO FREEZE"
+        text = "nothing frozen, no task in a freeze wait"
+
+    crashcolor.set_color(crashcolor.LIGHTCYAN)
+    print("Filesystem freeze assessment")
+    print("============================")
+    crashcolor.set_color(crashcolor.RESET)
+    print("Answer : ", end="")
+    crashcolor.set_color(crashcolor.LIGHTRED if status in (
+        "AGENT BLOCKED", "FREEZE STUCK", "THAW STUCK", "FROZEN, BLOCKING")
+        else crashcolor.YELLOW if status != "NO FREEZE" else crashcolor.RESET)
+    print(status, end="")
+    crashcolor.set_color(crashcolor.RESET)
+    print("  %s" % text)
+
+    print("\nFrozen filesystems")
+    if not frozen:
+        print("  none")
+    for level, mount_path, s_id, fstype, sb, holders in frozen:
+        print("  %-20s %s (%s, %s)  sb 0x%x%s"
+              % (get_frozen_str(level), mount_path, s_id, fstype, int(sb),
+                 "  held by %s" % holders if holders else ""))
+
+    print("\nTasks blocked by a freeze (from 'foreach UN bt')")
+    if not waiters:
+        print("  none")
+    for level in ("write", "pagefault", "fs"):
+        mine = [w for w in waiters if w[2] == level]
+        if not mine:
+            continue
+        examples = ", ".join("%s(%d) in %s" % (c, p, fsfreeze.caller_of(f))
+                             for p, c, l, f, r in mine[:FROZEN_EXAMPLE_LIMIT])
+        more = len(mine) - FROZEN_EXAMPLE_LIMIT
+        print("  %-10s %4d  %s%s" % (level, len(mine), examples,
+                                     " +%d more" % more if more > 0 else ""))
+    if waiters and len(frozen) > 1:
+        print("  (the stack does not say which of the frozen filesystems)")
+
+    if freezers:
+        print("\nFreezing or thawing now")
+        for pid, comm, frames, raw, what in freezers:
+            print("  %s(%d) %s in %s" % (comm, pid, "thawing" if what == "thaw"
+                                         else "freezing",
+                                         fsfreeze.caller_of(frames)))
+
+    print("\nFreeze agents")
+    if not agents:
+        print("  none running (vmtoolsd, qemu-ga, hv_vss_daemon, fsfreeze)")
+    for pid, comm, st in agents:
+        note = ""
+        if pid in waiter_groups:
+            note = "  BLOCKED behind the freeze: %s" % ", ".join(
+                "%s(%d)" % (w[1], w[0]) for w in waiter_groups[pid][:3])
+        elif pid in freezer_groups:
+            note = "  freezing/thawing"
+        print("  %-14s %6d  %-3s %s%s" % (comm, pid, st,
+                                         fsfreeze.AGENT_COMMS[comm], note))
+
+    print("\nKernel log")
+    if not reports:
+        print("  no hung-task reports")
+    else:
+        last = blocked_reports[-1] if blocked_reports else None
+        age = fsfreeze.time_diff(last["time"], log_end) if last else None
+        print("  %d hung-task report(s), %d of them freeze waits%s"
+              % (len(reports), len(blocked_reports),
+                 "; last %s before end of log" % fsfreeze.duration_text(age)
+                 if age is not None else ""))
+
+    if status == "AGENT BLOCKED" and any(c == "vmtoolsd"
+                                         for p, c, s in blocked_agents):
+        print("\nReference: https://access.redhat.com/solutions/7089292")
+        print("Workaround: set ignoreFrozenFileSystems=true and vmsvc.level=none "
+              "in /etc/vmware-tools/tools.conf")
+
+    if options.show_details and (waiters or freezers):
+        print("\nBacktraces (-d)")
+        for pid, comm, level, frames, raw in waiters[:FROZEN_DETAIL_LIMIT]:
+            print("\n  [%s wait]" % level)
+            for line in raw:
+                print("    " + line)
+        for pid, comm, frames, raw, what in freezers[:FROZEN_DETAIL_LIMIT]:
+            print("\n  [%sing]" % ("thaw" if what == "thaw" else "freez"))
+            for line in raw:
+                print("    " + line)
+        if len(waiters) > FROZEN_DETAIL_LIMIT:
+            print("\n  ... %d more blocked task(s)"
+                  % (len(waiters) - FROZEN_DETAIL_LIMIT))
+    elif waiters or freezers:
+        print("\nUse -d with -z for the backtraces; 'fsinfo -d' for the "
+              "per-level rw_sem waiters and the deadlock checks.")
+
+
 def all_filesystem_info(options):
     get_system_info()
     fs_state_list = {}
@@ -2834,6 +3105,11 @@ def fsinfo():
     op.add_option("-p", "--dumpe2fs", dest="dumpe2fs", default="",
                   action="store",
                   help="Shows dumpe2fs like information")
+    op.add_option("-z", "--frozen", dest="show_frozen", default=0,
+                  action="store_true",
+                  help="Is a filesystem freeze blocking the system: frozen "
+                       "filesystems, tasks waiting for a thaw, freeze "
+                       "agents and hung-task reports (-d for backtraces)")
 
     (o, args) = op.parse_args()
 
@@ -2893,6 +3169,10 @@ def fsinfo():
 
     if (o.show_swap):
         show_swap_usage(o)
+        sys.exit(0)
+
+    if (o.show_frozen):
+        show_frozen_summary(o)
         sys.exit(0)
 
 
