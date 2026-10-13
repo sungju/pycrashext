@@ -1163,6 +1163,14 @@ What this machine was, before starting on the vmcore. One screen with what
 - Counts of the known log signatures (as `logscan`), the reroute note, and
   **Start with**: the commands to run first, from all of the above.
 
+The output is grouped as Machine, Kernel and Software; everything that
+deserves attention (load far above the CPU count, why an NMI became a panic,
+the logscan reroute, platform disagreements, support state, boot parameters
+that change the analysis) is gathered under **Worth noting**. Panic sysctls
+are split into those set on this system and the RHEL defaults
+(`panic_on_oops`, `hardlockup_panic`). Firmware and serial are shown for
+bare metal only (`-v` for all).
+
 Every section fails on its own, so it is safe in a crash startup script. The
 last line, `SYSINFO platform=... kind=... rhel=... arch=... cpus=... mem=...
 taint=... thirdparty=...`, is for scripts.

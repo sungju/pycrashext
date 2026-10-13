@@ -30,7 +30,10 @@ import logsig
 import sysenv
 
 
-LABEL_W = 12
+import textwrap
+
+WIDTH = 78
+LABEL_W = 10
 
 
 def color(c):
@@ -41,28 +44,19 @@ def color(c):
 
 
 def row(label, text, c=None):
+    """One labelled line, wrapped under its text."""
+    lines = textwrap.wrap(text, WIDTH - LABEL_W - 2, break_on_hyphens=False) or [""]
     start = color(c) if c else ""
     end = color(crashcolor.RESET) if c else ""
-    print("%-*s: %s%s%s" % (LABEL_W, label, start, text, end))
+    for i, line in enumerate(lines):
+        print(" %-*s %s%s%s" % (LABEL_W, label if i == 0 else "", start, line, end))
 
 
-def cont(text, c=None):
-    start = color(c) if c else ""
-    end = color(crashcolor.RESET) if c else ""
-    print("%-*s  %s%s%s" % (LABEL_W, "", start, text, end))
-
-
-def rows(label, texts, c=None):
-    """The first text on the labelled line, the rest under it."""
-    for i, text in enumerate(texts):
-        if i == 0:
-            row(label, text, c)
-        else:
-            cont(text, c)
-
-
-def warn(text):
-    cont("! " + text, crashcolor.LIGHTRED)
+def heading(text):
+    print("")
+    crashcolor.set_color(crashcolor.BLUE | crashcolor.BOLD)
+    print(" " + text)
+    crashcolor.set_color(crashcolor.RESET)
 
 
 def run(cmd):
@@ -220,7 +214,7 @@ def section(fn, *args):
     try:
         return fn(*args)
     except Exception as e:
-        cont("(%s unavailable: %s)" % (fn.__name__.replace("show_", ""), e))
+        row("", "(%s unavailable: %s)" % (fn.__name__.replace("show_", ""), e))
         return None
 
 
@@ -228,236 +222,230 @@ class Facts(object):
     pass
 
 
-def show_header(f):
+def note(f, text, serious=False):
+    """A line for 'Worth noting'."""
+    f.notes.append((serious, text))
+
+
+def show_header(f, o):
     s = f.sys
+    p, k = f.platform, f.kernel
+    kinds = {"vm": "virtual machine", "cloud": "cloud instance", "bare metal": "bare metal", "lpar": ""}
+    what = ("%s %s" % (p["label"], kinds.get(p["kind"], ""))).strip()
+    line1 = " · ".join(x for x in (s.get("NODENAME"), k["label"], what) if x)
+    load = s.get("LOAD AVERAGE", "").replace(", ", "/")
+    line2 = "crashed %s · up %s" % (s.get("DATE", "?"), s.get("UPTIME", "?"))
     crashcolor.set_color(crashcolor.BLUE | crashcolor.BOLD)
-    print("=" * 78)
-    print(" %s   crashed %s   up %s" % (s.get("NODENAME", "?"), s.get("DATE", "?"), s.get("UPTIME", "?")))
-    print("=" * 78)
+    print("=" * WIDTH)
+    print(" " + line1)
+    print(" " + line2)
+    print("=" * WIDTH)
     crashcolor.set_color(crashcolor.RESET)
     if s.get("PANIC"):
         row("PANIC", s["PANIC"], crashcolor.LIGHTRED)
+    if load:
+        row("LOAD", "%s, %s tasks" % (load, s.get("TASKS", "?")))
+
     mins = uptime_minutes(s.get("UPTIME"))
     if mins is not None and mins < 15:
-        warn("crashed %d minute(s) after boot: a boot-time or early-service problem" % mins)
-    if s.get("LOAD AVERAGE"):
-        row("LOAD/TASKS", "load %s, %s tasks" % (s["LOAD AVERAGE"], s.get("TASKS", "?")))
+        note(f, "crashed %d minute(s) after boot: a boot-time or early-service problem" % mins)
     if f.overload:
-        warn("1-minute load is %.0fx the CPU count: tasks piling up runnable or in D state" % f.overload)
+        note(f, "load %s on %s CPUs (%.0fx): tasks piling up runnable or in D state" % (
+            s.get("LOAD AVERAGE", "?").split(",")[0], s.get("CPUS", "?").split()[0], f.overload), True)
+    why = sysenv.nmi_panic_cause(s.get("PANIC"), f.log, f.sysctls)
+    if why:
+        note(f, why, True)
+    reroute = logsig.reroute(f.log, f.log_hits)
+    if reroute:
+        note(f, reroute, True)
 
 
-def show_platform(f, o):
-    p = f.platform
-    kinds = {"vm": "Virtual machine on", "cloud": "Cloud instance on", "bare metal": "Bare metal,",
-             "lpar": "", "unknown": "Platform:"}
+def show_machine(f, o):
+    p, d, s = f.platform, f.dmi, f.sys
+    heading("Machine")
+    kinds = {"vm": "Virtual machine on", "cloud": "Cloud instance on", "bare metal": "Bare metal,"}
     text = ("%s %s" % (kinds.get(p["kind"], ""), p["label"])).strip()
     if p["model"] and p["model"].lower() not in p["label"].lower():
-        text += "  [%s]" % p["model"]
+        text += " (%s)" % p["model"]
     row("PLATFORM", text, crashcolor.LIGHTGREEN)
-    d = f.dmi
-    bios = " ".join(x for x in (d.get("DMI_BIOS_VENDOR"), d.get("DMI_BIOS_VERSION"), d.get("DMI_BIOS_DATE")) if x)
-    if bios:
-        age = sysenv.firmware_age_years(d.get("DMI_BIOS_DATE"), f.sys.get("DATE"))
-        line = "BIOS " + bios
-        if age is not None and age >= 0:
-            line += "  (%.1f years old at the crash)" % age
-        cont(line)
-        if age is not None and age >= 4 and p["kind"] == "bare metal":
-            warn("firmware is %.0f years old: check the vendor's BIOS/firmware errata" % age)
-    ids = []
-    if d.get("DMI_PRODUCT_SERIAL"):
-        ids.append("serial " + d["DMI_PRODUCT_SERIAL"])
-    if d.get("DMI_PRODUCT_UUID") and o.verbose:
-        ids.append("uuid " + d["DMI_PRODUCT_UUID"])
-    if ids:
-        cont("  ".join(ids))
-    cont("evidence: " + "; ".join(p["evidence"]) if p["evidence"] else "evidence: none (no DMI, no hypervisor type)")
+    if o.verbose or p["warnings"]:
+        row("", "evidence: " + ("; ".join(p["evidence"]) or "none"))
     for w in p["warnings"]:
-        warn(w)
+        note(f, w)
+    real_hw = p["kind"] in ("bare metal", "lpar")
+    if d.get("DMI_BIOS_VERSION") and (real_hw or o.verbose):
+        age = sysenv.firmware_age_years(d.get("DMI_BIOS_DATE"), s.get("DATE"))
+        bios = "firmware %s %s" % (d["DMI_BIOS_VERSION"], d.get("DMI_BIOS_DATE", ""))
+        if age is not None and age >= 0:
+            bios += " (%.1f years old)" % age
+        row("", bios)
+        if real_hw and age is not None and age >= 4:
+            note(f, "firmware is %.0f years old: check the vendor's BIOS/firmware errata" % age)
+    if d.get("DMI_PRODUCT_SERIAL") and (real_hw or o.verbose):
+        row("", "serial " + d["DMI_PRODUCT_SERIAL"])
     logs = sysenv.platform_logs(p["label"])
     if logs:
-        cont("platform side: " + logs)
-    if o.verbose and d:
-        for k in sorted(d):
-            cont("%-24s %s" % (k, d[k]))
+        row("", "host side: " + logs)
 
-
-def show_kernel(f, o):
-    k = f.kernel
-    rel = f.sys.get("RELEASE", "?")
-    text = "%s = %s" % (rel, k["label"]) if k["label"] != rel else rel
-    if k.get("how"):
-        text += " (%s)" % k["how"]
-    row("KERNEL", text)
-    if f.sys.get("VERSION"):
-        cont("built " + f.sys["VERSION"])
-    for fl in k["flavor"]:
-        warn(fl)
-    for n in k["notes"]:
-        cont("- " + n, crashcolor.LIGHTYELLOW)
-
-
-def show_hardware(f, o):
-    s = f.sys
-    cpus = s.get("CPUS", "?")
-    text = "%s CPU(s)" % cpus
+    cpu = ["%s CPUs" % (s.get("CPUS") or "?")]
     model = gdb_string("boot_cpu_data.x86_model_id").strip() if symbol_exists("boot_cpu_data") else ""
     if model:
-        text += ", " + re.sub(r"\s+", " ", model)
-    row("CPU", text)
-    extra = []
-    mc = None
+        cpu.append(re.sub(r"\s+", " ", model))
     if symbol_exists("boot_cpu_data"):
         m = re.search(r"=\s*(0x[0-9a-f]+|\d+)", run("p/x boot_cpu_data.microcode"))
         if m:
-            mc = m.group(1)
-            extra.append("microcode " + mc)
+            cpu.append("microcode " + m.group(1))
+    m = re.search(r"\((\d+) Mhz\)", s.get("MACHINE", ""))
+    if m:
+        cpu.append("%s MHz" % m.group(1))
+    row("CPU", ", ".join(cpu))
+
+    mem = [s.get("MEMORY") or "?"]
     nodes = read_int(("nr_online_nodes",))
     if nodes:
-        extra.append("%d NUMA node(s)" % nodes)
-    if s.get("MACHINE"):
-        extra.append(s["MACHINE"])
-    if extra:
-        cont(", ".join(extra))
-    mem = s.get("MEMORY", "?")
-    text = mem
+        mem.append("%d NUMA node%s" % (nodes, "" if nodes == 1 else "s"))
     try:
         if symbol_exists("crashk_res"):
             r = readSymbol("crashk_res")
-            size = int(r.end) - int(r.start) + 1
-            text += "   kdump reserved %s" % fmt_mb(size) if int(r.end) > 0 else "   kdump: no crashkernel memory reserved"
+            if int(r.end) > 0:
+                mem.append("kdump reserved %s" % fmt_mb(int(r.end) - int(r.start) + 1))
+            else:
+                mem.append("no kdump reservation")
     except Exception:
         pass
-    row("MEMORY", text)
-    dumps = [l.split(":", 1)[1].strip() for l in f.sys_text.splitlines() if l.strip().startswith("DUMPFILE:")]
-    if dumps:
-        row("DUMPFILE", "; ".join(dumps))
+    row("MEMORY", ", ".join(mem))
+    if o.verbose:
+        for l in f.sys_text.splitlines():
+            if l.strip().startswith("DUMPFILE:"):
+                row("DUMPFILE", l.split(":", 1)[1].strip())
+        for key in sorted(d):
+            row("", "%-22s %s" % (key, d[key]))
 
 
-def show_taint(f, o):
-    mask = f.taint_mask
-    if mask is None:
-        return
-    if mask == 0:
-        row("TAINT", "not tainted", crashcolor.LIGHTGREEN)
-        return
-    t = run("sys -t")
-    letters = ""
-    m = re.search(r"TAINTED_MASK:\s*\S+\s+(\S+)", t)
+def show_kernel(f, o):
+    k, s = f.kernel, f.sys
+    heading("Kernel")
+    rel = s.get("RELEASE", "?")
+    text = rel
+    m = re.search(r"\w{3} (\w{3} +\d+) [\d:]+ \w+ (\d{4})", s.get("VERSION", ""))
     if m:
-        letters = m.group(1)
-    row("TAINT", "0x%x %s" % (mask, letters), crashcolor.LIGHTYELLOW)
-    for bit, letter, why in f.taint:
-        cont("%s  %s" % (letter, why))
+        text += " (built %s %s)" % (re.sub(r" +", " ", m.group(1)), m.group(2))
+    row("RELEASE", text)
+    for fl in k["flavor"]:
+        note(f, fl)
+    for n in k["notes"]:
+        note(f, n)
 
-
-def show_boot(f, o):
-    if not f.cmdline:
-        return
-    notes = sysenv.notable_bootargs(f.cmdline)
-    if o.verbose or not notes:
-        row("CMDLINE", f.cmdline)
-    rows("BOOT ARGS", ["%-34s %s" % (param, note) for param, note in notes])
-
-
-def show_sysctls(f, o):
-    if f.armed:
-        rows("PANICS ON", ["%s=%d: %s becomes a panic" % (name, val, what) for name, val, what in f.armed],
-             crashcolor.LIGHTYELLOW)
-    else:
-        known = [n for n, v in f.sysctls.items() if v is not None]
-        if known:
-            row("PANICS ON", "no panic sysctl set (%d read, all 0)" % len(known))
-    extra = []
-    if f.panic_timeout is not None:
-        extra.append("kernel.panic=%d (%s)" % (
-            f.panic_timeout, "reboot after %ds" % f.panic_timeout if f.panic_timeout > 0
-            else "reboot at once" if f.panic_timeout < 0 else "no reboot after panic"))
-    if f.hung_timeout is not None:
-        extra.append("hung_task_timeout_secs=%d" % f.hung_timeout)
-    if f.watchdog_thresh is not None:
-        extra.append("watchdog_thresh=%d" % f.watchdog_thresh)
-    if extra:
-        cont(", ".join(extra))
-    sec = []
-    if f.fips:
-        sec.append("FIPS mode")
+    state = []
+    if f.taint_mask == 0:
+        state.append("not tainted")
+    elif f.taint_mask:
+        letters = "".join(l for _, l, _ in f.taint)
+        m = re.search(r"TAINTED_MASK:\s*\S+\s+(\S+)", run("sys -t"))
+        state.append("tainted %s (%s)" % (m.group(1) if m else letters,
+                                          ", ".join(why for _, _, why in f.taint)))
     if f.selinux is not None:
-        sec.append("SELinux %s" % ("enforcing" if f.selinux else "permissive/disabled"))
-    if sec:
-        row("SECURITY", ", ".join(sec))
+        state.append("SELinux " + ("enforcing" if f.selinux else "permissive/disabled"))
+    if f.fips:
+        state.append("FIPS")
+    if state:
+        row("STATE", ", ".join(state), crashcolor.LIGHTYELLOW if f.taint_mask else None)
+
+    args = sysenv.notable_bootargs(f.cmdline)
+    if o.verbose and f.cmdline:
+        row("CMDLINE", f.cmdline)
+    if args:
+        row("BOOT", "  ".join(p for p, _, _ in args))
+        for param, why, serious in args:
+            if serious:
+                note(f, "%s: %s" % (param, why))
+
+    own, default = sysenv.split_armed(f.armed, k.get("rhel"))
+    short = lambda lst: ", ".join(name.split(".", 1)[1] for name, _, _ in lst)
+    panics = []
+    if own:
+        panics.append("set here: " + short(own))
+    if default:
+        panics.append("RHEL default: " + short(default))
+    if not f.armed and any(v is not None for v in f.sysctls.values()):
+        panics.append("no panic sysctl set")
+    if panics:
+        row("PANIC ON", "; ".join(panics))
+    timers = []
+    if f.panic_timeout is not None:
+        timers.append("kernel.panic=%d (%s)" % (
+            f.panic_timeout, "reboots after %ds" % f.panic_timeout if f.panic_timeout > 0
+            else "reboots at once" if f.panic_timeout < 0 else "stays down"))
+    if f.hung_timeout is not None:
+        timers.append("hung task %ds" % f.hung_timeout)
+    if f.watchdog_thresh is not None:
+        timers.append("watchdog %ds" % f.watchdog_thresh)
+    if timers:
+        row("", ", ".join(timers))
 
 
-def show_modules(f, o):
-    m = f.modules
-    third = []
-    for cat, prod, mods in m["products"]:
-        mods_s = ", ".join(mods[:6]) + (" ..." if len(mods) > 6 else "")
-        third.append("%-14s %s (%s)" % (cat, prod, mods_s))
+def show_software(f, o):
+    m, w = f.modules, f.work
+    heading("Software")
+    third = ["%s: %s (%s)" % (cat, prod, " ".join(mods[:6]) + (" ..." if len(mods) > 6 else ""))
+             for cat, prod, mods in m["products"]]
     if m["other_tainted"]:
         shown = m["other_tainted"] if o.verbose else m["other_tainted"][:8]
-        txt = ", ".join("%s(%s)" % (n, t) for n, t in shown)
+        txt = " ".join("%s(%s)" % (n, t) for n, t in shown)
         if len(shown) < len(m["other_tainted"]):
-            txt += " ... %d more (mod -t)" % (len(m["other_tainted"]) - len(shown))
-        third.append("%-14s %s" % ("tainted", txt))
-    rows("THIRD PARTY", third, crashcolor.LIGHTYELLOW)
-    rows("DRIVERS", ["%-14s %s" % (cat, " ".join(mods)) for cat, mods in m["stacks"]])
-    row("MODULES", "%d loaded" % len(f.module_names))
-
-
-def show_storage_net(f, o):
+            txt += " ... %d more, see mod -t" % (len(m["other_tainted"]) - len(shown))
+        third.append("tainting: " + txt)
+    for i, text in enumerate(third):
+        row("3RD PARTY" if i == 0 else "", text, crashcolor.LIGHTYELLOW)
+    drivers = [x for _, mods in m["stacks"] for x in mods]
+    row("MODULES", "%d loaded%s" % (len(f.module_names), ": " + " ".join(drivers) if drivers else ""))
+    if w["apps"]:
+        parts = []
+        for label, n, detail in w["apps"]:
+            part = label if n == 1 else "%s x%d" % (label, n)
+            parts.append(part + (" (%s)" % detail if detail else ""))
+        row("RUNNING", "; ".join(parts))
+    if w["agents"]:
+        products = set(p for _, p, _ in m["products"])
+        row("AGENTS", ", ".join(a + (" (user mode)" if a in sysenv.MODULE_AGENTS and a not in products else "")
+                                for a, _ in w["agents"]))
     counts, overlay = f.mounts
     if counts:
         parts = ["%s x%d" % (t, n) if n > 1 else t for t, n in sorted(counts.items(), key=lambda x: (-x[1], x[0]))]
         if overlay:
             parts.append("overlay x%d (containers)" % overlay)
-        row("FILESYSTEMS", ", ".join(parts))
+        row("FS", ", ".join(parts))
     if f.ifaces:
-        shown = f.ifaces if o.verbose else f.ifaces[:6]
+        shown = f.ifaces if o.verbose else f.ifaces[:8]
         txt = ", ".join(("%s %s" % (n, a)).strip() for n, a in shown)
         if len(shown) < len(f.ifaces):
-            txt += " ... %d more (net)" % (len(f.ifaces) - len(shown))
+            txt += ", ... %d more, see net" % (len(f.ifaces) - len(shown))
         row("NETWORK", txt)
+    keys = [k for k, _, _ in logsig.SIGNATURES if k in f.log_hits and k != "call_trace"]
+    row("LOG", " ".join("%s=%d" % (k, len(f.log_hits[k])) for k in keys) if keys
+        else "no known signature in %d lines" % len(f.log))
 
 
-def show_workloads(f, o):
-    w = f.work
-    if w["apps"]:
-        parts = []
-        for label, n, detail in w["apps"]:
-            p = label if n == 1 else "%s x%d" % (label, n)
-            if detail:
-                p += " (%s)" % detail
-            parts.append(p)
-        row("WORKLOADS", "; ".join(parts))
-    if w["agents"]:
-        products = set(p for _, p, _ in f.modules["products"])
-        row("AGENTS", ", ".join(a + (" (user mode, no kernel module)"
-                                     if a in sysenv.MODULE_AGENTS and a not in products else "")
-                                 for a, _ in w["agents"]))
-
-
-def show_log(f, o):
-    hits = f.log_hits
-    keys = [k for k, _, _ in logsig.SIGNATURES if k in hits and k != "call_trace"]
-    if not keys:
-        row("LOG", "no known signature in %d line(s)" % len(f.log))
+def show_notes(f, o):
+    if not f.notes:
         return
-    row("LOG", " ".join("%s=%d" % (k, len(hits[k])) for k in keys))
-    note = logsig.reroute(f.log, hits)
-    if note:
-        warn("reroute: " + note)
+    heading("Worth noting")
+    for serious, text in sorted(f.notes, key=lambda n: not n[0]):
+        lines = textwrap.wrap(text, WIDTH - 5, break_on_hyphens=False)
+        c = crashcolor.LIGHTRED if serious else crashcolor.LIGHTYELLOW
+        for i, line in enumerate(lines):
+            print("  %s%s %s%s" % (color(c), "!" if i == 0 else " ", line, color(crashcolor.RESET)))
 
 
 def show_next(f, o):
     steps = sysenv.next_steps(f.platform, f.log_hits.keys(), f.taint, f.armed, f.work["agents"], f.kernel,
                               f.overload)
-    print("")
-    crashcolor.set_color(crashcolor.BLUE | crashcolor.BOLD)
-    print("Start with:")
-    crashcolor.set_color(crashcolor.RESET)
+    heading("Start with")
+    w = max(len(c) for c, _ in steps)
     for i, (cmd, why) in enumerate(steps, 1):
-        print("  %d. %-36s %s" % (i, cmd, why))
+        lines = textwrap.wrap(why, WIDTH - w - 8) or [""]
+        for j, line in enumerate(lines):
+            print("  %s %-*s  %s" % ("%d." % i if j == 0 else "  ", w, cmd if j == 0 else "", line))
 
 
 def summary_line(f):
@@ -501,6 +489,7 @@ def read_selinux():
 def gather():
     """Every fact, each one on its own: one that cannot be read is left empty."""
     f = Facts()
+    f.notes = []
     f.sys_text = run("sys")
     f.sys = kv_lines(f.sys_text)
     f.overload = sysenv.overload(f.sys.get("LOAD AVERAGE"), f.sys.get("CPUS"))
@@ -544,17 +533,11 @@ def sysinfo():
         print("sysinfo: could not read the basic facts: %s" % e)
         return
 
-    section(show_header, f)
-    section(show_platform, f, o)
+    section(show_header, f, o)
+    section(show_machine, f, o)
     section(show_kernel, f, o)
-    section(show_hardware, f, o)
-    section(show_taint, f, o)
-    section(show_boot, f, o)
-    section(show_sysctls, f, o)
-    section(show_modules, f, o)
-    section(show_storage_net, f, o)
-    section(show_workloads, f, o)
-    section(show_log, f, o)
+    section(show_software, f, o)
+    section(show_notes, f, o)
     section(show_next, f, o)
     print("")
     print(summary_line(f))

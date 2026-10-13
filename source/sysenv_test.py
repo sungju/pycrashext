@@ -6,7 +6,7 @@ Run directly: python3 source/sysenv_test.py
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
-from sysenv import (overload, classify_platform, kernel_release, decode_taint, notable_bootargs,
+from sysenv import (split_armed, nmi_panic_cause, overload, classify_platform, kernel_release, decode_taint, notable_bootargs,
                     classify_modules, workloads, armed_panics, next_steps, firmware_age_years,
                     platform_logs)
 
@@ -146,9 +146,14 @@ def check_taint_decode():
 def check_bootargs():
     cmd = ("BOOT_IMAGE=(hd0,gpt2)/vmlinuz root=/dev/mapper/rhel-root ro crashkernel=1G-4G:192M,4G-64G:256M "
            "rd.lvm.lv=rhel/root rhgb quiet mitigations=off transparent_hugepage=never nohz_full=2-7 fips=1")
-    got = [p.split("=")[0] for p, _ in notable_bootargs(cmd)]
+    got = [p.split("=")[0] for p, _, _ in notable_bootargs(cmd)]
     assert got == ["crashkernel", "mitigations", "transparent_hugepage", "nohz_full", "fips"], got
     assert notable_bootargs("ro quiet root=/dev/sda1") == []
+    # Values decide: =0 turns these off, and sizes alone reserve nothing.
+    quiet = "init_on_alloc=0 init_on_free=0 page_poison=0 default_hugepagesz=2M hugepagesz=2M hugepages=0"
+    assert notable_bootargs(quiet) == [], notable_bootargs(quiet)
+    loud = dict((p, w) for p, _, w in notable_bootargs("init_on_free=1 hugepages=1024 nowatchdog"))
+    assert loud == {"init_on_free=1": True, "hugepages=1024": False, "nowatchdog": True}, loud
 
 
 def check_modules():
@@ -207,10 +212,33 @@ def check_forced_dump_on_overloaded_vm():
     steps = next_steps({"kind": "vm"}, ["panic", "sysrq", "hypervisor"], overloaded=ratio)
     cmds = [c for c, _ in steps]
     assert cmds[:4] == ["bt", "hangcheck", "lockup -r", "vminfo -o"], cmds
-    assert "lockups or hangs" in dict(steps)["vminfo -o"]
+    assert "hung" in dict(steps)["vminfo -o"]
     # "Hypervisor detected" alone is every VM, not a hang.
     calm = dict(next_steps({"kind": "vm"}, ["hypervisor"]))
-    assert "rule hypervisor overcommit in or out" in calm["vminfo -o"]
+    assert "rule host overcommit in or out" in calm["vminfo -o"]
+
+
+
+def check_rhel_default_panics_apart():
+    armed = armed_panics({"kernel.panic_on_oops": 1, "kernel.hardlockup_panic": 1,
+                          "kernel.unknown_nmi_panic": 1})
+    own, default = split_armed(armed, rhel=9)
+    assert [n for n, _, _ in own] == ["kernel.unknown_nmi_panic"], own
+    assert [n for n, _, _ in default] == ["kernel.panic_on_oops", "kernel.hardlockup_panic"]
+    assert split_armed(armed)[1] == []
+
+
+def check_nmi_panic_cause():
+    log = ["[ 1408.1] Uhhuh. NMI received for unknown reason 30 on CPU 2.",
+           "[ 1408.2] Kernel panic - not syncing: NMI: Not continuing"]
+    why = nmi_panic_cause('"Kernel panic - not syncing: NMI: Not continuing"', log,
+                          {"kernel.unknown_nmi_panic": 1})
+    assert why.startswith("an NMI no driver claimed became a panic through kernel.unknown_nmi_panic=1"), why
+    assert "looked hung" in why
+    iock = nmi_panic_cause("NMI: Not continuing", ["NMI: IOCK error (debug interrupt?) for reason 71"],
+                           {"kernel.panic_on_io_nmi": 1})
+    assert "panic_on_io_nmi=1" in iock and "looked hung" not in iock
+    assert nmi_panic_cause("Kernel panic - not syncing: Fatal exception", log, {}) is None
 
 
 if (__name__ == '__main__'):

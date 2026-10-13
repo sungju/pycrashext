@@ -429,48 +429,50 @@ def decode_taint(mask, rhel=None):
 # Boot parameters
 # ---------------------------------------------------------------------------
 
-# (regex on one parameter, note). The note says what it changes for a crash.
+# (regex on one parameter, note, warn). The note says what it changes for a
+# crash; warn marks the ones that change the analysis, the rest are context.
+# A None note leaves the parameter out.
 BOOT_PARAMS = [
-    (r"^crashkernel=", "kdump memory reservation"),
-    (r"^mitigations=off$", "CPU vulnerability mitigations disabled"),
+    (r"^crashkernel=", "kdump reservation", False),
+    (r"^mitigations=off$", "CPU vulnerability mitigations disabled", True),
     (r"^(nospectre_v2|nopti|pti=off|spectre_v2=off|spec_store_bypass_disable=off|nospec_store_bypass_disable)$",
-     "a CPU vulnerability mitigation disabled"),
-    (r"^nosmt", "SMT (hyper-threading) disabled"),
-    (r"^(isolcpus|nohz_full|rcu_nocbs|irqaffinity)=", "CPU isolation (latency tuning): busy CPUs can starve housekeeping"),
-    (r"^(idle=poll|intel_idle\.max_cstate|processor\.max_cstate)", "C-states limited (latency tuning)"),
-    (r"^transparent_hugepage=", "THP mode set at boot"),
-    (r"^(hugepages|hugepagesz|default_hugepagesz)=", "hugepages reserved at boot (memory not in the free pool)"),
-    (r"^(mem|maxcpus|nr_cpus|possible_cpus)=", "memory or CPU count limited at boot"),
-    (r"^numa=off$", "NUMA disabled"),
-    (r"^(nmi_watchdog=0|nowatchdog|nosoftlockup)$", "lockup watchdog disabled: lockups will not be reported"),
-    (r"^(softlockup_panic|hung_task_panic|panic_on_warn|oops=panic|panic)=", "panic behaviour set at boot"),
-    (r"^(unknown_nmi_panic|panic_on_unrecovered_nmi|panic_on_io_nmi)", "NMI panic set at boot"),
-    (r"^(selinux=0|enforcing=0)$", "SELinux disabled or permissive at boot"),
-    (r"^audit=0$", "audit disabled"),
-    (r"^fips=1$", "FIPS mode"),
-    (r"^(intel_iommu|amd_iommu|iommu)=", "IOMMU mode set"),
-    (r"^(rd\.break|init=|single|emergency|systemd\.unit=(rescue|emergency))", "booted into rescue/debug mode"),
-    (r"^(rd\.lvm\.lv|root)=", None),
-    (r"^(elevator|scsi_mod\.use_blk_mq|dm_mod\.use_blk_mq)=", "I/O scheduler or blk-mq set at boot"),
-    (r"^(clocksource|tsc)=", "clocksource forced"),
-    (r"^(cgroup_no_v1|systemd\.unified_cgroup_hierarchy)=", "cgroup version chosen at boot"),
-    (r"^(ipv6\.disable=1|net\.ifnames=0|biosdevname=0)$", None),
-    (r"^(console|earlyprintk)=", None),
-    (r"^(kpti|lockdown|module\.sig_enforce)=", "kernel hardening parameter"),
-    (r"^(slub_debug|page_poison|page_owner|kasan|init_on_free|init_on_alloc)", "memory debugging enabled (slower)"),
-    (r"^(trace_event|ftrace|tp_printk)", "tracing enabled at boot"),
+     "a CPU vulnerability mitigation disabled", True),
+    (r"^nosmt", "SMT (hyper-threading) disabled", False),
+    (r"^(isolcpus|nohz_full|rcu_nocbs|irqaffinity)=",
+     "CPU isolation: busy isolated CPUs can starve housekeeping work", True),
+    (r"^(idle=poll|intel_idle\.max_cstate|processor\.max_cstate)", "C-states limited (latency tuning)", False),
+    (r"^transparent_hugepage=", "THP mode set at boot", False),
+    (r"^hugepages=0*[1-9]", "hugepages reserved at boot: not in the free pool", False),
+    (r"^(hugepages|hugepagesz|default_hugepagesz)=", None, False),
+    (r"^(mem|maxcpus|nr_cpus|possible_cpus)=", "memory or CPU count limited at boot", True),
+    (r"^numa=off$", "NUMA disabled", False),
+    (r"^(nmi_watchdog=0|nowatchdog|nosoftlockup)$", "lockup watchdog off: lockups go unreported", True),
+    (r"^(softlockup_panic|hung_task_panic|panic_on_warn|oops=panic|panic)=", "panic behaviour set at boot", False),
+    (r"^(unknown_nmi_panic|panic_on_unrecovered_nmi|panic_on_io_nmi)", "NMI panic set at boot", False),
+    (r"^(selinux=0|enforcing=0)$", "SELinux disabled or permissive at boot", False),
+    (r"^audit=0$", "audit disabled", False),
+    (r"^fips=1$", "FIPS mode", False),
+    (r"^(intel_iommu|amd_iommu|iommu)=", "IOMMU mode set", False),
+    (r"^(rd\.break|init=|single$|emergency$|systemd\.unit=(rescue|emergency))", "booted into rescue/debug mode", True),
+    (r"^(elevator|scsi_mod\.use_blk_mq|dm_mod\.use_blk_mq)=", "I/O scheduler or blk-mq set at boot", False),
+    (r"^(clocksource|tsc)=", "clocksource forced", False),
+    (r"^(cgroup_no_v1|systemd\.unified_cgroup_hierarchy)=", "cgroup version chosen at boot", False),
+    (r"^(lockdown|module\.sig_enforce)=", "kernel hardening parameter", False),
+    (r"^(slub_debug|kasan|page_owner=on|page_poison=(1|on)|init_on_free=1|init_on_alloc=1|debug_pagealloc=on)",
+     "memory debugging on (slower)", True),
+    (r"^(trace_event|ftrace|tp_printk)", "tracing enabled at boot", False),
 ]
-_BOOT = [(re.compile(p), n) for p, n in BOOT_PARAMS]
+_BOOT = [(re.compile(p), n, w) for p, n, w in BOOT_PARAMS]
 
 
 def notable_bootargs(cmdline):
-    """[(param, note)] for the boot parameters worth a look, in cmdline order."""
+    """[(param, note, warn)] for the boot parameters worth a look, in cmdline order."""
     out = []
     for word in (cmdline or "").split():
-        for pat, note in _BOOT:
+        for pat, note, warn in _BOOT:
             if pat.search(word):
                 if note:
-                    out.append((word, note))
+                    out.append((word, note, warn))
                 break
     return out
 
@@ -665,10 +667,50 @@ PANIC_SYSCTLS = [
 ]
 
 
+# Panic sysctls a RHEL kernel turns on by itself.
+RHEL_PANIC_DEFAULTS = {"kernel.panic_on_oops": 1, "kernel.hardlockup_panic": 1}
+
+
 def armed_panics(values):
     """values {sysctl: int or None}. [(sysctl, value, what)] for the non-zero ones."""
     return [(name, values[name], what) for _, name, what in PANIC_SYSCTLS
             if values.get(name)]
+
+
+def split_armed(armed, rhel=None):
+    """(set on this system, RHEL defaults) out of armed_panics()."""
+    if not rhel:
+        return list(armed), []
+    own = [a for a in armed if RHEL_PANIC_DEFAULTS.get(a[0]) != a[1]]
+    return own, [a for a in armed if a not in own]
+
+
+# The NMI an "NMI: Not continuing" panic followed, and the sysctl that made
+# it one (arch/x86/kernel/nmi.c).
+NMI_CAUSES = [
+    (r"NMI received for unknown reason", "kernel.unknown_nmi_panic", "an NMI no driver claimed"),
+    (r"NMI: PCI system error \(SERR\)", "kernel.panic_on_unrecovered_nmi", "a PCI system error (SERR) NMI"),
+    (r"NMI: IOCK error", "kernel.panic_on_io_nmi", "an I/O check (IOCK) NMI"),
+]
+
+
+def nmi_panic_cause(panic, lines, values):
+    """
+    Why an "NMI: Not continuing" panic happened, or None for other panics.
+    An unclaimed NMI is almost always sent on purpose (hypervisor "send
+    NMI", BMC/iLO/iDRAC NMI button, watchdog), usually because the system
+    looked hung: what was running before it is the question, not the NMI.
+    """
+    if "NMI: Not continuing" not in (panic or ""):
+        return None
+    for pat, sysctl, what in NMI_CAUSES:
+        if any(re.search(pat, l) for l in lines):
+            text = "%s became a panic through %s=%s" % (what, sysctl, values.get(sysctl, "?"))
+            if sysctl == "kernel.unknown_nmi_panic":
+                text += ("; such an NMI is sent on purpose (hypervisor 'send NMI', BMC button, "
+                         "watchdog), usually because the system looked hung")
+            return text
+    return "an NMI became a panic through one of the NMI panic sysctls"
 
 
 # ---------------------------------------------------------------------------
@@ -677,17 +719,17 @@ def armed_panics(values):
 
 # logsig keys -> (command, why)
 LOG_NEXT = [
-    ("sysrq", "hangcheck", "the dump was forced (sysrq/NMI): was the system hung, and on what?"),
-    ("sysrq", "lockup -r", "the dump was forced (sysrq/NMI): was a CPU stuck?"),
-    ("softlockup", "lockup -r", "soft lockups in the log: who held the CPU"),
+    ("sysrq", "hangcheck", "dump was forced: was the system hung, on what?"),
+    ("sysrq", "lockup -r", "dump was forced: was a CPU stuck?"),
+    ("softlockup", "lockup -r", "soft lockup: who held the CPU?"),
     ("hardlockup", "lockup -r", "hard lockup in the log"),
-    ("hung_task", "hangcheck", "hung tasks in the log: who is blocked and on what"),
-    ("rcu_stall", "rcuinfo -s", "RCU stall in the log"),
+    ("hung_task", "hangcheck", "hung tasks: who is blocked, on what?"),
+    ("rcu_stall", "rcuinfo -s", "RCU stall: which CPU or task held it up?"),
     ("oom", "meminfo -i", "the OOM killer ran"),
     ("oom_cgroup", "cginfo -m", "a memory cgroup ran out"),
-    ("storage", "devinfo -q", "storage errors in the log: requests still in flight"),
+    ("storage", "devinfo -q", "storage errors: requests still in flight"),
     ("netdev_timeout", "netinfo -i", "a NIC transmit timeout"),
-    ("corruption", "kmem -s", "a corruption report: check the slab caches"),
+    ("corruption", "kmem -s", "corruption report: check the slab caches"),
     ("hardware", "log | grep -iE 'mce|hardware error|edac'", "hardware errors in the log"),
 ]
 
@@ -722,24 +764,24 @@ def next_steps(platform, log_hits=(), taint=(), armed=(), agents=(), kernel=None
         if key in hits:
             add(cmd, why)
     if overloaded:
-        add("hangcheck", "load %.0fx the CPU count: who is blocked, and on what?" % overloaded)
-        add("lockup -r", "load %.0fx the CPU count: which CPUs ran what for how long?" % overloaded)
+        add("hangcheck", "load %.0fx CPUs: who is blocked, on what?" % overloaded)
+        add("lockup -r", "load %.0fx CPUs: what ran on each CPU, how long?" % overloaded)
     hang = hits & set(("softlockup", "hardlockup", "hung_task", "rcu_stall", "sysrq")) or overloaded
     if platform.get("kind") in ("vm", "cloud"):
         if hang:
-            add("vminfo -o", "a VM with lockups or hangs: was the host overcommitted?")
+            add("vminfo -o", "a VM that hung: was the host overcommitted?")
         else:
-            add("vminfo -o", "a VM: rule hypervisor overcommit in or out")
+            add("vminfo -o", "a VM: rule host overcommit in or out")
         if hits & set(("hung_task", "storage")):
-            add("devinfo -p", "paravirtual I/O rings: did the host stop completing I/O?")
+            add("devinfo -p", "did the host stop completing I/O?")
             if any(a in FREEZE_AGENTS for a, _ in agents):
-                add("fsinfo -z", "a snapshot agent runs here: is a filesystem frozen?")
+                add("fsinfo -z", "snapshot agent here: is a filesystem frozen?")
     letters = set(l for _, l, _ in taint)
     if letters & set("POE"):
-        add("mod -t", "third-party modules tainted the kernel: are they in the backtrace?")
+        add("mod -t", "tainting modules: are they in the backtrace?")
     if "K" in letters:
-        add("mod | grep -E 'kpatch|livepatch'", "a live patch is applied: is the crash in patched code?")
+        add("mod | grep -E 'kpatch|livepatch'", "live patched: is the crash in patched code?")
     if kernel and kernel.get("rhel") and kernel.get("label", "").startswith("RHEL"):
-        add("kvercmp <fixed kernel>", "when a known bug matches, is the fix already in %s?" % kernel["label"])
-    add("logscan", "every known log signature with its first and last line")
+        add("kvercmp <fixed kernel>", "is a known bug's fix already in %s?" % kernel["label"])
+    add("logscan", "each log signature, first and last line")
     return steps
