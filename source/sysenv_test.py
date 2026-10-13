@@ -6,7 +6,7 @@ Run directly: python3 source/sysenv_test.py
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
-from sysenv import (classify_platform, kernel_release, decode_taint, notable_bootargs,
+from sysenv import (overload, classify_platform, kernel_release, decode_taint, notable_bootargs,
                     classify_modules, workloads, armed_panics, next_steps, firmware_age_years,
                     platform_logs)
 
@@ -195,6 +195,22 @@ def check_next_steps():
     assert len(steps) == len(set(steps))
     bare = [c for c, _ in next_steps({"kind": "bare metal"}, ["oops"])]
     assert "vminfo -o" not in bare and "fsinfo -z" not in bare
+
+
+
+def check_forced_dump_on_overloaded_vm():
+    # An NMI-forced dump of a VM at load 781 on 6 CPUs: look for the hang.
+    ratio = overload("781.32, 300.20, 110.86", "6")
+    assert ratio and ratio > 100, ratio
+    assert overload("3.00, 2.00, 1.00", "8") is None
+    assert overload("", "8") is None and overload("1.0, 1.0, 1.0", "") is None
+    steps = next_steps({"kind": "vm"}, ["panic", "sysrq", "hypervisor"], overloaded=ratio)
+    cmds = [c for c, _ in steps]
+    assert cmds[:4] == ["bt", "hangcheck", "lockup -r", "vminfo -o"], cmds
+    assert "lockups or hangs" in dict(steps)["vminfo -o"]
+    # "Hypervisor detected" alone is every VM, not a hang.
+    calm = dict(next_steps({"kind": "vm"}, ["hypervisor"]))
+    assert "rule hypervisor overcommit in or out" in calm["vminfo -o"]
 
 
 if (__name__ == '__main__'):

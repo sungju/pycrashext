@@ -21,6 +21,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
 from pykdump.API import *
+from LinuxDump import Tasks
 
 import re
 
@@ -100,17 +101,24 @@ def read_int(names):
 
 
 def read_cmdline():
+    """
+    The whole boot command line. Read through its address: the string
+    readSymbol gives for a char * can stop short of a long command line.
+    """
+    addr = Addr(readSymbol("saved_command_line"))
     try:
-        val = readSymbol("saved_command_line")
-        if isinstance(val, str):
-            return val
-        addr = Addr(val)
         raw = readmem(addr, 4096)
         if isinstance(raw, str):
             raw = raw.encode("latin-1")
         return raw.split(b"\0", 1)[0].decode("utf-8", "replace")
     except Exception:
-        return gdb_string("saved_command_line")
+        chars = []
+        for i in range(4096):
+            b = readU8(addr + i)
+            if b == 0:
+                break
+            chars.append(chr(b))
+        return "".join(chars)
 
 
 def hypervisor_seen():
@@ -148,12 +156,19 @@ def module_list():
 
 
 def process_names():
-    """comm of every thread-group leader; kernel threads without brackets."""
-    out = run("ps -G")
-    if not out or "invalid option" in out or "usage" in out.lower():
-        out = run("ps")
+    """
+    comm of every thread-group leader. From the task table, not 'ps -G':
+    'ps -G' can leave crash's hash queue open for the rest of this epython
+    run, and 'mount' and 'net' then fail with "hash queue is in use?".
+    """
+    try:
+        comms = [str(t.comm) for t in Tasks.TaskTable().allThreads() if int(t.pid) == int(t.tgid)]
+        if comms:
+            return comms
+    except Exception:
+        pass
     comms = []
-    for line in out.splitlines():
+    for line in run("ps").splitlines():
         w = line.replace(">", " ", 1).split(None, 8)
         if len(w) >= 9 and w[0].isdigit():
             comms.append(w[8].strip().strip("[]"))
@@ -227,6 +242,8 @@ def show_header(f):
         warn("crashed %d minute(s) after boot: a boot-time or early-service problem" % mins)
     if s.get("LOAD AVERAGE"):
         row("LOAD/TASKS", "load %s, %s tasks" % (s["LOAD AVERAGE"], s.get("TASKS", "?")))
+    if f.overload:
+        warn("1-minute load is %.0fx the CPU count: tasks piling up runnable or in D state" % f.overload)
 
 
 def show_platform(f, o):
@@ -414,7 +431,10 @@ def show_workloads(f, o):
             parts.append(p)
         row("WORKLOADS", "; ".join(parts))
     if w["agents"]:
-        row("AGENTS", ", ".join(a for a, _ in w["agents"]))
+        products = set(p for _, p, _ in f.modules["products"])
+        row("AGENTS", ", ".join(a + (" (user mode, no kernel module)"
+                                     if a in sysenv.MODULE_AGENTS and a not in products else "")
+                                 for a, _ in w["agents"]))
 
 
 def show_log(f, o):
@@ -430,7 +450,8 @@ def show_log(f, o):
 
 
 def show_next(f, o):
-    steps = sysenv.next_steps(f.platform, f.log_hits.keys(), f.taint, f.armed, f.work["agents"], f.kernel)
+    steps = sysenv.next_steps(f.platform, f.log_hits.keys(), f.taint, f.armed, f.work["agents"], f.kernel,
+                              f.overload)
     print("")
     crashcolor.set_color(crashcolor.BLUE | crashcolor.BOLD)
     print("Start with:")
@@ -452,7 +473,7 @@ def summary_line(f):
         ("taint", "".join(l for _, l, _ in f.taint) or "none"),
         ("thirdparty", ",".join(pr.replace(" ", "_") for _, pr, _ in f.modules["products"]) or "none"),
     ]
-    return "SYSINFO " + " ".join("%s=%s" % kv for kv in fields)
+    return "SYSINFO " + " ".join("%s=%s" % (k, re.sub(r"_+", "_", re.sub(r"[^\w.,/+-]+", "_", v)).strip("_")) for k, v in fields)
 
 
 def safe(fn, default):
@@ -482,6 +503,7 @@ def gather():
     f = Facts()
     f.sys_text = run("sys")
     f.sys = kv_lines(f.sys_text)
+    f.overload = sysenv.overload(f.sys.get("LOAD AVERAGE"), f.sys.get("CPUS"))
     f.dmi = safe(lambda: dict((k, v) for k, v in kv_lines(run("sys -i")).items()
                               if k.startswith("DMI_")), {})
     f.log = run("log").splitlines()
@@ -503,9 +525,10 @@ def gather():
     f.selinux = safe(read_selinux, None)
     f.module_names, taints = safe(module_list, ([], {}))
     f.modules = sysenv.classify_modules(f.module_names, taints)
-    f.work = sysenv.workloads(safe(process_names, []))
+    # 'mount' and 'net' first: they need crash's hash queue free.
     f.mounts = safe(mounts, ({}, 0))
     f.ifaces = safe(interfaces, [])
+    f.work = sysenv.workloads(safe(process_names, []))
     return f
 
 

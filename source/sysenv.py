@@ -613,6 +613,9 @@ AGENTS = [
 _WORKLOADS = [(re.compile(p), n) for p, n in WORKLOADS]
 _AGENTS = [(re.compile(p), n) for p, n in AGENTS]
 
+# Agents that may also come as kernel modules (PRODUCTS).
+MODULE_AGENTS = ("CrowdStrike Falcon", "Trend Micro Deep Security", "SentinelOne")
+
 # Agents that freeze filesystems for snapshots: 'fsinfo -z' if I/O hung.
 FREEZE_AGENTS = ("VMware Tools", "QEMU guest agent", "Hyper-V daemons")
 
@@ -674,6 +677,8 @@ def armed_panics(values):
 
 # logsig keys -> (command, why)
 LOG_NEXT = [
+    ("sysrq", "hangcheck", "the dump was forced (sysrq/NMI): was the system hung, and on what?"),
+    ("sysrq", "lockup -r", "the dump was forced (sysrq/NMI): was a CPU stuck?"),
     ("softlockup", "lockup -r", "soft lockups in the log: who held the CPU"),
     ("hardlockup", "lockup -r", "hard lockup in the log"),
     ("hung_task", "hangcheck", "hung tasks in the log: who is blocked and on what"),
@@ -687,7 +692,22 @@ LOG_NEXT = [
 ]
 
 
-def next_steps(platform, log_hits=(), taint=(), armed=(), agents=(), kernel=None):
+# Load at this many times the CPU count says tasks were piling up.
+OVERLOAD_RATIO = 4
+
+
+def overload(load_average, cpus):
+    """1-minute load / CPUs when at least OVERLOAD_RATIO, else None."""
+    try:
+        load = float((load_average or "").split(",")[0])
+        n = int((cpus or "").split()[0])
+    except (ValueError, IndexError):
+        return None
+    ratio = load / n if n else 0
+    return ratio if ratio >= OVERLOAD_RATIO else None
+
+
+def next_steps(platform, log_hits=(), taint=(), armed=(), agents=(), kernel=None, overloaded=None):
     """[(command, why)] in the order to run them; no duplicates."""
     steps = []
 
@@ -701,8 +721,12 @@ def next_steps(platform, log_hits=(), taint=(), armed=(), agents=(), kernel=None
     for key, cmd, why in LOG_NEXT:
         if key in hits:
             add(cmd, why)
+    if overloaded:
+        add("hangcheck", "load %.0fx the CPU count: who is blocked, and on what?" % overloaded)
+        add("lockup -r", "load %.0fx the CPU count: which CPUs ran what for how long?" % overloaded)
+    hang = hits & set(("softlockup", "hardlockup", "hung_task", "rcu_stall", "sysrq")) or overloaded
     if platform.get("kind") in ("vm", "cloud"):
-        if hits & set(("softlockup", "hardlockup", "hung_task", "rcu_stall", "hypervisor")):
+        if hang:
             add("vminfo -o", "a VM with lockups or hangs: was the host overcommitted?")
         else:
             add("vminfo -o", "a VM: rule hypervisor overcommit in or out")
