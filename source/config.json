@@ -209,6 +209,12 @@
 			"desc"    : "Decode preempt_count",
 			"options" : "-h   - list available options",
 			"help"    : "Decodes preempt_count values\n\n preempt <value>...   decode values\n -l                   decode every preempt_count the kernel log prints"
+		},
+		{
+			"command" : "sysinfo",
+			"desc"    : "What this machine was, and where to start",
+			"options" : "-h   - list available options",
+			"help"    : "One screen before starting on a vmcore: platform (hardware vendor, hypervisor or cloud, with evidence), RHEL minor release and support state, CPU/microcode, kdump reservation, taint, notable boot parameters, armed panic sysctls, third-party products by module, driver stacks, filesystems, addresses, workloads, log signatures and the commands to start with\n\n -v   - every DMI field, the whole boot command line, every interface and tainted module"
 		}
 	]
 }

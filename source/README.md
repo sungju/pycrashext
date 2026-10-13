@@ -79,6 +79,7 @@ Every command accepts '-h' to show the available options.
 | seinfo | SELinux sidtab information |
 | selinuxinfo | SELinux status |
 | syscallinfo | System call table listing and modification check |
+| sysinfo | What the machine was (hardware vendor, hypervisor or cloud), RHEL minor release, taint, third-party products, workloads, and the commands to start with. Made for a crash startup script |
 | timeinfo | Time related information (clock sources) |
 | traceinfo | ftrace/BPF tracing information |
 | vminfo | Virtual machine related information |

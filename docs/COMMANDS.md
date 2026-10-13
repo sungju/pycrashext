@@ -61,6 +61,7 @@ All commands are invoked inside the crash utility as `epython <command>.py [opti
   - [kvercmp](#kvercmp)
   - [logscan](#logscan)
   - [preempt](#preempt)
+  - [sysinfo](#sysinfo)
 
 ---
 
@@ -1127,6 +1128,48 @@ halves disabled, hardirq nesting, NMI, and whether that is atomic context.
 
 **Usage:** `preempt <value>...` or `preempt -l` (every preempt_count the kernel
 log prints, each after its line). Also `python3 source/preemptcount.py <value>...`.
+
+---
+
+### sysinfo
+
+What this machine was, before starting on the vmcore. One screen with what
+`sys` does not give:
+
+- **Platform**: bare metal and whose (Dell, HPE, Lenovo, Cisco UCS,
+  Supermicro, ...), a VM and on what (VMware, Hyper-V, KVM/QEMU, RHV/oVirt,
+  OpenStack, OpenShift Virtualization, Nutanix AHV, Xen, ...), or a cloud
+  instance (Azure, EC2, GCE, OCI, ...), POWER LPAR or IBM Z. Decided from
+  DMI and checked against the kernel's own hypervisor type and the
+  `Hypervisor detected` log line; a disagreement is shown (KVM with Hyper-V
+  enlightenments, SMBIOS passed through to a VM). BIOS date and its age at
+  the crash, serial, and where that platform keeps its own record of the
+  event (iDRAC TSR, iLO AHS, ESXi vmware.log, Azure boot diagnostics, ...).
+- **Kernel**: RHEL major.minor from the release (`_N` suffix, else the GA
+  release table), EUS/ELS notes, CentOS Stream/pre-release, UEK, debug and
+  RT kernels.
+- CPU model, microcode, NUMA nodes, memory, kdump reservation, dump file.
+- **Taint** decoded; boot parameters that change how a crash reads
+  (`mitigations=off`, `nohz_full`, `nowatchdog`, `hugepages`, ...); panic
+  sysctls that were set (`panic_on_oops`, `hung_task_panic`, ...),
+  `kernel.panic`, hung-task timeout, watchdog threshold, FIPS, SELinux.
+- **Third-party products** by module (CrowdStrike, Trend Micro, McAfee,
+  Veeam, PowerPath, HDLM, Veritas, Oracle ASM, GPFS, ZFS, NVIDIA, live
+  patches, ...) and any other tainting module; driver stacks (VM, storage,
+  network, cluster, containers, KVM host).
+- Filesystems, network addresses, **workloads** from process names (Oracle
+  instances, SAP HANA, Pacemaker, Kubernetes/OpenShift, KVM host, ...) and
+  guest/cloud/security agents.
+- Counts of the known log signatures (as `logscan`), the reroute note, and
+  **Start with**: the commands to run first, from all of the above.
+
+Every section fails on its own, so it is safe in a crash startup script. The
+last line, `SYSINFO platform=... kind=... rhel=... arch=... cpus=... mem=...
+taint=... thirdparty=...`, is for scripts.
+
+**Usage:** `sysinfo [-v]` (`-v` adds every DMI field, the whole boot command
+line, every interface and tainted module). The rules are `source/sysenv.py`,
+checked by `python3 source/sysenv_test.py`.
 
 ---
 
