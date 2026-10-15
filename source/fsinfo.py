@@ -2031,21 +2031,31 @@ def get_xfs_reclaimable(xfs_mount):
     no 'struct inode' the VFS can see.
     """
     if member_offset("struct xfs_perag", "pag_ici_reclaimable") < 0:
-        return -1, 0
+        return -1, 0, "'struct xfs_perag' has no pag_ici_reclaimable here"
 
     total = 0
     ags = 0
+    perags = 0
     for perag in iter_xfs_perags(xfs_mount):
+        perags = perags + 1
         try:
-            total = total + int(perag.pag_ici_reclaimable)
+            count = perag.pag_ici_reclaimable
+            try:
+                # Plain int in most releases, atomic_t in some
+                value = int(count)
+            except Exception:
+                value = int(count.counter)
+            total = total + value
             ags = ags + 1
         except Exception:
             continue
 
+    if perags == 0:
+        return -1, 0, "crash's 'tree' listed no per-AG structures"
     if ags == 0:
-        return -1, 0
+        return -1, 0, "pag_ici_reclaimable could not be read on any AG"
 
-    return total, ags
+    return total, ags, ""
 
 
 def get_xfs_inodegc_backlog(xfs_mount):
@@ -2174,9 +2184,15 @@ def show_xfs_icache_details(sb, options, walked_inodes, pinned_by_log,
     print("== XFS internals ==")
     print("  %-38s : 0x%x" % ("xfs_mount", xfs_mount))
 
-    reclaimable, ags = get_xfs_reclaimable(xfs_mount)
+    reclaimable, ags, why = get_xfs_reclaimable(xfs_mount)
     if reclaimable < 0:
+        crashcolor.set_color(crashcolor.YELLOW)
         print("  %-38s : %s" % ("Inodes awaiting XFS reclaim", "unreadable"))
+        crashcolor.set_color(crashcolor.RESET)
+        print("    %s" % why)
+        print("    this is the count that says whether the xfs_inode slab")
+        print("    is held by XFS's reclaim backlog rather than by the VFS,")
+        print("    so it is worth chasing if the slab is large")
     else:
         crashcolor.set_color(crashcolor.LIGHTRED
                              if reclaimable > max(walked_inodes, 1)
@@ -2227,6 +2243,23 @@ def show_xfs_icache_details(sb, options, walked_inodes, pinned_by_log,
 
 def _percent(value, total):
     return (value * 100.0 / total) if total > 0 else 0.0
+
+
+def _share_phrase(walked, allocated, truncated):
+    """
+    How much of a system-wide cache this walk accounted for.
+
+    A capped walk stops at exactly --max objects, so 'walked / allocated'
+    then describes the cap and not the filesystem. Saying '3.0% are this
+    superblock's' when the walk was cut short is simply false, so the
+    share is withheld rather than guessed.
+    """
+    if truncated:
+        return "at least %d of them are here (the walk stopped at the" \
+               " limit, so the share is unknown)" % walked
+
+    return "%.1f%% of them are this superblock's" % \
+           _percent(walked, allocated)
 
 
 def _print_count_row(label, value, total, width=34):
@@ -2357,7 +2390,7 @@ def show_icache_sb(options, sb_addr):
     # -- inodes ------------------------------------------------------------
     total = pinned = unused = 0
     freeing = being_born = 0
-    pinned_via_dentry = pinned_no_dentry = 0
+    pinned_via_dentry = pinned_no_dentry = pinned_by_cached_dentry = 0
     unlinked = dirty = writeback = 0
     with_pages = 0
     cached_pages = 0
@@ -2439,7 +2472,15 @@ def show_icache_sb(options, sb_addr):
 
         if held_by_dentry:
             pinned_via_dentry = pinned_via_dentry + 1
-        elif not aliases:
+        elif aliases:
+            # Every dentry holds a reference on its inode whether or not
+            # the dentry itself is in use, so an inode whose aliases are
+            # all unused is pinned only by cached names. It is reclaimable
+            # - the shrinker takes the dentries first and the inode
+            # follows - which makes this a different answer from the two
+            # around it, and on a plain file cache it is most of them.
+            pinned_by_cached_dentry = pinned_by_cached_dentry + 1
+        else:
             # No path leads here at all: something holds the inode itself -
             # an open-but-unlinked file, a loop backing file, an NFS silly
             # rename, or the filesystem's own internal reference.
@@ -2472,10 +2513,15 @@ def show_icache_sb(options, sb_addr):
                          else crashcolor.RESET)
     _print_count_row("Pinned (i_count > 0)", pinned, total)
     crashcolor.set_color(crashcolor.RESET)
-    _print_count_row("  referenced through a dentry", pinned_via_dentry,
+    _print_count_row("  a dentry of theirs is in use", pinned_via_dentry,
                      total)
+    _print_count_row("  only cached dentries hold them",
+                     pinned_by_cached_dentry, total)
     _print_count_row("  no dentry at all", pinned_no_dentry, total)
     _print_count_row("Unused (i_count == 0, on the LRU)", unused, total)
+    print("  (the three lines above divide the pinned inodes. Only the")
+    print("   first and last resist reclaim: an inode held by nothing but")
+    print("   cached names goes as soon as the shrinker takes the names)")
     print("")
     _print_count_row("Unlinked (i_nlink == 0)", unlinked, total)
     _print_count_row("Dirty", dirty, total)
@@ -2490,14 +2536,15 @@ def show_icache_sb(options, sb_addr):
     summary = get_slab_summary(inode_cache)
     if summary is not None:
         print("")
-        print("  %-34s : %s in '%s' (%d bytes each)" %
+        print("  %-34s : %s%s in '%s' (%d bytes each)" %
               ("Slab memory for these inodes",
+               "at least " if truncated else "",
                bytes_to_str(total * summary["objsize"]), inode_cache,
                summary["objsize"]))
-        print("  %-34s : %d allocated system-wide (%.1f%% are this"
-              " superblock's)" %
-              ("  that cache holds", summary["allocated"],
-               _percent(total, summary["allocated"])))
+        print("  %-34s : %d allocated system-wide" %
+              ("  that cache holds", summary["allocated"]))
+        print("  %-34s   %s" %
+              ("", _share_phrase(total, summary["allocated"], truncated)))
 
     if by_type:
         print("")
@@ -2570,14 +2617,16 @@ def show_icache_sb(options, sb_addr):
     dentry_summary = get_slab_summary("dentry")
     if dentry_summary is not None:
         print("")
-        print("  %-34s : %s (%d bytes each)" %
+        print("  %-34s : %s%s (%d bytes each)" %
               ("Slab memory for these dentries",
+               "at least " if dstats["truncated"] else "",
                bytes_to_str(dtotal * dentry_summary["objsize"]),
                dentry_summary["objsize"]))
-        print("  %-34s : %d allocated system-wide (%.1f%% are this"
-              " superblock's)" %
-              ("  the 'dentry' cache holds", dentry_summary["allocated"],
-               _percent(dtotal, dentry_summary["allocated"])))
+        print("  %-34s : %d allocated system-wide" %
+              ("  the 'dentry' cache holds", dentry_summary["allocated"]))
+        print("  %-34s   %s" %
+              ("", _share_phrase(dtotal, dentry_summary["allocated"],
+                                 dstats["truncated"])))
         print("  (dentries not reachable from this root - disconnected ones")
         print("   from NFS, or other superblocks - are not in the first")
         print("   figure)")
@@ -2608,6 +2657,19 @@ def show_icache_sb(options, sb_addr):
     print("=" * 78)
     print("Reading")
     print("=" * 78)
+
+    if truncated or dstats["truncated"]:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Both walks stopped at --max, and they stop on different")
+        print("objects: the inodes are the first %d on s_inodes, the" %
+              max_objects)
+        print("dentries the first %d reached from the root. The two" %
+              max_objects)
+        print("sections describe different parts of this filesystem, so")
+        print("do not read one against the other. Raise --max for a count")
+        print("that covers it.")
+        crashcolor.set_color(crashcolor.RESET)
+        print("")
 
     if pinned > unused and total > 0:
         crashcolor.set_color(crashcolor.LIGHTRED)
@@ -2951,6 +3013,47 @@ def get_inode_filename(inode):
 MAX_DENTRY_DEPTH = 64
 
 
+def get_dentry_name(dentry):
+    """
+    The single path component a dentry is named by.
+
+    'd_name.name' is a 'const unsigned char *', and PyKdump reads a
+    character pointer into a SmartString - already a Python str - so the
+    value is used as it comes. This used to call '.string_()' on it,
+    which no version of PyKdump defines: every call raised AttributeError
+    into a bare 'except' and every name in a path came out as '<?>'.
+
+    The readmem() path covers a build that classifies the member as a
+    plain pointer instead of a string.
+    """
+    try:
+        name = dentry.d_name.name
+    except Exception:
+        return "<?>"
+
+    if isinstance(name, str):
+        return str(name) or "<?>"
+
+    try:
+        length = 0
+        try:
+            length = int(dentry.d_name.len)
+        except Exception:
+            length = 0
+        if length <= 0 or length > 255:
+            length = 255
+
+        raw = readmem(int(name), length)
+        if isinstance(raw, bytes):
+            text = raw.split(b'\0')[0].decode('utf-8', 'replace')
+        else:
+            text = str(raw).split('\0')[0]
+
+        return text or "<?>"
+    except Exception:
+        return "<?>"
+
+
 def get_dentry_path(dentry, cache):
     """
     Path of a dentry within its own filesystem, by walking d_parent.
@@ -2988,10 +3091,7 @@ def get_dentry_path(dentry, cache):
             cache[addr] = "/"
             break
 
-        try:
-            chain.append((addr, cur.d_name.name.string_()))
-        except Exception:
-            chain.append((addr, "<?>"))
+        chain.append((addr, get_dentry_name(cur)))
 
         cur = parent
     else:

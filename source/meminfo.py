@@ -3053,7 +3053,9 @@ def show_vm(options, pid):
                     if not filename:
                         vm_file = vma.vm_file
                         dentry = vm_file.f_path.dentry
-                        filename = dentry.d_name.name.string_()
+                        # No PyKdump defines '.string_()'; a character
+                        # pointer already reads back as a string
+                        filename = str(dentry.d_name.name)
 
                     # Categorize by filename
                     if filename.endswith('.so') or '.so.' in filename:
