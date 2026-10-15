@@ -14,29 +14,18 @@ import rules_helper as rh
 
 def get_dentry_objsize():
     """
-    Parse 'kmem -S dentry' output to get dentry slab object size.
-    Returns the objsize in bytes, or None on failure.
+    Dentry slab object size in bytes, or None on failure.
+
+    This used to run 'kmem -S dentry', which lists every object in the
+    cache - on the very dumps this rule is meant to catch, that is
+    millions of lines read to recover one number from the header. 'kmem
+    -s' prints the header alone.
     """
-    try:
-        result_lines = rh.get_data(None, "kmem -S dentry").splitlines()
-        header_found = False
-        for line in result_lines:
-            words = line.split()
-            if not words:
-                continue
-            if words[0] == "CACHE":
-                header_found = True
-                continue
-            if header_found and len(words) >= 2:
-                try:
-                    objsize = int(words[1])
-                    if objsize > 0:
-                        return objsize
-                except ValueError:
-                    continue
-    except Exception:
-        pass
-    return None
+    summary = rh.get_slab_summary("dentry")
+    if summary is None or summary["objsize"] <= 0:
+        return None
+
+    return summary["objsize"]
 
 
 def get_system_total_memory_kb():

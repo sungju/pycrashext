@@ -6,10 +6,13 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 
 from pykdump.API import *
 from LinuxDump import Tasks
+from LinuxDump import percpu
 import sys
 import heapq
 import operator
 import re
+
+from collections import deque
 
 import crashcolor
 
@@ -128,6 +131,38 @@ def get_vfsmount_from_sb(sb):
     return None 
 
 
+_mount_table = None
+
+def get_mount_table():
+    """
+    {super_block address: [mount point, ...]}, parsed from one 'mount' run.
+
+    Shared because callers that walk every superblock would otherwise run
+    'mount' once per superblock, and the table cannot change inside a dump.
+    """
+    global _mount_table
+
+    if _mount_table is not None:
+        return _mount_table
+
+    table = {}
+    try:
+        for line in exec_crash_command("mount").splitlines():
+            words = line.split()
+            if len(words) < 5:
+                continue
+            try:
+                sb_addr = int(words[1], 16)
+            except ValueError:
+                continue                # the header line
+            table.setdefault(sb_addr, []).append(words[4])
+    except Exception:
+        pass
+
+    _mount_table = table
+    return table
+
+
 def get_mount_points(sb):
     """
     Where a superblock is mounted, from the 'mount' table.
@@ -137,18 +172,10 @@ def get_mount_points(sb):
     instead. A superblock appears once per mount, so a bind-mounted
     filesystem yields several paths.
     """
-    points = []
     try:
-        for line in exec_crash_command("mount").splitlines():
-            words = line.split()
-            if len(words) < 5:
-                continue
-            if words[1] == ("%x" % sb):
-                points.append(words[4])
+        return list(get_mount_table().get(int(sb), []))
     except Exception:
-        pass
-
-    return points
+        return []
 
 
 def get_mount_option(mnt_flags):
@@ -1337,45 +1364,1285 @@ def show_slab_dentry(options):
         pass
 
 
+def iter_super_blocks(maxel=100000):
+    """Every superblock, from the 'super_blocks' list."""
+    return readSUListFromHead(sym2addr("super_blocks"), "s_list",
+                              "struct super_block", maxel=maxel)
+
+
+_nr_node_ids = None
+
+def get_nr_node_ids():
+    global _nr_node_ids
+
+    if _nr_node_ids is not None:
+        return _nr_node_ids
+
+    nodes = 1
+    try:
+        if symbol_exists("nr_node_ids"):
+            value = int(readSymbol("nr_node_ids"))
+            if value > 0:
+                nodes = value
+    except Exception:
+        pass
+
+    _nr_node_ids = nodes
+    return nodes
+
+
+def list_lru_count(lru):
+    """
+    Objects on a 'struct list_lru', summed over its NUMA nodes.
+
+    list_lru_add() bumps node[nid].nr_items for every object regardless of
+    which per-memcg list it lands on, so this stays correct on memcg-aware
+    LRUs without walking the per-memcg arrays - which were reshaped twice
+    (memcg_lrus, then an xarray) and are not worth chasing for a count.
+
+    Returns -1 when the layout is not one this build can read.
+    """
+    try:
+        node_size = struct_size("struct list_lru_node")
+        if node_size <= 0 or member_offset("struct list_lru_node",
+                                           "nr_items") < 0:
+            return -1
+
+        base = int(lru.node)
+        if base == 0:
+            return -1
+
+        total = 0
+        for nid in range(get_nr_node_ids()):
+            node = readSU("struct list_lru_node", base + nid * node_size)
+            total = total + int(node.nr_items)
+
+        return total
+    except Exception:
+        return -1
+
+
+def _sb_lru_is_list_lru(field):
+    """
+    True when super_block.<field> is a 'struct list_lru'.
+
+    Up to 3.11 's_dentry_lru' was a plain list_head paired with a
+    's_nr_dentry_unused' counter; 3.12 replaced both with a per-node
+    list_lru. Telling them apart by size keeps one code path for RHEL6 and
+    for everything after it.
+    """
+    try:
+        lru_size = struct_size("struct list_lru")
+        return lru_size > 0 and \
+               member_size("struct super_block", field) == lru_size
+    except Exception:
+        return False
+
+
+def get_sb_unused_counts(sb):
+    """
+    (dentries, inodes) sitting unused on this superblock's shrinker LRUs.
+
+    These are the objects the shrinker is free to reclaim: a dentry with no
+    reference, or an inode with no reference and no dentry pointing at it.
+    -1 for either means 'this kernel does not keep it where we can read it'.
+    """
+    dentries = inodes = -1
+
+    try:
+        if _sb_lru_is_list_lru("s_dentry_lru"):
+            dentries = list_lru_count(sb.s_dentry_lru)
+        elif member_offset("struct super_block", "s_nr_dentry_unused") >= 0:
+            dentries = int(sb.s_nr_dentry_unused)
+    except Exception:
+        dentries = -1
+
+    try:
+        if _sb_lru_is_list_lru("s_inode_lru"):
+            inodes = list_lru_count(sb.s_inode_lru)
+        elif member_offset("struct super_block", "s_nr_inodes_unused") >= 0:
+            inodes = int(sb.s_nr_inodes_unused)
+    except Exception:
+        inodes = -1
+
+    return dentries, inodes
+
+
+def get_sb_mount_label(sb):
+    """Where a superblock lives, for a table column."""
+    points = get_mount_points(sb)
+    if points:
+        return ", ".join(points)
+
+    try:
+        if is_internal_shmem_sb(sb):
+            return "<kernel-internal shmem>"
+    except Exception:
+        pass
+
+    # Alive but in no mount table: unmounted ('umount -l') or in another
+    # mount namespace. For a superblock still holding a million dentries
+    # that is itself the finding.
+    return "<not mounted>"
+
+
+def get_sb_fs_type(sb):
+    try:
+        return str(sb.s_type.name)
+    except Exception:
+        return "?"
+
+
 def show_caches(options):
-    shrinker_list = readSymbol("shrinker_list")
-    if shrinker_list == None or shrinker_list == 0:
-        return
+    """
+    Per-superblock dentry and inode cache occupancy.
 
-    sb_offset = member_offset("struct super_block", "s_shrink")
-    if sb_offset < 0:
-        return
+    Walks 'super_blocks' rather than the shrinker list. The previous
+    version keyed off 'shrinker.shrink == prune_super', and prune_super()
+    was replaced by super_cache_scan() in 3.12, so on anything newer than
+    RHEL6 nothing matched and the table came out empty.
 
+    Returns the rows it printed, so callers that want to rank superblocks
+    do not have to walk the list a second time.
+    """
     total_dentry_unused = 0
     total_inodes_unused = 0
-    prune_super = sym2addr("prune_super")
+    unreadable = 0
+    rows = []
 
-    print("=" * 60)
-    print("%18s %10s %10s %s" %\
-          ("super_block", "dentries", "inodes", "path"))
-    print("-" * 60)
-    for shrinker in readSUListFromHead(shrinker_list,
-                                       "list",
-                                       "struct shrinker"):
-        # Only concerns about normal super_block
-        if shrinker.shrink != prune_super:
+    for sb in iter_super_blocks():
+        dentry_unused, inodes_unused = get_sb_unused_counts(sb)
+        if dentry_unused < 0 and inodes_unused < 0:
+            unreadable = unreadable + 1
             continue
 
-        sb = readSU("struct super_block", shrinker - sb_offset)
-        dentry_unused = sb.s_nr_dentry_unused
-        inodes_unused = sb.s_nr_inodes_unused
-        if dentry_unused == 0 and inodes_unused == 0:
+        total_dentry_unused = total_dentry_unused + max(dentry_unused, 0)
+        total_inodes_unused = total_inodes_unused + max(inodes_unused, 0)
+        rows.append((sb, dentry_unused, inodes_unused))
+
+    rows.sort(key=lambda row: max(row[1], 0) + max(row[2], 0), reverse=True)
+
+    print("=" * 78)
+    print("%-18s %-8s %12s %12s  %s" %
+          ("super_block", "type", "dentries", "inodes", "mount"))
+    print("-" * 78)
+    for sb, dentry_unused, inodes_unused in rows:
+        # Without -d, a superblock holding nothing is noise
+        if not options.show_details and \
+           dentry_unused <= 0 and inodes_unused <= 0:
             continue
-        total_dentry_unused = total_dentry_unused + dentry_unused
-        total_inodes_unused = total_inodes_unused + inodes_unused
 
-        print("0x%x %10d %10d %s" %\
-              (sb, dentry_unused, inodes_unused,
-               dentry_to_filename(sb.s_root)))
+        print("0x%-16x %-8s %12s %12s  %s" %
+              (sb, get_sb_fs_type(sb)[:8],
+               "?" if dentry_unused < 0 else "%d" % dentry_unused,
+               "?" if inodes_unused < 0 else "%d" % inodes_unused,
+               get_sb_mount_label(sb)))
 
-    print("-" * 60)
-    print("%18s %10d %10d" %\
-          ("Total", total_dentry_unused, total_inodes_unused))
+    print("-" * 78)
+    print("%-18s %-8s %12d %12d" %
+          ("Total", "", total_dentry_unused, total_inodes_unused))
+    print("(unused == on the shrinker LRU, i.e. reclaimable under memory")
+    print(" pressure; objects still referenced are not counted here)")
+
+    if unreadable > 0:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("%d superblock(s) had no readable LRU counters" % unreadable)
+        crashcolor.set_color(crashcolor.RESET)
+
+    return rows
+
+
+# ---------------------------------------------------------------------------
+# 'fsinfo --icache': what is holding the dentry and inode slab caches
+# ---------------------------------------------------------------------------
+
+# Queried by name: 'kmem -s' with no argument walks every cache in the
+# system, which on a dump with millions of slab objects costs far more than
+# asking for the dozen caches that matter here. Caches that do not exist on
+# this kernel are skipped.
+VFS_SLAB_CACHES = [
+    ("dentry",             "dcache entries"),
+    ("inode_cache",        "VFS inodes with no fs-private part"),
+    ("xfs_inode",          "XFS inodes"),
+    ("xfs_ili",            "XFS inode log items"),
+    ("ext4_inode_cache",   "ext4 inodes"),
+    ("ext3_inode_cache",   "ext3 inodes"),
+    ("btrfs_inode",        "btrfs inodes"),
+    ("nfs_inode_cache",    "NFS inodes"),
+    ("cifs_inode_cache",   "CIFS inodes"),
+    ("fuse_inode",         "FUSE inodes"),
+    ("overlay_inode",      "overlayfs inodes"),
+    ("shmem_inode_cache",  "tmpfs/shmem inodes"),
+    ("proc_inode_cache",   "procfs inodes"),
+    ("sock_inode_cache",   "socket inodes"),
+    ("bdev_cache",         "block device inodes"),
+    ("kernfs_node_cache",  "sysfs/cgroupfs nodes"),
+    ("filp",               "open file structures"),
+]
+
+# Which slab cache holds a filesystem's inodes, for the per-superblock
+# memory estimate. Filesystems not listed here keep their inodes in the
+# generic 'inode_cache'.
+FS_INODE_CACHE = {
+    "xfs":      "xfs_inode",
+    "ext4":     "ext4_inode_cache",
+    "ext3":     "ext3_inode_cache",
+    "btrfs":    "btrfs_inode",
+    "nfs":      "nfs_inode_cache",
+    "nfs4":     "nfs_inode_cache",
+    "cifs":     "cifs_inode_cache",
+    "smb3":     "cifs_inode_cache",
+    "fuse":     "fuse_inode",
+    "overlay":  "overlay_inode",
+    "tmpfs":    "shmem_inode_cache",
+    "shmem":    "shmem_inode_cache",
+    "proc":     "proc_inode_cache",
+    "sockfs":   "sock_inode_cache",
+    "bdev":     "bdev_cache",
+}
+
+
+_slab_summaries = {}
+
+def get_slab_summary(name):
+    """
+    One 'kmem -s <cache>' row as a dict, or None when there is no such cache.
+
+    Memoised because 'kmem -s' has to walk the cache's slabs to count
+    allocated objects, which on a cache holding millions of them takes long
+    enough that asking twice is worth avoiding.
+    """
+    if name in _slab_summaries:
+        return _slab_summaries[name]
+
+    _slab_summaries[name] = None
+    try:
+        output = exec_crash_command("kmem -s %s" % name)
+    except Exception:
+        return None
+
+    for line in output.splitlines():
+        words = line.split()
+        if len(words) < 7 or words[-1] != name:
+            continue
+        try:
+            _slab_summaries[name] = {
+                "name":      name,
+                "objsize":   int(words[1]),
+                "allocated": int(words[2]),
+                "total":     int(words[3]),
+                "slabs":     int(words[4]),
+                "ssize":     words[5],
+            }
+            return _slab_summaries[name]
+        except ValueError:
+            continue
+
+    return None
+
+
+def get_total_memory_bytes():
+    """Installed RAM, for the '% of memory' columns. 0 when unavailable."""
+    for name in ("totalram_pages", "_totalram_pages"):
+        try:
+            if not symbol_exists(name):
+                continue
+            value = readSymbol(name)
+            try:
+                pages = int(value.counter)      # atomic_long_t, 5.0 onwards
+            except Exception:
+                pages = int(value)
+            if pages > 0:
+                return pages * page_size
+        except Exception:
+            continue
+
+    try:
+        for line in exec_crash_command("kmem -i").splitlines():
+            words = line.split()
+            if len(words) >= 3 and words[0] == "TOTAL" and words[1] == "MEM":
+                return int(words[2]) * page_size
+    except Exception:
+        pass
+
+    return 0
+
+
+def get_dentry_refcount(dentry):
+    """
+    d_lockref.count, or the pre-3.12 d_count. -1 when neither can be read.
+
+    A dentry with a reference cannot be reclaimed; one without is on the
+    superblock's LRU waiting for the shrinker. That split is the whole
+    question when the dcache has grown large.
+    """
+    try:
+        return int(dentry.d_lockref.count)
+    except Exception:
+        pass
+
+    try:
+        count = dentry.d_count
+        try:
+            return int(count.counter)
+        except Exception:
+            return int(count)
+    except Exception:
+        return -1
+
+
+# A hardlinked inode can have many aliases; walking all of them for every
+# inode on the filesystem would dominate the runtime for no extra insight.
+MAX_INODE_ALIASES = 32
+
+
+def iter_inode_dentries(inode, limit=MAX_INODE_ALIASES):
+    """
+    The dentries aliasing an inode.
+
+    'struct inode.i_dentry' became an hlist in 3.6 and the dentry side of
+    the link moved into the 'd_u' union at the same time, so handle both
+    layouts - the same split get_first_dentry_addr() deals with.
+    """
+    result = []
+
+    try:
+        dentry_offset = member_offset('struct dentry', 'd_u')
+        if dentry_offset < 0:
+            dentry_offset = member_offset('struct dentry', 'd_alias')
+        if dentry_offset < 0:
+            return result
+
+        if member_size("struct inode", "i_dentry") == \
+                struct_size("struct hlist_head"):
+            ptr = int(inode.i_dentry.first)
+            while ptr != 0 and len(result) < limit:
+                result.append(readSU("struct dentry", ptr - dentry_offset))
+                ptr = int(readSU("struct hlist_node", ptr).next)
+        else:
+            head_addr = int(inode) + member_offset("struct inode", "i_dentry")
+            ptr = int(inode.i_dentry.next)
+            while ptr != 0 and ptr != head_addr and len(result) < limit:
+                result.append(readSU("struct dentry", ptr - dentry_offset))
+                ptr = int(readSU("struct list_head", ptr).next)
+    except Exception:
+        pass
+
+    return result
+
+
+def iter_sb_inodes(sb, limit):
+    """
+    The inodes on one superblock, streamed.
+
+    readSUListFromHead() would do this in one call, but it builds the whole
+    list before returning it - on the filesystems this command exists for
+    that is millions of objects held in memory at once, for a walk that
+    only ever looks at one inode at a time.
+    """
+    offset = member_offset("struct inode", "i_sb_list")
+    head_off = member_offset("struct super_block", "s_inodes")
+    if offset < 0 or head_off < 0:
+        return
+
+    head_addr = int(sb) + head_off
+    try:
+        ptr = int(readSU("struct list_head", head_addr).next)
+    except Exception:
+        return
+
+    count = 0
+    while ptr != 0 and ptr != head_addr and count < limit:
+        yield readSU("struct inode", ptr - offset)
+        try:
+            ptr = int(readSU("struct list_head", ptr).next)
+        except Exception:
+            return
+        count = count + 1
+
+
+_dentry_child_layout = None
+
+def get_dentry_child_layout():
+    """
+    How this kernel links a directory's children, as (kind, head, link).
+
+    Three layouts are in the field: 'd_children'/'d_sib' hlists (6.8 and
+    later), 'd_subdirs'/'d_child' lists (3.19 to 6.7), and the same lists
+    with the sibling link inside the 'd_u' union (up to 3.18).
+    """
+    global _dentry_child_layout
+
+    if _dentry_child_layout is not None:
+        return _dentry_child_layout
+
+    children_off = member_offset("struct dentry", "d_children")
+    sib_off = member_offset("struct dentry", "d_sib")
+    if children_off >= 0 and sib_off >= 0:
+        layout = ("hlist", children_off, sib_off)
+    else:
+        link_off = member_offset("struct dentry", "d_child")
+        if link_off < 0:
+            link_off = member_offset("struct dentry", "d_u")
+        layout = ("list", member_offset("struct dentry", "d_subdirs"),
+                  link_off)
+
+    _dentry_child_layout = layout
+    return layout
+
+
+def iter_dentry_children(dentry, limit):
+    """The child dentries of one directory dentry."""
+    kind, head_off, link_off = get_dentry_child_layout()
+    if head_off < 0 or link_off < 0:
+        return
+
+    head_addr = int(dentry) + head_off
+    count = 0
+
+    try:
+        if kind == "hlist":
+            ptr = int(readSU("struct hlist_head", head_addr).first)
+            while ptr != 0 and count < limit:
+                yield readSU("struct dentry", ptr - link_off)
+                ptr = int(readSU("struct hlist_node", ptr).next)
+                count = count + 1
+        else:
+            ptr = int(readSU("struct list_head", head_addr).next)
+            while ptr != 0 and ptr != head_addr and count < limit:
+                yield readSU("struct dentry", ptr - link_off)
+                ptr = int(readSU("struct list_head", ptr).next)
+                count = count + 1
+    except Exception:
+        # A bad pointer ends this directory rather than the whole walk
+        return
+
+
+def dentry_has_children(dentry):
+    kind, head_off, _link_off = get_dentry_child_layout()
+    if head_off < 0:
+        return False
+
+    head_addr = int(dentry) + head_off
+    try:
+        if kind == "hlist":
+            return int(readSU("struct hlist_head", head_addr).first) != 0
+
+        return int(readSU("struct list_head", head_addr).next) != head_addr
+    except Exception:
+        return False
+
+
+DCACHE_MOUNTED = 0x00010000
+
+
+def walk_sb_dcache(sb, max_dentries):
+    """
+    Breadth-first walk of one superblock's dcache tree, from its root.
+
+    Breadth-first rather than depth-first because this walk is capped: on a
+    filesystem with millions of dentries the cap will be hit, and a partial
+    breadth-first walk covers the top of the tree - which is where the
+    answer usually is - while a partial depth-first walk would disappear
+    into whichever subdirectory it happened to enter first.
+
+    Negative dentries are the common reason for a large dcache and they
+    hang off no inode, so they are only reachable this way - the inode walk
+    cannot see them.
+    """
+    stats = {
+        "total": 0, "negative": 0, "in_use": 0, "unused": 0,
+        "unknown_ref": 0, "negative_in_use": 0, "mounted": 0,
+        "directories": 0, "truncated": False,
+    }
+    by_parent = {}      # parent dentry address -> [children, negative, in_use]
+
+    root = sb.s_root
+    if root is None or int(root) == 0:
+        return stats, by_parent
+
+    def account(dentry):
+        stats["total"] = stats["total"] + 1
+
+        negative = False
+        try:
+            negative = int(dentry.d_inode) == 0
+        except Exception:
+            pass
+        if negative:
+            stats["negative"] = stats["negative"] + 1
+
+        refcount = get_dentry_refcount(dentry)
+        if refcount < 0:
+            stats["unknown_ref"] = stats["unknown_ref"] + 1
+        elif refcount > 0:
+            stats["in_use"] = stats["in_use"] + 1
+            if negative:
+                stats["negative_in_use"] = stats["negative_in_use"] + 1
+        else:
+            stats["unused"] = stats["unused"] + 1
+
+        try:
+            if (int(dentry.d_flags) & DCACHE_MOUNTED) != 0:
+                stats["mounted"] = stats["mounted"] + 1
+        except Exception:
+            pass
+
+        return negative, refcount
+
+    account(root)
+    queue = deque([root])
+    seen_dirs = set([int(root)])
+
+    while queue:
+        if stats["total"] >= max_dentries:
+            stats["truncated"] = True
+            break
+
+        parent = queue.popleft()
+        stats["directories"] = stats["directories"] + 1
+        counters = [0, 0, 0]
+
+        for child in iter_dentry_children(parent,
+                                          max_dentries - stats["total"]):
+            negative, refcount = account(child)
+            counters[0] = counters[0] + 1
+            if negative:
+                counters[1] = counters[1] + 1
+            if refcount > 0:
+                counters[2] = counters[2] + 1
+
+            if stats["total"] >= max_dentries:
+                stats["truncated"] = True
+                break
+
+            addr = int(child)
+            if addr not in seen_dirs and dentry_has_children(child):
+                seen_dirs.add(addr)
+                queue.append(child)
+
+        if counters[0] > 0:
+            by_parent[int(parent)] = counters
+
+    return stats, by_parent
+
+
+# ---------------------------------------------------------------------------
+# XFS keeps its own inode cache in front of the VFS one, so an xfs_inode can
+# easily outlive the 'struct inode' the VFS has already let go of. Three
+# places hold them, and each points at a different problem:
+#   - the per-AG reclaim tag: evicted, waiting for xfs_reclaim_inodes()
+#   - the inodegc queues (5.14 and later): waiting for deferred inactivation
+#   - the AIL: pinned by log items that have not reached disk
+# None of this is visible from the VFS side, which is why a dump can show
+# far more xfs_inode objects than the superblock has inodes.
+# ---------------------------------------------------------------------------
+
+XFS_LI_INODE = 0x123b
+
+
+def get_xfs_mount(sb):
+    """'struct xfs_mount' behind an XFS superblock, or None."""
+    try:
+        if get_sb_fs_type(sb) != "xfs":
+            return None
+
+        fs_info = int(sb.s_fs_info)
+        if fs_info == 0:
+            return None
+
+        return readSU("struct xfs_mount", fs_info)
+    except Exception:
+        return None
+
+
+def get_xfs_inode_state(inode, vnode_offset):
+    """
+    (pinned by the log, has a log item) for the xfs_inode behind an inode.
+
+    i_pincount is raised while a transaction holds the inode and dropped
+    when the log forces it out, so a non-zero count means the inode cannot
+    be reclaimed until the log moves. i_itemp is the attached log item,
+    which keeps the inode alive until the AIL pushes it.
+    """
+    try:
+        xfs_inode = readSU("struct xfs_inode", int(inode) - vnode_offset)
+    except Exception:
+        return False, False
+
+    pinned = False
+    try:
+        pinned = int(xfs_inode.i_pincount.counter) > 0
+    except Exception:
+        try:
+            pinned = int(xfs_inode.i_pincount) > 0
+        except Exception:
+            pass
+
+    has_item = False
+    try:
+        has_item = int(xfs_inode.i_itemp) != 0
+    except Exception:
+        pass
+
+    return pinned, has_item
+
+
+def iter_xfs_perags(xfs_mount):
+    """
+    The 'struct xfs_perag' of an XFS mount.
+
+    They live in a radix tree ('m_perag_tree') up to 6.x and in an xarray
+    ('m_perags') after that. Both are asked of crash's 'tree' command
+    rather than walked here - the node formats have changed more often
+    than the trees they implement.
+    """
+    for member, kind in (("m_perag_tree", "radix"), ("m_perags", "xarray")):
+        offset = member_offset("struct xfs_mount", member)
+        if offset < 0:
+            continue
+
+        try:
+            output = exec_crash_command("tree -t %s 0x%x" %
+                                        (kind, int(xfs_mount) + offset))
+        except Exception:
+            continue
+
+        for line in output.splitlines():
+            words = line.split()
+            if not words:
+                continue
+            try:
+                addr = int(words[0], 16)
+            except ValueError:
+                continue
+            if addr == 0:
+                continue
+            yield readSU("struct xfs_perag", addr)
+
+        return
+
+
+def get_xfs_reclaimable(xfs_mount):
+    """
+    (inodes awaiting reclaim, AGs counted), or (-1, 0) when unreadable.
+
+    pag_ici_reclaimable counts the inodes the VFS has already evicted but
+    XFS has not freed: they hold xfs_inode slab memory while belonging to
+    no 'struct inode' the VFS can see.
+    """
+    if member_offset("struct xfs_perag", "pag_ici_reclaimable") < 0:
+        return -1, 0
+
+    total = 0
+    ags = 0
+    for perag in iter_xfs_perags(xfs_mount):
+        try:
+            total = total + int(perag.pag_ici_reclaimable)
+            ags = ags + 1
+        except Exception:
+            continue
+
+    if ags == 0:
+        return -1, 0
+
+    return total, ags
+
+
+def get_xfs_inodegc_backlog(xfs_mount):
+    """
+    (inodes queued for deferred inactivation, cpus), or None.
+
+    5.14 moved inode inactivation off the unlink path onto per-cpu queues
+    drained by a workqueue. When that worker cannot run - a frozen
+    filesystem, a stalled workqueue - unlinked inodes pile up here and
+    every one of them still owns its xfs_inode. This is the usual
+    explanation for a huge xfs_inode slab on RHEL9 with no matching VFS
+    inode count.
+    """
+    if member_offset("struct xfs_mount", "m_inodegc") < 0:
+        return None
+
+    try:
+        base = xfs_mount.m_inodegc
+        if int(base) == 0:
+            return None
+    except Exception:
+        return None
+
+    exact = member_offset("struct xfs_inodegc", "items") >= 0
+    total = 0
+    cpus = 0
+
+    for cpu in range(sys_info.CPUS):
+        try:
+            gc = percpu.percpu_ptr(base, cpu)
+            if not hasattr(gc, "PYT_symbol"):
+                # percpu_ptr() hands back a bare address when it cannot
+                # tell what it was given; name the type ourselves
+                gc = readSU("struct xfs_inodegc", int(gc))
+            if exact:
+                total = total + int(gc.items)
+            else:
+                # Pre-5.19 queues carry no count, so walk the llist. The
+                # cap keeps a corrupt chain from running away; the number
+                # is only used to say 'large', not to be exact.
+                node = int(gc.list.first)
+                walked = 0
+                while node != 0 and walked < 1000000:
+                    walked = walked + 1
+                    node = int(readSU("struct llist_node", node).next)
+                total = total + walked
+            cpus = cpus + 1
+        except Exception:
+            continue
+
+    if cpus == 0:
+        return None
+
+    return total, cpus
+
+
+def get_xfs_ail_stats(xfs_mount, limit):
+    """
+    (items on the AIL, of those inode items, truncated) or None.
+
+    Log items sit on the AIL until their metadata is written back. An
+    inode with a live log item cannot be reclaimed, so an AIL that is not
+    draining holds inodes just as firmly as an open file does.
+    """
+    try:
+        ail = xfs_mount.m_ail
+        if int(ail) == 0:
+            return None
+    except Exception:
+        return None
+
+    # 'xa_ail' up to 4.x, renamed 'ail_head' in 5.x
+    head_off = member_offset("struct xfs_ail", "ail_head")
+    if head_off < 0:
+        head_off = member_offset("struct xfs_ail", "xa_ail")
+    link_off = member_offset("struct xfs_log_item", "li_ail")
+    if head_off < 0 or link_off < 0:
+        return None
+
+    head_addr = int(ail) + head_off
+    total = 0
+    inode_items = 0
+    truncated = False
+
+    try:
+        ptr = int(readSU("struct list_head", head_addr).next)
+        while ptr != 0 and ptr != head_addr:
+            if total >= limit:
+                truncated = True
+                break
+
+            item = readSU("struct xfs_log_item", ptr - link_off)
+            total = total + 1
+            try:
+                if int(item.li_type) == XFS_LI_INODE:
+                    inode_items = inode_items + 1
+            except Exception:
+                pass
+
+            ptr = int(readSU("struct list_head", ptr).next)
+    except Exception:
+        pass
+
+    return total, inode_items, truncated
+
+
+def show_xfs_icache_details(sb, options, walked_inodes, pinned_by_log,
+                            with_log_item):
+    """The XFS-side holders of this filesystem's inodes."""
+    xfs_mount = get_xfs_mount(sb)
+    if xfs_mount is None:
+        return
+
+    limit = options.max_objects if options.max_objects > 0 else 2000000
+
+    print("")
+    print("== XFS internals ==")
+    print("  %-38s : 0x%x" % ("xfs_mount", xfs_mount))
+
+    reclaimable, ags = get_xfs_reclaimable(xfs_mount)
+    if reclaimable < 0:
+        print("  %-38s : %s" % ("Inodes awaiting XFS reclaim", "unreadable"))
+    else:
+        crashcolor.set_color(crashcolor.LIGHTRED
+                             if reclaimable > max(walked_inodes, 1)
+                             else crashcolor.RESET)
+        print("  %-38s : %12d  (across %d AGs)" %
+              ("Inodes awaiting XFS reclaim", reclaimable, ags))
+        crashcolor.set_color(crashcolor.RESET)
+        print("    the VFS has evicted these; they still own their")
+        print("    xfs_inode until xfs_reclaim_inodes() frees them")
+        if reclaimable > max(walked_inodes, 1):
+            print("    ** more of these than live inodes: the xfs_inode slab")
+            print("       is held by XFS's own reclaim backlog, not by the")
+            print("       VFS cache **")
+
+    backlog = get_xfs_inodegc_backlog(xfs_mount)
+    if backlog is not None:
+        queued, cpus = backlog
+        crashcolor.set_color(crashcolor.LIGHTRED if queued > 0
+                             else crashcolor.RESET)
+        print("  %-38s : %12d  (over %d cpus)" %
+              ("Queued for deferred inactivation", queued, cpus))
+        crashcolor.set_color(crashcolor.RESET)
+        if queued > 0:
+            print("    unlinked inodes waiting for xfs_inodegc_worker(); if")
+            print("    this is large, check whether that worker can run -")
+            print("    a frozen filesystem or a stalled workqueue stops it,")
+            print("    and nothing else frees these inodes")
+
+    ail = get_xfs_ail_stats(xfs_mount, limit)
+    if ail is not None:
+        items, inode_items, truncated = ail
+        print("  %-38s : %12d%s" %
+              ("Log items on the AIL", items,
+               "  (stopped at --max)" if truncated else ""))
+        print("  %-38s : %12d" % ("  of those, inode items", inode_items))
+        if inode_items > 0:
+            print("    these inodes are pinned until the AIL pushes their")
+            print("    metadata out; a stuck log keeps every one of them")
+
+    print("  %-38s : %12d" % ("Walked inodes pinned by the log",
+                              pinned_by_log))
+    print("  %-38s : %12d" % ("Walked inodes with a log item",
+                              with_log_item))
+    print("  (per-inode XFS reclaim flags are deliberately not decoded:")
+    print("   the XFS_I* bit values have moved between releases and")
+    print("   guessing them would silently mislabel inodes)")
+
+
+def _percent(value, total):
+    return (value * 100.0 / total) if total > 0 else 0.0
+
+
+def _print_count_row(label, value, total, width=34):
+    print("  %-*s : %12d  (%5.1f%%)" % (width, label, value,
+                                        _percent(value, total)))
+
+
+def show_icache_summary(options):
+    """
+    System-wide view of the dentry and inode caches.
+
+    Answers 'how big is this, and which filesystem is it on' - the two
+    things needed before drilling into one superblock with
+    'fsinfo --icache <super_block>'.
+    """
+    total_memory = get_total_memory_bytes()
+
+    print("=" * 78)
+    print("VFS object slab caches")
+    print("=" * 78)
+    print("('kmem -s' counts allocated objects slab by slab, so this takes")
+    print(" a while on a cache holding millions of them)")
+    print("")
+    print("%-22s %8s %12s %12s %10s %7s %6s" %
+          ("CACHE", "OBJSIZE", "ALLOCATED", "TOTAL", "MEMORY", "%RAM",
+           "WASTE"))
+    print("-" * 82)
+
+    vfs_bytes = 0
+    for name, _description in VFS_SLAB_CACHES:
+        summary = get_slab_summary(name)
+        if summary is None:
+            continue
+
+        cache_bytes = summary["total"] * summary["objsize"]
+        vfs_bytes = vfs_bytes + cache_bytes
+        # Objects the cache holds pages for but has not handed out. A large
+        # share means the slabs are fragmented - freeing objects will not
+        # return the memory until whole slabs come free.
+        waste = _percent(summary["total"] - summary["allocated"],
+                         summary["total"])
+
+        print("%-22s %8d %12d %12d %10s %6.1f%% %5.1f%%" %
+              (name, summary["objsize"], summary["allocated"],
+               summary["total"], bytes_to_str(cache_bytes),
+               _percent(cache_bytes, total_memory), waste))
+
+    print("-" * 82)
+    print("%-22s %8s %12s %12s %10s %6.1f%%" %
+          ("Total", "", "", "", bytes_to_str(vfs_bytes),
+           _percent(vfs_bytes, total_memory)))
+    if total_memory > 0:
+        print("(RAM: %s)" % bytes_to_str(total_memory))
+    print("(per-memcg slab copies, which exist before 5.9, are not counted")
+    print(" here - 'kmem -s <cache>' only reports the root cache)")
+
+    print("")
+    print("=" * 78)
+    print("Global VFS counters")
+    print("=" * 78)
+    for symbol, fields in (("dentry_stat", ("nr_dentry", "nr_unused",
+                                            "nr_negative")),
+                           ("inodes_stat", ("nr_inodes", "nr_unused"))):
+        try:
+            stat = readSymbol(symbol)
+        except Exception:
+            continue
+
+        for field in fields:
+            try:
+                print("  %-28s : %d" % ("%s.%s" % (symbol, field),
+                                        int(getattr(stat, field))))
+            except Exception:
+                continue
+
+    print("  (these are snapshots taken the last time something read")
+    print("   /proc/sys/fs/dentry-state or /proc/sys/fs/inode-nr; the live")
+    print("   counts are per-cpu, so prefer the ALLOCATED column above)")
+
+    print("")
+    print("=" * 78)
+    print("Unused (reclaimable) objects per superblock")
+    print("=" * 78)
+    rows = show_caches(options)
+
+    if rows and (max(rows[0][1], 0) + max(rows[0][2], 0)) > 0:
+        top_sb = rows[0][0]
+        print("")
+        crashcolor.set_color(crashcolor.LIGHTGREEN)
+        print("Next: fsinfo --icache 0x%x" % top_sb)
+        crashcolor.set_color(crashcolor.RESET)
+        print("  (breaks that superblock down into pinned vs reclaimable,")
+        print("   and shows which directories hold the dentries; the table")
+        print("   above ranks by reclaimable objects only, so a superblock")
+        print("   whose objects are all pinned sorts low here)")
+
+
+def show_icache_sb(options, sb_addr):
+    """
+    Break down the inode and dentry cache of one filesystem.
+
+    The question behind a large dentry/xfs_inode slab is always the same:
+    are these objects pinned - someone holds a reference, and the shrinker
+    is powerless - or merely cached, in which case nothing holds them and
+    the question is why reclaim has not run. Those two answers lead to
+    completely different investigations, so the split comes first.
+    """
+    try:
+        sb = readSU("struct super_block", int(sb_addr, 16))
+        fs_type = get_sb_fs_type(sb)
+    except Exception:
+        print("Error: '%s' is not a readable 'struct super_block' address" %
+              sb_addr)
+        return
+
+    top_n = options.top_count if options.top_count > 0 else 20
+    max_objects = options.max_objects if options.max_objects > 0 else 2000000
+    dev_major, dev_minor = get_dev_no(sb)
+
+    print("=" * 78)
+    print("Inode and dentry cache on %s" % get_sb_mount_label(sb))
+    print("  super_block 0x%x, type %s, dev %d:%d" %
+          (sb, fs_type, dev_major, dev_minor))
+    print("=" * 78)
+
+    holders = get_inode_holders() if options.holders else None
+
+    # -- inodes ------------------------------------------------------------
+    total = pinned = unused = 0
+    freeing = being_born = 0
+    pinned_via_dentry = pinned_no_dentry = 0
+    unlinked = dirty = writeback = 0
+    with_pages = 0
+    cached_pages = 0
+    by_type = {}
+    by_holder = {}
+    pinned_unheld = 0
+    truncated = False
+
+    # XFS carries its own state on top of each VFS inode, and reading it
+    # costs two more member reads per inode - only worth it on XFS
+    xfs_vnode_offset = -1
+    if fs_type == "xfs":
+        xfs_vnode_offset = member_offset("struct xfs_inode", "i_vnode")
+    pinned_by_log = 0
+    with_log_item = 0
+
+    if member_offset("struct super_block", "s_inodes") < 0:
+        print("Error: this kernel does not keep a readable 's_inodes' list")
+        return
+
+    for inode in iter_sb_inodes(sb, max_objects):
+        total = total + 1
+
+        try:
+            i_state = int(inode.i_state)
+            i_count = int(inode.i_count.counter)
+        except Exception:
+            continue
+
+        if (i_state & (I_FREEING | I_WILL_FREE)) != 0:
+            freeing = freeing + 1
+        if (i_state & I_NEW) != 0:
+            being_born = being_born + 1
+        if (i_state & I_DIRTY) != 0:
+            dirty = dirty + 1
+        if (i_state & I_SYNC) != 0:
+            writeback = writeback + 1
+
+        try:
+            nrpages = int(inode.i_mapping.nrpages)
+        except Exception:
+            nrpages = 0
+        if nrpages > 0:
+            with_pages = with_pages + 1
+            cached_pages = cached_pages + nrpages
+
+        try:
+            i_nlink = int(inode.i_nlink)
+        except Exception:
+            i_nlink = -1
+        if i_nlink == 0:
+            unlinked = unlinked + 1
+
+        try:
+            type_name = get_inode_type_name(int(inode.i_mode))
+        except Exception:
+            type_name = "unknown"
+        by_type[type_name] = by_type.get(type_name, 0) + 1
+
+        if xfs_vnode_offset >= 0:
+            log_pinned, has_item = get_xfs_inode_state(inode,
+                                                       xfs_vnode_offset)
+            if log_pinned:
+                pinned_by_log = pinned_by_log + 1
+            if has_item:
+                with_log_item = with_log_item + 1
+
+        if i_count <= 0:
+            unused = unused + 1
+            continue
+
+        pinned = pinned + 1
+        aliases = iter_inode_dentries(inode)
+        held_by_dentry = False
+        for dentry in aliases:
+            if get_dentry_refcount(dentry) > 0:
+                held_by_dentry = True
+                break
+
+        if held_by_dentry:
+            pinned_via_dentry = pinned_via_dentry + 1
+        elif not aliases:
+            # No path leads here at all: something holds the inode itself -
+            # an open-but-unlinked file, a loop backing file, an NFS silly
+            # rename, or the filesystem's own internal reference.
+            pinned_no_dentry = pinned_no_dentry + 1
+
+        if holders is not None:
+            who = holders.get(int(inode))
+            if who:
+                for pid, comm in who:
+                    key = "%s (%d)" % (comm, pid)
+                    by_holder[key] = by_holder.get(key, 0) + 1
+            else:
+                pinned_unheld = pinned_unheld + 1
+
+    # readSUListFromHead() stops silently at 'maxel', so a full count is
+    # the one case where there may be more behind it
+    truncated = total >= max_objects
+
+    print("")
+    print("== Inodes on this superblock ==")
+    print("  %-34s : %12d" % ("Total walked", total))
+    if truncated:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("  (stopped at the --max limit of %d; everything below counts"
+              % max_objects)
+        print("   only what was walked, so read it as a lower bound)")
+        crashcolor.set_color(crashcolor.RESET)
+
+    crashcolor.set_color(crashcolor.LIGHTRED if pinned > unused
+                         else crashcolor.RESET)
+    _print_count_row("Pinned (i_count > 0)", pinned, total)
+    crashcolor.set_color(crashcolor.RESET)
+    _print_count_row("  referenced through a dentry", pinned_via_dentry,
+                     total)
+    _print_count_row("  no dentry at all", pinned_no_dentry, total)
+    _print_count_row("Unused (i_count == 0, on the LRU)", unused, total)
+    print("")
+    _print_count_row("Unlinked (i_nlink == 0)", unlinked, total)
+    _print_count_row("Dirty", dirty, total)
+    _print_count_row("Under writeback", writeback, total)
+    _print_count_row("Being freed", freeing, total)
+    _print_count_row("Being created (I_NEW)", being_born, total)
+    _print_count_row("Holding page cache", with_pages, total)
+    print("  %-34s : %12s" % ("  those pages",
+                              bytes_to_str(cached_pages * page_size)))
+
+    inode_cache = FS_INODE_CACHE.get(fs_type, "inode_cache")
+    summary = get_slab_summary(inode_cache)
+    if summary is not None:
+        print("")
+        print("  %-34s : %s in '%s' (%d bytes each)" %
+              ("Slab memory for these inodes",
+               bytes_to_str(total * summary["objsize"]), inode_cache,
+               summary["objsize"]))
+        print("  %-34s : %d allocated system-wide (%.1f%% are this"
+              " superblock's)" %
+              ("  that cache holds", summary["allocated"],
+               _percent(total, summary["allocated"])))
+
+    if by_type:
+        print("")
+        print("  %-34s %12s" % ("BY TYPE", "INODES"))
+        for name, count in sorted(by_type.items(), key=lambda kv: kv[1],
+                                  reverse=True)[:top_n]:
+            print("  %-34s %12d" % ("  " + name, count))
+
+    if holders is not None:
+        print("")
+        print("== Processes holding these inodes open (fd) ==")
+        if by_holder:
+            print("  %-34s %12s" % ("PROCESS (PID)", "INODES"))
+            for name, count in sorted(by_holder.items(),
+                                      key=lambda kv: kv[1],
+                                      reverse=True)[:top_n]:
+                print("  %-34s %12d" % (name[:34], count))
+        else:
+            crashcolor.set_color(crashcolor.YELLOW)
+            print("  'foreach files' attributed none of them")
+            crashcolor.set_color(crashcolor.RESET)
+
+        if pinned_unheld > 0:
+            print("")
+            print("  %-34s : %12d" % ("Pinned but held by no fd",
+                                      pinned_unheld))
+            print("  (a reference that is not an open file descriptor: a")
+            print("   process cwd or root, a mount point, a mapping, a")
+            print("   'struct file' in flight over a unix socket, or the")
+            print("   filesystem's own internal reference)")
+
+    if xfs_vnode_offset >= 0:
+        show_xfs_icache_details(sb, options, total, pinned_by_log,
+                                with_log_item)
+
+    # -- dentries ----------------------------------------------------------
+    print("")
+    print("== Dentries on this superblock ==")
+    print("  (walking the dcache tree from the root; this is the slow part)")
+
+    dstats, by_parent = walk_sb_dcache(sb, max_objects)
+    dtotal = dstats["total"]
+
+    print("  %-34s : %12d" % ("Total reached from the root", dtotal))
+    if dstats["truncated"]:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("  (stopped at the --max limit of %d; the walk is"
+              " breadth-first," % max_objects)
+        print("   so what follows describes the top of the tree)")
+        crashcolor.set_color(crashcolor.RESET)
+
+    crashcolor.set_color(crashcolor.LIGHTRED
+                         if _percent(dstats["negative"], dtotal) > 50
+                         else crashcolor.RESET)
+    _print_count_row("Negative (no inode)", dstats["negative"], dtotal)
+    crashcolor.set_color(crashcolor.RESET)
+    _print_count_row("In use (refcount > 0)", dstats["in_use"], dtotal)
+    _print_count_row("  of those, negative", dstats["negative_in_use"],
+                     dtotal)
+    _print_count_row("Unused (on the LRU)", dstats["unused"], dtotal)
+    if dstats["unknown_ref"] > 0:
+        _print_count_row("Refcount unreadable", dstats["unknown_ref"], dtotal)
+    _print_count_row("Mount points", dstats["mounted"], dtotal)
+    print("  %-34s : %12d" % ("Directories with children",
+                              len(by_parent)))
+    print("  (every child holds a reference on its parent, so a directory")
+    print("   with children is always 'in use' - the meaningful in-use")
+    print("   count is the negative one above)")
+
+    dentry_summary = get_slab_summary("dentry")
+    if dentry_summary is not None:
+        print("")
+        print("  %-34s : %s (%d bytes each)" %
+              ("Slab memory for these dentries",
+               bytes_to_str(dtotal * dentry_summary["objsize"]),
+               dentry_summary["objsize"]))
+        print("  %-34s : %d allocated system-wide (%.1f%% are this"
+              " superblock's)" %
+              ("  the 'dentry' cache holds", dentry_summary["allocated"],
+               _percent(dtotal, dentry_summary["allocated"])))
+        print("  (dentries not reachable from this root - disconnected ones")
+        print("   from NFS, or other superblocks - are not in the first")
+        print("   figure)")
+
+    if by_parent:
+        print("")
+        print("== Directories holding the most dentries ==")
+        print("  %12s %12s %12s  %s" %
+              ("CHILDREN", "NEGATIVE", "IN USE", "PATH"))
+        print("  " + "-" * 74)
+        cache = {}
+        ranked = sorted(by_parent.items(), key=lambda kv: kv[1][0],
+                        reverse=True)
+        for addr, (children, negative, in_use) in ranked[:top_n]:
+            try:
+                path = get_dentry_path(readSU("struct dentry", addr), cache)
+            except Exception:
+                path = "0x%x" % addr
+            print("  %12d %12d %12d  %s" % (children, negative, in_use, path))
+
+        if len(ranked) > top_n:
+            rest = sum(counters[0] for _addr, counters in ranked[top_n:])
+            print("  %12d %12s %12s  (%d more directories)" %
+                  (rest, "", "", len(ranked) - top_n))
+
+    # -- verdict -----------------------------------------------------------
+    print("")
+    print("=" * 78)
+    print("Reading")
+    print("=" * 78)
+
+    if pinned > unused and total > 0:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("Most inodes here are pinned, not cached. The shrinker cannot")
+        print("free them whatever the memory pressure - something is holding")
+        print("references.")
+        crashcolor.set_color(crashcolor.RESET)
+        if not options.holders:
+            print("Re-run with --holders to attribute them to processes.")
+        if unlinked > total / 10:
+            print("A large share is unlinked (deleted but still open), so")
+            print("deleting files will not help; the holders have to close")
+            print("them.")
+    elif total > 0:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Most inodes here are unused, i.e. reclaimable. Nothing is")
+        print("holding them: the question is why reclaim has not taken them")
+        print("back.")
+        crashcolor.set_color(crashcolor.RESET)
+        try:
+            pressure = int(readSymbol("sysctl_vfs_cache_pressure"))
+            print("  sysctl_vfs_cache_pressure = %d%s" %
+                  (pressure,
+                   "   <- below 100 makes the kernel keep this cache"
+                   if pressure < 100 else ""))
+        except Exception:
+            pass
+        print("  Worth checking next: tasks stuck in shrink_slab() or")
+        print("  super_cache_scan() ('foreach bt'), how many memory cgroups")
+        print("  exist (per-memcg LRUs dilute what one scan can see), and")
+        print("  the WASTE column of 'fsinfo --icache' - fragmented slabs")
+        print("  hold pages even after the objects are freed.")
+
+    if _percent(dstats["negative"], dtotal) > 50:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("")
+        print("Over half the dentries are negative - failed lookups cached")
+        print("as 'this name does not exist'. Look at the directory table")
+        print("above: a workload probing for files that are not there will")
+        print("pile them up under one or two directories.")
+        crashcolor.set_color(crashcolor.RESET)
+
+    print("=" * 78)
 
 
 def show_ext4_inode_cache_details(options, address):
@@ -2942,10 +4209,20 @@ def show_fsnotify_group(options):
 '''
 
 
-DCACHE_ENTRY_TYPE=0x07000000
-DCACHE_MISS_TYPE=0x00000000
-
 def show_negative_dentries(options):
+    """
+    Count the dentries that cache a failed lookup.
+
+    A negative dentry is one with no inode, and that is what gets tested
+    here. The flag-based test this used to do - 'd_flags & 0x07000000 ==
+    DCACHE_MISS_TYPE' - only holds on 3.10: the type field was compacted
+    to 0x00700000 in later kernels, so on RHEL8 and RHEL9 the old mask
+    read unrelated flag bits and the count came out wrong without saying
+    so. 'd_inode == NULL' means the same thing on every version.
+
+    Overlayfs whiteouts have no inode either, so they are counted here;
+    next to a real negative-dentry pile-up they are a rounding error.
+    """
     result_lines = exec_crash_command("kmem -S dentry").splitlines()
     neg_cnt = 0
     total_cnt = 0
@@ -2956,7 +4233,7 @@ def show_negative_dentries(options):
         try:
             dentry = readSU("struct dentry", int(words[0][1:-1], 16))
             total_cnt = total_cnt + 1
-            if (dentry.d_flags & DCACHE_ENTRY_TYPE) == DCACHE_MISS_TYPE:
+            if int(dentry.d_inode) == 0:
                 neg_cnt = neg_cnt + 1
                 if options.show_details:
                     print("%s" % dentry_to_filename(dentry))
@@ -3056,6 +4333,18 @@ def fsinfo():
     op.add_option("-i", "--inode", dest="inode", default="",
                   action="store",
                   help="Show detailed inode information for 'struct inode' address (hex)")
+    op.add_option("-I", "--icache", dest="show_icache", default=0,
+                  action="store_true",
+                  help="Show what is holding the dentry and inode slab "
+                       "caches: cache sizes and per-superblock reclaimable "
+                       "counts. With a 'struct super_block' address (hex), "
+                       "split that filesystem's inodes into pinned and "
+                       "reclaimable and show which directories hold its "
+                       "dentries")
+    op.add_option("--max", dest="max_objects", default=2000000,
+                  action="store", type="int", metavar="N",
+                  help="With '-I <super_block>', stop each walk after N "
+                       "objects (default: 2000000)")
     op.add_option("-n", "--fsnotify", dest="fsnotify_group", default="",
                   action="store",
                   help="Show fsnotify details for fsnotify_group")
@@ -3069,8 +4358,8 @@ def fsinfo():
                        "consuming that filesystem's page cache")
     op.add_option("--top", dest="top_count", default=20,
                   action="store", type="int", metavar="N",
-                  help="With '-r <super_block>', number of rows to list "
-                       "in each table (default: 20)")
+                  help="With '-r <super_block>' or '-I <super_block>', "
+                       "number of rows to list in each table (default: 20)")
     op.add_option("--breakdown", dest="breakdown", default=0,
                   action="store_true",
                   help="With '-r <super_block>', also group the cache by "
@@ -3082,7 +4371,8 @@ def fsinfo():
                        "processes holding it, both by open fd ('foreach "
                        "files', run once) and by mapping (each inode's VMA "
                        "tree) - the only way to find a culprit for unlinked "
-                       "files")
+                       "files. With '-I <super_block>', attribute the pinned "
+                       "inodes to the processes holding them open")
     op.add_option("--depth", dest="path_depth", default=3,
                   action="store", type="int", metavar="N",
                   help="With '--breakdown', group directories at N path "
@@ -3142,6 +4432,12 @@ def fsinfo():
             show_pagecache_sb_stats(o, args[0])
         else:
             show_page_caches(o)
+        sys.exit(0)
+    if (o.show_icache):
+        if len(args) > 0:
+            show_icache_sb(o, args[0])
+        else:
+            show_icache_summary(o)
         sys.exit(0)
     if (o.dumpe2fs != ""):
         show_dumpe2fs(o)
