@@ -71,10 +71,10 @@ def is_pycrashext(name):
 
 
 def run_pycrashext(name, args):
-    """Run a pycrashext command in this process, as its alias would, and
-    return (output, error). crash does not expand aliases for a command
-    started from Python, so 'exec_crash_command("hangcheck -g")' would not
-    reach it."""
+    """Run a pycrashext command in this process, as crash would, and return
+    (output, error): its file runs as __main__ with the arguments in
+    sys.argv and its output captured, instead of starting a nested epython
+    through exec_crash_command."""
     path = find_module(name)
     if not path:
         return "", "pycrashext command '%s' not found" % name

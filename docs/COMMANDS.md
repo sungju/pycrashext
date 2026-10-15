@@ -988,7 +988,7 @@ Collects, in one crash session, the raw output a vmcore analysis rests on, into 
 
 Each output goes into the file under a `**Source:** \`/cores/tasks/<task>\` → \`<command>\`` line, exactly as printed, without colour codes. A long output keeps its first and last lines with a `<<< SKIPPED N lines >>>` line carrying the true count, so excerpts copied from it can be checked by `excerpt-markers --revive` and `/datacheck`. A short summary at the top (branches, fault, log signatures, commands that failed) is labelled as derived.
 
-The file goes to `~/gemini/<case>/vmcore-<task>-evidence.md` when the case is known (the task's `caseno`, as `caseinfo` reads it), else the current directory, else `$HOME`. The last line printed, `EVIDENCE file=... task=... case=... branches=... blocks=... bytes=...`, is for scripts. Pycrashext commands run in-process (crash does not expand their aliases for a command started from Python), and `| grep`, `| head`, `| tail` and `| wc -l` after a command are applied by `evidence` itself.
+The file goes to `~/gemini/<case>/vmcore-<task>-evidence.md` when the case is known (the task's `caseno`, as `caseinfo` reads it), else the current directory, else `$HOME`. The last line printed, `EVIDENCE file=... task=... case=... branches=... blocks=... bytes=...`, is for scripts. Pycrashext commands run in-process (their file as `__main__`, output captured) rather than through a nested epython, and `| grep`, `| head`, `| tail` and `| wc -l` after a command are applied by `evidence` itself.
 
 **Usage:** `evidence [-o FILE] [-x "cmd; cmd"] [-f FILE] [-a] [--stdout] [-q]`
 

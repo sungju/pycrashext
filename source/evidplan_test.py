@@ -180,6 +180,14 @@ def check_block_and_render():
     assert "Not collected:** kmem -i: timed out" in doc
 
 
+def check_registered_in_config():
+    # crash registers only the commands config.json lists (regext.py).
+    import json, os
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    names = [c["command"] for c in json.load(open(path))["commands"]]
+    assert "evidence" in names, "evidence is not in config.json"
+
+
 def main():
     n = 0
     for name, fn in sorted(globals().items()):
