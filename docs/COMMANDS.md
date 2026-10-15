@@ -50,6 +50,7 @@ All commands are invoked inside the crash utility as `epython <command>.py [opti
 - [Automated Diagnostics](#automated-diagnostics)
   - [autocheck](#autocheck)
   - [insights](#insights)
+  - [evidence](#evidence)
 - [AI-Assisted Analysis](#ai-assisted-analysis)
   - [ai](#ai)
 - [Reverse Engineering](#reverse-engineering)
@@ -980,6 +981,37 @@ Run Red Hat Insights checks against the crash dump data.
 insights               # Run insights checks
 insights -t            # Run with test data
 ```
+
+### evidence
+
+Collects, in one crash session, the raw output a vmcore analysis rests on, into one Markdown file an AI (or an engineer) writes the report from, instead of an AI driving crash one command at a time. It runs a base set (`sys`, `caseinfo`, `sysinfo`, `bt`, `logscan`, the last 150 log lines, `mod -t`, `kmem -i`, `ps -S`, `autocheck`), picks the analysis branch from `sys` and the log signatures (`logsig.py`): panic/oops, OOM, hang/lockup/stall, sysrq, death of init. It then runs that branch's commands, with follow-ups from what it already saw (`edis -r <RIP>`, `sym`, `modinfo --details <module>`, `kmem <address>`, `hangcheck -g`, `lockup`, `rcuinfo`, `vminfo --overcommit -d` on a hung VM, ...).
+
+Each output goes into the file under a `**Source:** \`/cores/tasks/<task>\` → \`<command>\`` line, exactly as printed, without colour codes. A long output keeps its first and last lines with a `<<< SKIPPED N lines >>>` line carrying the true count, so excerpts copied from it can be checked by `excerpt-markers --revive` and `/datacheck`. A short summary at the top (branches, fault, log signatures, commands that failed) is labelled as derived.
+
+The file goes to `~/gemini/<case>/vmcore-<task>-evidence.md` when the case is known (the task's `caseno`, as `caseinfo` reads it), else the current directory, else `$HOME`. The last line printed, `EVIDENCE file=... task=... case=... branches=... blocks=... bytes=...`, is for scripts. Pycrashext commands run in-process (crash does not expand their aliases for a command started from Python), and `| grep`, `| head`, `| tail` and `| wc -l` after a command are applied by `evidence` itself.
+
+**Usage:** `evidence [-o FILE] [-x "cmd; cmd"] [-f FILE] [-a] [--stdout] [-q]`
+
+| Option | Long Form | Description |
+|--------|-----------|-------------|
+| `-o` | `--output` | Write the evidence file here |
+| `-x` | `--extra` | More commands to run, separated by `;` |
+| `-f` | `--file` | More commands, one per line |
+| `-a` | `--append` | Only run the `-x`/`-f` commands, appended to the existing file |
+| `-t` | `--task` | Task ID, when the DUMPFILE path does not hold it |
+| `--stdout` | | Print the evidence instead of writing a file |
+| `-q` | `--quiet` | Do not print each command as it runs |
+
+#### Examples
+
+```
+evidence                                   # Collect into ~/gemini/<case>/vmcore-<task>-evidence.md
+evidence -a -x "bt 1234; kmem ffff9c0012345678"   # Follow-ups, appended to the file
+evidence -a -x "log | grep -i nfs; kvercmp kernel-4.18.0-553.22.1.el8_10"
+echo -e "evidence -q\nquit" | allspark revive <task>   # From a script: one session, no prompt
+```
+
+The plan and the layout are in `evidplan.py`; `python3 evidplan_test.py` and `python3 evidence_test.py` (a stand-in pykdump) check them without crash. The agent-skills `/vmreport` skill writes the vmcore report from this file.
 
 ---
 
