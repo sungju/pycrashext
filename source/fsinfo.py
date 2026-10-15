@@ -6,7 +6,6 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 
 from pykdump.API import *
 from LinuxDump import Tasks
-from LinuxDump import percpu
 import sys
 import heapq
 import operator
@@ -2061,6 +2060,15 @@ def get_xfs_inodegc_backlog(xfs_mount):
     inode count.
     """
     if member_offset("struct xfs_mount", "m_inodegc") < 0:
+        return None
+
+    # Imported here, not at the top of the module: LinuxDump.percpu reads
+    # symbols as it is imported and raises if it cannot find the runqueue
+    # ones, which would take the whole of fsinfo down over a line that
+    # only XFS mounts on 5.14 and later ever reach.
+    try:
+        from LinuxDump import percpu
+    except Exception:
         return None
 
     try:
