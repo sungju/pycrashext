@@ -441,14 +441,17 @@ def get_directmap_details():
     except: # This feature is only available on x86 arch
         return 0, 0, 0, 0
 
-    idx = 0
-    dmval = [0, 0, 0, 0, 0]
-    shift_val = [2, 11, 12, 20, 0]
-    for dp in direct_pages_count:
-        dmval[idx] = dp << shift_val[idx]
-        idx = idx + 1
+    # As arch_report_meminfo() does: index by enum pg_level (PG_LEVEL_NONE,
+    # 4K, 2M, 1G, then 512G and 256T on newer kernels such as RHEL 9), in kB.
+    # DirectMap4M is the 32-bit non-PAE name for the PG_LEVEL_2M count.
+    counts = [int(dp) for dp in direct_pages_count]
+    def count(level):
+        return counts[level] if level < len(counts) else 0
 
-    return dmval[0], dmval[1], dmval[2], dmval[3]
+    dm4k = count(1) << 2
+    dm2m = count(2) << 11
+    dm1g = count(3) << 20
+    return dm4k, dm2m, 0, dm1g
 
 
 def hugetlb_total_pages():
@@ -784,7 +787,7 @@ def get_meminfo():
         meminfo["DirectMap2M"] = dm2m
     if dm4m > 0:
         meminfo["DirectMap4M"] = dm4m
-    if dm4k > 0:
+    if dm1g > 0:
         meminfo["DirectMap1G"] = dm1g
     result_str = "" + get_entry_in_dict(meminfo, "MemTotal", " kB\n") +\
                 get_entry_in_dict(meminfo, "MemFree", " kB\n") +\
