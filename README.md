@@ -284,6 +284,25 @@ $ export CRASHEXT_SERVER=http://<address>:5000
 | `AI_REQUEST_TIMEOUT` | AI request timeout in seconds (default: 30) |
 | `CODE_THEME` | Color theme for AI markdown output |
 | `PYTHON_LIB` | Additional Python library paths for `sys.path` |
+| `PYCRASHEXT_COMMAND_PATH` | Directories with extra crash commands kept outside this repository (see below) |
+
+## External Commands
+
+Commands you keep outside this repository - for example ones that call a private remoteapi plugin loaded through `PYCRASHEXT_PLUGIN_PATH` (see [remoteapi/README.md](remoteapi/README.md)) - are registered with `PYCRASHEXT_COMMAND_PATH`, a colon-separated list of directories. Each directory holds its own `config.json`, in the same format as `source/config.json`, next to the `<command>.py` files it lists.
+
+crash finds a command's file along `PYKDUMPPATH`, which PyKdump reads once at load time, so each directory must be on `PYKDUMPPATH` as well:
+
+```
+$ export PYCRASHEXT_COMMAND_PATH="$HOME/my-crashext/commands"
+$ export PYKDUMPPATH="$PYKDUMPPATH:$HOME/my-crashext/commands"
+$ crash ...
+```
+
+- A directory that is missing, not on `PYKDUMPPATH`, or has an unreadable `config.json` is skipped with a warning when crash starts.
+- An external command never replaces a built-in one or one from an earlier directory, and an entry without its `.py` file is skipped.
+- External commands can import pycrashext modules such as `crashcolor` and `netutil` (`netutil.urlopen_post()` handles the POST to a `CRASHEXT_SERVER` URL).
+
+Run `python3 source/extcmds_test.py` to check the registration rules.
 
 ## License
 

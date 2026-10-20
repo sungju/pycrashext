@@ -68,6 +68,35 @@ $ export INSIGHTS_RULES="/home/sungju/support-rules:/home/sungju/new-rules"
 | PYCRASHEXT_DEBUG | (unset) | Set to `1`/`true`/`yes` to enable Flask reloader/debug behavior |
 | PYCRASHEXT_NO_WEB | (unset) | Set to `1`/`true`/`yes` to stop `git find` from consulting the public kernel sources |
 | GITHUB_TOKEN | (unset) | Optional GitHub token used by `git find`; raises the API rate limit from 60 to 5000 requests/hour |
+| PYCRASHEXT_PLUGIN_PATH | (unset) | Colon-separated list of directories holding external plugins (see below) |
+
+## External plugins ##
+
+Endpoints that only make sense on your own systems - anything that needs internal services or credentials - can live in a directory outside this repository and be loaded with `PYCRASHEXT_PLUGIN_PATH`. Nothing about them is shipped here.
+
+```
+$ export PYCRASHEXT_PLUGIN_PATH="$HOME/my-crashext/plugins"
+$ ./run_standalone.sh
+```
+
+- Every `*.py` in each listed directory is loaded after the built-in plugins and must define `add_plugin_rule(app)`, exactly like the files in `web/plugins/`.
+- Files starting with `_` are not loaded as plugins; the directory is put on `sys.path`, so plugins can `import` them as helpers.
+- A plugin that fails to load, or whose endpoint name is already registered, is reported on stderr and skipped; the others still load. Built-in endpoints cannot be replaced.
+- `/reload` reloads external plugins too.
+- The docker service does not mount these directories; run the server standalone, or add the directory as a volume and set the variable in a compose override file.
+
+```python
+# ~/my-crashext/plugins/hello.py
+from flask import request
+
+def hello():
+    return "hello " + request.form.get("name", "?")
+
+def add_plugin_rule(app):
+    app.add_url_rule('/api/hello', 'hello', hello, methods=['POST'])
+```
+
+A matching crash command can be added without editing this repository too - see `PYCRASHEXT_COMMAND_PATH` in the top-level README. Run `python3 web/load_plugins_test.py` to check the loader.
 
 ## Launching the server ##
 

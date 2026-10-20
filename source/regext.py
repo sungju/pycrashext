@@ -15,6 +15,7 @@ import re
 import traceback
 
 import crashcolor
+import extcmds
 
 try:
     if "PYTHON_LIB" in os.environ:
@@ -91,6 +92,17 @@ def load_json_config():
                 print("Duplicate command '%s' in config; overriding previous entry" % cmd_name)
                 crashcolor.set_color(crashcolor.RESET)
             registered[cmd_name] = normalized
+
+        ext_entries, ext_warnings = extcmds.external_commands(os.environ,
+                                                              registered.keys())
+        crashcolor.set_color(crashcolor.YELLOW)
+        for warning in ext_warnings:
+            print(warning)
+        crashcolor.set_color(crashcolor.RESET)
+        for cmd in ext_entries:
+            normalized = validate_command_entry(cmd)
+            if normalized is not None:
+                registered[normalized['command']] = normalized
 
         for cmd_name, cmd_info in registered.items():
             rprog(cmd_info['command'], cmd_info['desc'],
