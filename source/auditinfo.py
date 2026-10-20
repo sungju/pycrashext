@@ -528,6 +528,30 @@ audit_compare_dict = {
 }
 
 
+# Colors used for audit rules and times. Empty when not on a terminal.
+RULE_ACTION_COLORS = {
+    AUDIT_ALWAYS : crashcolor.GREEN,
+    AUDIT_NEVER : crashcolor.LIGHTRED,
+}
+RULE_LIST_COLOR = crashcolor.LIGHTBLUE
+RULE_ARCH_COLOR = crashcolor.MAGENTA
+RULE_SYSCALL_COLOR = crashcolor.YELLOW
+RULE_VALUE_COLOR = crashcolor.CYAN
+RULE_PATH_COLOR = crashcolor.LIGHTCYAN
+RULE_PERM_COLOR = crashcolor.YELLOW
+RULE_KEY_COLOR = crashcolor.LIGHTGREEN
+TIME_COLOR = crashcolor.LIGHTCYAN
+AGE_COLOR = crashcolor.YELLOW
+
+
+def colored(text, color):
+    color_str = crashcolor.get_color(color)
+    if color_str == "":
+        return text
+
+    return color_str + text + crashcolor.get_color(crashcolor.RESET)
+
+
 def to_s32(val):
     val = int(val) & 0xffffffff
     if val & 0x80000000:
@@ -609,15 +633,15 @@ def get_audit_field_str(rule, field):
         # 'auid=-1' is stored as 'loginuid_set=0' with a legacy flag
         try:
             if rule.pflags & AUDIT_LOGINUID_LEGACY:
-                return "-F auid%sunset" % op_str
+                return "-F auid%s%s" % (op_str, colored("unset", RULE_VALUE_COLOR))
         except:
             pass
 
     if ftype == AUDIT_FIELD_COMPARE:
         if fval in audit_compare_dict:
             left, right = audit_compare_dict[fval]
-            return "-C %s%s%s" % (left, op_str, right)
-        return "-F %s%s%d" % (name, op_str, fval)
+            return "-C %s" % colored(left + op_str + right, RULE_VALUE_COLOR)
+        return "-F %s%s%s" % (name, op_str, colored("%d" % fval, RULE_VALUE_COLOR))
 
     if ftype == AUDIT_ARCH:
         val_str = get_audit_arch_str(fval)
@@ -651,7 +675,16 @@ def get_audit_field_str(rule, field):
     else:
         val_str = "%d" % fval
 
-    return "-F %s%s%s" % (name, op_str, val_str)
+    if ftype == AUDIT_ARCH:
+        val_color = RULE_ARCH_COLOR
+    elif ftype in (AUDIT_WATCH, AUDIT_DIR, AUDIT_EXE):
+        val_color = RULE_PATH_COLOR
+    elif ftype == AUDIT_PERM:
+        val_color = RULE_PERM_COLOR
+    else:
+        val_color = RULE_VALUE_COLOR
+
+    return "-F %s%s%s" % (name, op_str, colored(val_str, val_color))
 
 
 # Prefixes of syscall handler symbols in sys_call_table, longest first
@@ -730,7 +763,7 @@ def get_mask_str(rule, arch_val, show_numbers=False):
     if not takes_syscalls(rule):
         return ""
     if is_all_syscalls(rule):
-        return "-S all"
+        return "-S %s" % colored("all", RULE_SYSCALL_COLOR)
 
     table_addr = get_syscall_table_addr(arch_val)
     syscalls = []
@@ -751,7 +784,7 @@ def get_mask_str(rule, arch_val, show_numbers=False):
     if len(syscalls) == 0:
         return ""
 
-    return "-S " + ",".join(syscalls)
+    return "-S " + colored(",".join(syscalls), RULE_SYSCALL_COLOR)
 
 
 def is_watch_rule(rule, fields):
@@ -777,19 +810,21 @@ def get_audit_rule_str(rule, options):
     if is_watch_rule(rule, fields):
         for field in fields:
             if field.type == AUDIT_WATCH:
-                result.append("-w %s" % get_audit_watch_path(rule))
+                result.append("-w %s" % colored(get_audit_watch_path(rule), RULE_PATH_COLOR))
             elif field.type == AUDIT_DIR:
-                result.append("-w %s" % get_audit_dir_str(rule))
+                result.append("-w %s" % colored(get_audit_dir_str(rule), RULE_PATH_COLOR))
         for field in fields:
             if field.type == AUDIT_PERM:
-                result.append("-p %s" % get_audit_perm_str(field.val))
+                result.append("-p %s" % colored(get_audit_perm_str(field.val), RULE_PERM_COLOR))
         for key in keys:
-            result.append("-k %s" % key)
+            result.append("-k %s" % colored(key, RULE_KEY_COLOR))
 
         return " ".join(result)
 
-    result.append("-a %s,%s" % (get_audit_action_str(rule.action),
-                                get_audit_list_str(rule.listnr)))
+    action_color = RULE_ACTION_COLORS.get(rule.action, crashcolor.YELLOW)
+    result.append("-a %s,%s" % (
+        colored(get_audit_action_str(rule.action), action_color),
+        colored(get_audit_list_str(rule.listnr), RULE_LIST_COLOR)))
     # auditctl prints arch first as it decides the syscall names
     arch_val = None
     for field in fields:
@@ -806,7 +841,7 @@ def get_audit_rule_str(rule, options):
             continue
         if field.type == AUDIT_FILTERKEY:
             for key in keys:
-                result.append("-F key=%s" % key)
+                result.append("-F key=%s" % colored(key, RULE_KEY_COLOR))
             continue
         result.append(get_audit_field_str(rule, field))
 
@@ -919,7 +954,8 @@ def get_hz():
 
 def jiffies_to_str(jiffies_val):
     hz = get_hz()
-    return "%g sec, HZ=%d" % (int(jiffies_val) / float(hz), hz)
+    return "%s, HZ=%d" % (colored("%g sec" % (int(jiffies_val) / float(hz)),
+                                  TIME_COLOR), hz)
 
 
 def get_crash_wall_sec():
@@ -959,9 +995,10 @@ def get_record_time_str(record, crash_sec):
         return ""
 
     stamp = int(match.group(1)) + int(match.group(2)) / 1000.0
-    result = "[%s" % (wall_sec_to_str(int(stamp)))
+    result = "[%s" % (colored(wall_sec_to_str(int(stamp)), TIME_COLOR))
     if crash_sec:
-        result = result + ", %.3f sec before crash" % (crash_sec - stamp)
+        result = result + ", %s before crash" % \
+            (colored("%.3f sec" % (crash_sec - stamp), AGE_COLOR))
 
     return result + "] "
 
@@ -1005,7 +1042,7 @@ def show_audit_status(options):
         print("----< details >----")
         print("struct sk_buff_head 0x%x" % (audit_queue))
         if crash_sec:
-            print("crash time %s" % (wall_sec_to_str(crash_sec)))
+            print("crash time %s" % (colored(wall_sec_to_str(crash_sec), TIME_COLOR)))
         print("-" * 40)
         NLMSG_HDRLEN = struct_size("struct nlmsghdr")
         for sk_buff in readSUListFromHead(audit_queue,
