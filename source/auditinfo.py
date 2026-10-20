@@ -7,6 +7,8 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 
 import errno
+import re
+import time
 
 import crashcolor
 
@@ -906,6 +908,64 @@ def show_audit_backlog(options):
     print(result)
 
 
+def get_hz():
+    try:
+        hz = sys_info.HZ
+    except:
+        hz = 0
+
+    return hz if hz else 1000
+
+
+def jiffies_to_str(jiffies_val):
+    hz = get_hz()
+    return "%g sec, HZ=%d" % (int(jiffies_val) / float(hz), hz)
+
+
+def get_crash_wall_sec():
+    """Wall clock seconds at crash time, or 0 if it can't be read"""
+    try:
+        timekeeper = readSymbol("tk_core").timekeeper
+    except:
+        try:
+            timekeeper = readSymbol("timekeeper")
+        except:
+            timekeeper = None
+
+    try:
+        if timekeeper is not None:
+            if member_offset("struct timekeeper", "xtime_sec") > -1:
+                return int(timekeeper.xtime_sec)
+            if member_offset("struct timekeeper", "xtime") > -1:
+                return int(timekeeper.xtime.tv_sec)
+        return int(readSymbol("xtime").tv_sec)
+    except:
+        return 0
+
+
+def wall_sec_to_str(wall_sec):
+    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(wall_sec))
+
+
+# 'audit(<sec>.<msec>:<serial>)' at the start of every audit record
+audit_stamp_re = re.compile(r"audit\((\d+)\.(\d+):\d+\)")
+
+
+def get_record_time_str(record, crash_sec):
+    if not isinstance(record, str):
+        return ""
+    match = audit_stamp_re.search(record)
+    if match is None:
+        return ""
+
+    stamp = int(match.group(1)) + int(match.group(2)) / 1000.0
+    result = "[%s" % (wall_sec_to_str(int(stamp)))
+    if crash_sec:
+        result = result + ", %.3f sec before crash" % (crash_sec - stamp)
+
+    return result + "] "
+
+
 def show_audit_status(options):
     audit_enabled = readSymbol("audit_enabled")
     audit_failure = readSymbol("audit_failure")
@@ -937,11 +997,15 @@ def show_audit_status(options):
     print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
     print("%-17s %d" % ("lost", audit_lost))
     print("%-17s %d" % ("backlog", audit_queue.qlen))
-    print("%-17s %d" % ("backlog_wait_time", audit_backlog_wait_time))
+    print("%-17s %d (%s)" % ("backlog_wait_time", audit_backlog_wait_time,
+                             jiffies_to_str(audit_backlog_wait_time)))
 
     if (options.show_details):
+        crash_sec = get_crash_wall_sec()
         print("----< details >----")
         print("struct sk_buff_head 0x%x" % (audit_queue))
+        if crash_sec:
+            print("crash time %s" % (wall_sec_to_str(crash_sec)))
         print("-" * 40)
         NLMSG_HDRLEN = struct_size("struct nlmsghdr")
         for sk_buff in readSUListFromHead(audit_queue,
@@ -954,7 +1018,7 @@ def show_audit_status(options):
                     s = s.decode("UTF-8", "ignore")
                 except:
                     pass
-            print("%s" % (s))
+            print("%s%s" % (get_record_time_str(s, crash_sec), s))
 
 
 
