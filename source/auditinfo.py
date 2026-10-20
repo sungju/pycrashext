@@ -977,16 +977,34 @@ def get_crash_wall_sec():
     try:
         if timekeeper is not None:
             if member_offset("struct timekeeper", "xtime_sec") > -1:
-                return int(timekeeper.xtime_sec)
+                return int(timekeeper.xtime_sec) + \
+                       get_timekeeper_nsec(timekeeper) / 1e9
             if member_offset("struct timekeeper", "xtime") > -1:
-                return int(timekeeper.xtime.tv_sec)
-        return int(readSymbol("xtime").tv_sec)
+                return int(timekeeper.xtime.tv_sec) + \
+                       int(timekeeper.xtime.tv_nsec) / 1e9
+        xtime = readSymbol("xtime")
+        return int(xtime.tv_sec) + int(xtime.tv_nsec) / 1e9
+    except:
+        return 0
+
+
+def get_timekeeper_nsec(timekeeper):
+    """Nanoseconds within the second; xtime_nsec is kept shifted"""
+    try:
+        if member_offset("struct timekeeper", "tkr_mono") > -1:
+            tkr = timekeeper.tkr_mono
+            return int(tkr.xtime_nsec) >> int(tkr.shift)
+        if member_offset("struct timekeeper", "tkr") > -1:
+            return int(timekeeper.tkr.xtime_nsec) >> int(timekeeper.tkr.shift)
+        return int(timekeeper.xtime_nsec) >> int(timekeeper.shift)
     except:
         return 0
 
 
 def wall_sec_to_str(wall_sec):
-    return time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(wall_sec))
+    msec = int((wall_sec - int(wall_sec)) * 1000)
+    return "%s.%03d UTC" % (time.strftime("%Y-%m-%d %H:%M:%S",
+                                          time.gmtime(int(wall_sec))), msec)
 
 
 # 'audit(<sec>.<msec>:<serial>)' at the start of every audit record
@@ -1001,7 +1019,7 @@ def get_record_time_str(record, crash_sec):
         return ""
 
     stamp = int(match.group(1)) + int(match.group(2)) / 1000.0
-    result = "[%s" % (colored(wall_sec_to_str(int(stamp)), TIME_COLOR))
+    result = "[%s" % (colored(wall_sec_to_str(stamp), TIME_COLOR))
     if crash_sec:
         result = result + ", %s before crash" % \
             (colored("%.3f sec" % (crash_sec - stamp), AGE_COLOR))
@@ -1188,9 +1206,13 @@ class AuditEvent:
         self.types = []
         self.syscall = None         # parsed SYSCALL record
         self.paths = []             # parsed PATH records
+        self.trigger_text = None    # first record not part of a syscall
 
     def add_record(self, msgtype, text):
         self.types.append(msgtype)
+        if self.trigger_text is None and \
+           msgtype not in audit_syscall_aux_types:
+            self.trigger_text = text
         if msgtype == AUDIT_SYSCALL_TYPE:
             self.syscall = parse_audit_record(text)
         elif msgtype == AUDIT_PATH_TYPE:
@@ -1330,6 +1352,56 @@ def match_rule(rule, fields, event):
     return result
 
 
+audit_avc_re = re.compile(r"avc:\s+(denied|granted)\s+\{\s*([^}]*?)\s*\}")
+
+
+def get_avc_str(text):
+    match = audit_avc_re.search(text)
+    if match is None:
+        return ""
+    record = parse_audit_record(text)
+    result = "%s { %s }" % (match.group(1), match.group(2))
+    if "tclass" in record:
+        result = result + " tclass=%s" % (record["tclass"])
+    tcontext = record.get("tcontext", "").split(":")
+    if len(tcontext) >= 3:
+        result = result + " tcontext=%s" % (tcontext[2])
+
+    return result
+
+
+def get_event_source_str(event):
+    """Who logged an event that no rule generated, without per-event ids"""
+    result = []
+    trigger = event.trigger_type()
+    if trigger is not None and event.trigger_text is not None:
+        avc_str = get_avc_str(event.trigger_text)
+        if avc_str != "":
+            result.append(avc_str)
+
+    record = event.syscall
+    if record is None and event.trigger_text is not None:
+        record = parse_audit_record(event.trigger_text)
+    if record is None:
+        return ""
+
+    for name in ["comm", "exe"]:
+        if name in record:
+            result.append("%s=%s" % (name, record[name]))
+    nr = get_record_int(record, "syscall")
+    if nr is not None:
+        name = None
+        table_addr = get_syscall_table_addr(get_record_int(record, "arch", 16))
+        if table_addr:
+            name = get_syscall_name(table_addr, nr)
+        result.append("syscall=%s" % (name if name else "%d" % nr))
+
+    if len(result) == 0:
+        return ""
+
+    return " (%s)" % (" ".join(result))
+
+
 class AuditRuleInfo:
     def __init__(self, audit_entry, options):
         self.rule = audit_entry.rule
@@ -1344,8 +1416,12 @@ def find_event_rule(event, rules):
     trigger = event.trigger_type()
     if event.syscall is None:
         if trigger is None:
-            return ("-", "no SYSCALL record")
-        return ("-", "no rule: %s record" % get_msgtype_str(trigger))
+            # The front of the queue can hold the tail of an event
+            # whose first records were already read by auditd
+            return ("-", "partial event: only %s records" %
+                    ",".join(get_msgtype_str(t) for t in event.types))
+        return ("-", "no rule: %s record%s" % (get_msgtype_str(trigger),
+                                                get_event_source_str(event)))
 
     exit_rules = [r for r in rules
                   if r.rule.listnr in (AUDIT_FILTER_EXIT, AUDIT_FILTER_ENTRY)]
@@ -1372,9 +1448,10 @@ def find_event_rule(event, rules):
         return ("fields" if result else "possible", rule_info.rule_str)
 
     if trigger is not None:
-        return ("-", "no rule: forced by %s record" % get_msgtype_str(trigger))
+        return ("-", "no rule: forced by %s record%s" %
+                (get_msgtype_str(trigger), get_event_source_str(event)))
 
-    return ("-", "no matching rule found")
+    return ("-", "no matching rule found%s" % (get_event_source_str(event)))
 
 
 def get_event_summary(event):
@@ -1423,7 +1500,8 @@ def show_audit_rule_match(options):
     print("\nMATCH: key = by the key in the SYSCALL record, " \
           "fields = the record matches every field,\n" \
           "       possible = first rule that isn't ruled out " \
-          "(perm/dir/... can't be checked from records)")
+          "(perm/dir/... can't be checked from records)\n" \
+          "       - = not generated by an audit rule")
 
 
 def auditinfo():
