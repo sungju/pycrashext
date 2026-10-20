@@ -92,6 +92,22 @@ def check_helpers_are_importable_not_loaded(root):
     assert app.routes['kcs'][1]() == 'via helper'
 
 
+def check_reload_picks_up_changed_helpers(root):
+    d = make_dir(root, 'site')
+    helper = os.path.join(d, '_extcmd_helper_reload.py')
+    write(helper, 'ANSWER = "old"\n')
+    write(os.path.join(d, 'kcs.py'),
+          'import _extcmd_helper_reload\n'
+          'def view():\n    return _extcmd_helper_reload.ANSWER\n'
+          'def add_plugin_rule(app):\n'
+          '    app.add_url_rule("/api/kcs", "kcs", view)\n')
+    load_external_plugins(FakeApp(), d)
+    write(helper, 'ANSWER = "newer"\n')
+    app = FakeApp()
+    load_external_plugins(app, d)
+    assert app.routes['kcs'][1]() == 'newer'
+
+
 def check_broken_plugin_does_not_stop_the_rest(root):
     d = make_dir(root, 'site')
     write(os.path.join(d, 'a_broken.py'), 'raise RuntimeError("boom")\n')

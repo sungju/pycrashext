@@ -70,6 +70,15 @@ def external_module_name(plugin_dir, filename):
     return 'pycrashext_ext_%s_%s' % (tag, os.path.splitext(filename)[0])
 
 
+def forget_modules_in(plugin_dir):
+    """Drop cached modules loaded from 'plugin_dir', so /reload imports helpers afresh."""
+    prefix = plugin_dir + os.sep
+    for name, module in list(sys.modules.items()):
+        path = getattr(module, '__file__', None)
+        if path and os.path.realpath(path).startswith(prefix):
+            del sys.modules[name]
+
+
 def load_external_plugins(app, path_value):
     """Load every *.py in each PYCRASHEXT_PLUGIN_PATH directory and add its rules.
 
@@ -82,6 +91,7 @@ def load_external_plugins(app, path_value):
     for plugin_dir in split_plugin_path(path_value):
         if plugin_dir not in sys.path:
             sys.path.insert(0, plugin_dir)
+        forget_modules_in(plugin_dir)
         for filename in sorted(os.listdir(plugin_dir)):
             if not filename.endswith('.py') or filename.startswith('_'):
                 continue

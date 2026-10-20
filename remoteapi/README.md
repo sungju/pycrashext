@@ -82,7 +82,7 @@ $ ./run_standalone.sh
 - Every `*.py` in each listed directory is loaded after the built-in plugins and must define `add_plugin_rule(app)`, exactly like the files in `web/plugins/`.
 - Files starting with `_` are not loaded as plugins; the directory is put on `sys.path`, so plugins can `import` them as helpers.
 - A plugin that fails to load, or whose endpoint name is already registered, is reported on stderr and skipped; the others still load. Built-in endpoints cannot be replaced.
-- `/reload` reloads external plugins too.
+- `/reload` reloads external plugins too, along with the helpers they import from their directory.
 - The docker service does not mount these directories; run the server standalone, or add the directory as a volume and set the variable in a compose override file.
 
 ```python
