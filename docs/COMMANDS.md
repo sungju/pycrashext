@@ -802,7 +802,7 @@ Linux audit subsystem information including status, rules, and backlog.
 |--------|-----------|-------------|
 | `-b` | `--backlog` | Show backlog process list |
 | `-d` | `--details` | Show details if possible |
-| `-r` | `--rules` | Show audit rules |
+| `-r` | `--rules` | Show audit rules in `auditctl -l` format (`-d` adds entry addresses and syscall numbers) |
 | `-s` | `--status` | Show audit status |
 
 #### Examples
@@ -812,6 +812,7 @@ auditinfo -s           # Show audit status
 auditinfo -r           # Show audit rules
 auditinfo -b           # Show audit backlog processes
 auditinfo -s -d        # Show detailed audit status
+auditinfo -r -d        # Show rules with audit_entry addresses and syscall numbers
 ```
 
 ---

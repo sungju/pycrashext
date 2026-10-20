@@ -6,6 +6,8 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 
 from pykdump.API import *
 
+import errno
+
 import crashcolor
 
 """
@@ -42,6 +44,7 @@ AUDIT_OBJ_LEV_LOW = 22
 AUDIT_OBJ_LEV_HIGH = 23
 AUDIT_LOGINUID_SET = 24
 AUDIT_SESSIONID = 25
+AUDIT_FSTYPE = 26
 
 
 """
@@ -61,6 +64,7 @@ AUDIT_OBJ_UID = 109
 AUDIT_OBJ_GID = 110
 AUDIT_FIELD_COMPARE = 111
 AUDIT_EXE = 112
+AUDIT_SADDR_FAM = 113
 
 AUDIT_ARG0 = 200
 AUDIT_ARG1 = (AUDIT_ARG0+1)
@@ -148,15 +152,15 @@ Audit_ge = 7
 Audit_bad = 8
 
 audit_ops = {
-    Audit_equal : "equal",
-    Audit_not_equal : "not_equal",
-    Audit_bitmask : "bitmask",
-    Audit_bittest : "bittest",
+    Audit_equal : "=",
+    Audit_not_equal : "!=",
+    Audit_bitmask : "&",
+    Audit_bittest : "&=",
     Audit_lt : "<",
     Audit_gt : ">",
     Audit_le : "<=",
     Audit_ge : ">=",
-    Audit_bad : "bad",
+    Audit_bad : "?",
 }
 
 
@@ -285,38 +289,37 @@ def get_audit_arch_str(arch_type):
     return "%d" % arch_type
 
 
-# Rule flags
+# Filter lists (audit_krule.listnr). These are list numbers, not bits.
 AUDIT_FILTER_PREPEND = 0x10
 AUDIT_FILTER_USER   = 0x00    # Apply rule to user-generated messages
 AUDIT_FILTER_TASK   = 0x01    # Apply rule at task creation (not syscall)
 AUDIT_FILTER_ENTRY  = 0x02    # Apply rule at syscall entry
 AUDIT_FILTER_WATCH  = 0x03    # Apply rule to file system watches
 AUDIT_FILTER_EXIT   = 0x04    # Apply rule at syscall exit
-AUDIT_FILTER_TYPE   = 0x05    # Apply rule at audit_log_start
+AUDIT_FILTER_EXCLUDE = 0x05   # Apply rule before record creation
+AUDIT_FILTER_TYPE   = AUDIT_FILTER_EXCLUDE
+AUDIT_FILTER_FS     = 0x06    # Apply rule at __audit_inode_child
+AUDIT_FILTER_URING_EXIT = 0x07  # Apply rule at io_uring op exit
 
 
-audit_flag_dict =  {
-    AUDIT_FILTER_USER : "",  # Don't need to use user in output, "user",
+# Names auditctl uses in '-a action,list'
+audit_list_dict = {
+    AUDIT_FILTER_USER : "user",
     AUDIT_FILTER_TASK : "task",
-    AUDIT_FILTER_ENTRY : "syscall",
+    AUDIT_FILTER_ENTRY : "entry",
     AUDIT_FILTER_WATCH : "watch",
-    AUDIT_FILTER_EXIT :  "exit",
-    AUDIT_FILTER_TYPE : "start",
+    AUDIT_FILTER_EXIT : "exit",
+    AUDIT_FILTER_EXCLUDE : "exclude",
+    AUDIT_FILTER_FS : "filesystem",
+    AUDIT_FILTER_URING_EXIT : "io_uring",
 }
 
 
-def get_audit_flag_str(flags):
-    result = ""
-    for key in audit_flag_dict:
-        if (key & flags) == key:
-            if result != "":
-                result = result + ","
-            result = result + audit_flag_dict[key]
+def get_audit_list_str(listnr):
+    if listnr in audit_list_dict:
+        return audit_list_dict[listnr]
 
-    if result ==  "":
-        result = "%d" % flags
-
-    return  result
+    return "%d" % listnr
 
 
 # Rule actions
@@ -344,24 +347,191 @@ AUDIT_PERM_WRITE = 2
 AUDIT_PERM_READ  = 4
 AUDIT_PERM_ATTR  = 8
 
-audit_perm_dict = {
-    AUDIT_PERM_EXEC  : "e",
-    AUDIT_PERM_WRITE : "w",
-    AUDIT_PERM_READ  : "r",
-    AUDIT_PERM_ATTR  : "a",
-}
+# Same letters and order as auditctl
+audit_perm_list = [
+    (AUDIT_PERM_READ, "r"),
+    (AUDIT_PERM_WRITE, "w"),
+    (AUDIT_PERM_EXEC, "x"),
+    (AUDIT_PERM_ATTR, "a"),
+]
 
 
 def get_audit_perm_str(val):
     result = ""
-    for key in audit_perm_dict:
-        if (key & val) == key:
-            result = result + audit_perm_dict[key]
+    for key, letter in audit_perm_list:
+        if val & key:
+            result = result + letter
 
     if result ==  "":
-        result = "%s" % val
+        result = "%d" % val
 
     return result
+
+
+# Field names as auditctl prints them in '-F name<op>value'
+audit_field_name_dict = {
+    AUDIT_PID : "pid",
+    AUDIT_UID : "uid",
+    AUDIT_EUID : "euid",
+    AUDIT_SUID : "suid",
+    AUDIT_FSUID : "fsuid",
+    AUDIT_GID : "gid",
+    AUDIT_EGID : "egid",
+    AUDIT_SGID : "sgid",
+    AUDIT_FSGID : "fsgid",
+    AUDIT_LOGINUID : "auid",
+    AUDIT_PERS : "pers",
+    AUDIT_ARCH : "arch",
+    AUDIT_MSGTYPE : "msgtype",
+    AUDIT_SUBJ_USER : "subj_user",
+    AUDIT_SUBJ_ROLE : "subj_role",
+    AUDIT_SUBJ_TYPE : "subj_type",
+    AUDIT_SUBJ_SEN : "subj_sen",
+    AUDIT_SUBJ_CLR : "subj_clr",
+    AUDIT_PPID : "ppid",
+    AUDIT_OBJ_USER : "obj_user",
+    AUDIT_OBJ_ROLE : "obj_role",
+    AUDIT_OBJ_TYPE : "obj_type",
+    AUDIT_OBJ_LEV_LOW : "obj_lev_low",
+    AUDIT_OBJ_LEV_HIGH : "obj_lev_high",
+    AUDIT_LOGINUID_SET : "loginuid_set",
+    AUDIT_SESSIONID : "sessionid",
+    AUDIT_FSTYPE : "fstype",
+    AUDIT_DEVMAJOR : "devmajor",
+    AUDIT_DEVMINOR : "devminor",
+    AUDIT_INODE : "inode",
+    AUDIT_EXIT : "exit",
+    AUDIT_SUCCESS : "success",
+    AUDIT_WATCH : "path",
+    AUDIT_PERM : "perm",
+    AUDIT_DIR : "dir",
+    AUDIT_FILETYPE : "filetype",
+    AUDIT_OBJ_UID : "obj_uid",
+    AUDIT_OBJ_GID : "obj_gid",
+    AUDIT_FIELD_COMPARE : "field_compare",
+    AUDIT_EXE : "exe",
+    AUDIT_SADDR_FAM : "saddr_fam",
+    AUDIT_ARG0 : "a0",
+    AUDIT_ARG1 : "a1",
+    AUDIT_ARG2 : "a2",
+    AUDIT_ARG3 : "a3",
+    AUDIT_FILTERKEY : "key",
+}
+
+audit_id_fields = [
+    AUDIT_UID, AUDIT_EUID, AUDIT_SUID, AUDIT_FSUID, AUDIT_LOGINUID,
+    AUDIT_OBJ_UID,
+    AUDIT_GID, AUDIT_EGID, AUDIT_SGID, AUDIT_FSGID, AUDIT_OBJ_GID,
+]
+
+# Fields whose value is a string in audit_field.lsm_str
+audit_lsm_fields = [
+    AUDIT_SUBJ_USER, AUDIT_SUBJ_ROLE, AUDIT_SUBJ_TYPE,
+    AUDIT_SUBJ_SEN, AUDIT_SUBJ_CLR,
+    AUDIT_OBJ_USER, AUDIT_OBJ_ROLE, AUDIT_OBJ_TYPE,
+    AUDIT_OBJ_LEV_LOW, AUDIT_OBJ_LEV_HIGH,
+]
+
+AUDIT_UID_UNSET = 0xffffffff
+AUDIT_LOGINUID_LEGACY = 0x1   # audit_krule.pflags
+AUDIT_KEY_SEPARATOR = '\x01'
+
+audit_filetype_dict = {
+    0o140000 : "socket",
+    0o120000 : "link",
+    0o100000 : "file",
+    0o060000 : "block",
+    0o040000 : "dir",
+    0o020000 : "character",
+    0o010000 : "fifo",
+}
+
+# Message types defined by the kernel (include/uapi/linux/audit.h)
+audit_msgtype_dict = {
+    1300 : "SYSCALL",
+    1301 : "FS_WATCH",
+    1302 : "PATH",
+    1303 : "IPC",
+    1304 : "SOCKETCALL",
+    1305 : "CONFIG_CHANGE",
+    1306 : "SOCKADDR",
+    1307 : "CWD",
+    1309 : "EXECVE",
+    1311 : "IPC_SET_PERM",
+    1312 : "MQ_OPEN",
+    1313 : "MQ_SENDRECV",
+    1314 : "MQ_NOTIFY",
+    1315 : "MQ_GETSETATTR",
+    1316 : "KERNEL_OTHER",
+    1317 : "FD_PAIR",
+    1318 : "OBJ_PID",
+    1319 : "TTY",
+    1320 : "EOE",
+    1321 : "BPRM_FCAPS",
+    1322 : "CAPSET",
+    1323 : "MMAP",
+    1324 : "NETFILTER_PKT",
+    1325 : "NETFILTER_CFG",
+    1326 : "SECCOMP",
+    1327 : "PROCTITLE",
+    1328 : "FEATURE_CHANGE",
+    1329 : "REPLACE",
+    1330 : "KERN_MODULE",
+    1331 : "FANOTIFY",
+    1332 : "TIME_INJOFFSET",
+    1333 : "TIME_ADJNTPVAL",
+    1334 : "BPF",
+    1335 : "EVENT_LISTENER",
+    1336 : "URINGOP",
+    1337 : "OPENAT2",
+    1400 : "AVC",
+    1401 : "SELINUX_ERR",
+    1402 : "AVC_PATH",
+    1403 : "MAC_POLICY_LOAD",
+    1404 : "MAC_STATUS",
+    1405 : "MAC_CONFIG_CHANGE",
+    1700 : "ANOM_PROMISCUOUS",
+    1701 : "ANOM_ABEND",
+    1702 : "ANOM_LINK",
+    1703 : "ANOM_CREAT",
+}
+
+# AUDIT_COMPARE_* : (left, right) as auditctl prints them in '-C'
+audit_compare_dict = {
+    1 : ("uid", "obj_uid"),
+    2 : ("gid", "obj_gid"),
+    3 : ("euid", "obj_uid"),
+    4 : ("egid", "obj_gid"),
+    5 : ("auid", "obj_uid"),
+    6 : ("suid", "obj_uid"),
+    7 : ("sgid", "obj_gid"),
+    8 : ("fsuid", "obj_uid"),
+    9 : ("fsgid", "obj_gid"),
+    10 : ("uid", "auid"),
+    11 : ("uid", "euid"),
+    12 : ("uid", "fsuid"),
+    13 : ("uid", "suid"),
+    14 : ("auid", "fsuid"),
+    15 : ("auid", "suid"),
+    16 : ("auid", "euid"),
+    17 : ("euid", "suid"),
+    18 : ("euid", "fsuid"),
+    19 : ("suid", "fsuid"),
+    20 : ("gid", "egid"),
+    21 : ("gid", "fsgid"),
+    22 : ("gid", "sgid"),
+    23 : ("egid", "fsgid"),
+    24 : ("egid", "sgid"),
+    25 : ("sgid", "fsgid"),
+}
+
+
+def to_s32(val):
+    val = int(val) & 0xffffffff
+    if val & 0x80000000:
+        return val - 0x100000000
+
+    return val
 
 
 def read_string(addr, delimiter=0x0, highchar=128):
@@ -377,62 +547,268 @@ def read_string(addr, delimiter=0x0, highchar=128):
     return result
 
 
-def get_audit_dir_str(audit_rule):
-    pathname = read_string(audit_rule.tree.pathname)
+def get_audit_watch_path(rule):
+    if not rule.watch:
+        return ""
 
-    return pathname
+    return str(rule.watch.path)
 
 
-def get_audit_val_str(ftype, fval, audit_entry, audit_field):
-    val_str = ""
-    if ftype == AUDIT_ARCH:
-        val_str = "-F %s " % (get_audit_arch_str(fval))
-    elif ftype == AUDIT_PERM:
-        val_str = "-p %s " % (get_audit_perm_str(fval))
-    elif ftype == AUDIT_DIR:
-        val_str = "-w %s " % (get_audit_dir_str(audit_entry.rule))
-    elif ftype == AUDIT_UID:
-        val_str = "-F uid=%d " % (fval)
-    elif ftype >= AUDIT_ARG0 and ftype <= AUDIT_ARG3:
-        op_str = "=" if audit_field.op == 0 else "!="
-        if fval == 4294967295:
-            fval = -1
-        val_str = "-F a%d%s%d " % (ftype - AUDIT_ARG0, op_str, fval)
-    else:
+def get_audit_dir_str(rule):
+    if not rule.tree:
+        return ""
+
+    # 'pathname' is a flexible array at the end of struct audit_tree
+    return read_string(int(rule.tree) +
+                       member_offset("struct audit_tree", "pathname"))
+
+
+def get_audit_exe_path(rule):
+    try:
+        if rule.exe:
+            return str(rule.exe.path)
+    except:
         pass
-        #val_str = "%d" % (fval if int(fval) < 4294967283 else -1)
 
-    return val_str
-
-
-def get_audit_fields_details(audit_entry):
-    rule = audit_entry.rule
-    result_str = ""
-
-    for i in range(0, rule.field_count):
-        field = rule.fields[i]
-        result_str = result_str + get_audit_val_str(field.type, field.val, \
-                                                    audit_entry, field)
-
-    return result_str
+    return ""
 
 
-def get_mask_str(masks):
-    result_str = ""
-    idx = 0
-    enabled_syscalls = []
-    for index, value in enumerate(masks):
+def get_audit_keys(rule):
+    filterkey = rule.filterkey
+    if not filterkey:
+        return []
+
+    return [key for key in str(filterkey).split(AUDIT_KEY_SEPARATOR) if key]
+
+
+def get_audit_id_str(fval):
+    if fval == AUDIT_UID_UNSET:
+        return "unset"
+
+    return "%d" % fval
+
+
+def get_audit_exit_str(fval):
+    sval = to_s32(fval)
+    if sval < 0 and -sval in errno.errorcode:
+        return "-%s" % errno.errorcode[-sval]
+
+    return "%d" % sval
+
+
+def get_audit_field_str(rule, field):
+    ftype = field.type
+    fop = field.op
+    op_str = get_audit_op_str(fop)
+    fval = int(field.val) & 0xffffffff
+    name = audit_field_name_dict.get(ftype, "%d" % ftype)
+
+    if ftype == AUDIT_LOGINUID_SET and fval == 0:
+        # 'auid=-1' is stored as 'loginuid_set=0' with a legacy flag
+        try:
+            if rule.pflags & AUDIT_LOGINUID_LEGACY:
+                return "-F auid%sunset" % op_str
+        except:
+            pass
+
+    if ftype == AUDIT_FIELD_COMPARE:
+        if fval in audit_compare_dict:
+            left, right = audit_compare_dict[fval]
+            return "-C %s%s%s" % (left, op_str, right)
+        return "-F %s%s%d" % (name, op_str, fval)
+
+    if ftype == AUDIT_ARCH:
+        val_str = get_audit_arch_str(fval)
+    elif ftype == AUDIT_PERM:
+        val_str = get_audit_perm_str(fval)
+    elif ftype == AUDIT_WATCH:
+        val_str = get_audit_watch_path(rule)
+    elif ftype == AUDIT_DIR:
+        val_str = get_audit_dir_str(rule)
+    elif ftype == AUDIT_EXE:
+        val_str = get_audit_exe_path(rule)
+    elif ftype in audit_lsm_fields:
+        val_str = str(field.lsm_str) if field.lsm_str else ""
+    elif ftype in audit_id_fields:
+        val_str = get_audit_id_str(fval)
+    elif ftype == AUDIT_EXIT:
+        val_str = get_audit_exit_str(fval)
+    elif ftype in (AUDIT_PID, AUDIT_PPID):
+        val_str = "%d" % to_s32(fval)
+    elif ftype == AUDIT_MSGTYPE:
+        val_str = audit_msgtype_dict.get(fval, "%d" % fval)
+    elif ftype == AUDIT_FILETYPE:
+        val_str = audit_filetype_dict.get(fval, "%d" % fval)
+    elif ftype >= AUDIT_ARG0 and ftype <= AUDIT_ARG3:
+        if fop in (Audit_bitmask, Audit_bittest):
+            val_str = "0x%x" % fval
+        elif fval == 0xffffffff:
+            val_str = "-1"
+        else:
+            val_str = "%d" % fval
+    else:
+        val_str = "%d" % fval
+
+    return "-F %s%s%s" % (name, op_str, val_str)
+
+
+# Prefixes of syscall handler symbols in sys_call_table, longest first
+syscall_sym_prefixes = (
+    "__ia32_compat_sys_", "__x64_compat_sys_", "__x32_compat_sys_",
+    "__arm64_compat_sys_", "__s390_compat_sys_", "__se_compat_sys_",
+    "__x64_sys_", "__ia32_sys_", "__arm64_sys_", "__s390x_sys_",
+    "__s390_sys_", "__se_sys_", "compat_sys_", "ptregs_", "stub_",
+    "SyS_", "sys_",
+)
+
+syscall_table_cache = {}
+
+
+def get_syscall_table_addr(arch_val):
+    # A 32-bit arch on a 64-bit kernel goes through the compat table
+    if arch_val is not None and not (arch_val & __AUDIT_ARCH_64BIT) and \
+       sys_info.pointersize == 8:
+        table_names = ["ia32_sys_call_table", "compat_sys_call_table"]
+    else:
+        table_names = ["sys_call_table"]
+
+    for table_name in table_names:
+        if table_name not in syscall_table_cache:
+            try:
+                syscall_table_cache[table_name] = sym2addr(table_name)
+            except:
+                syscall_table_cache[table_name] = 0
+        if syscall_table_cache[table_name]:
+            return syscall_table_cache[table_name]
+
+    return 0
+
+
+def get_syscall_name(table_addr, nr):
+    try:
+        name = addr2sym(readPtr(table_addr + nr * sys_info.pointersize))
+    except:
+        return None
+    if not name:
+        return None
+
+    stripped = False
+    found = True
+    while found:
+        found = False
+        for prefix in syscall_sym_prefixes:
+            if name.startswith(prefix):
+                name = name[len(prefix):]
+                stripped = found = True
+                break
+
+    # Anything else is not a syscall handler, e.g. beyond the table end
+    if not stripped or name in ("", "ni_syscall"):
+        return None
+
+    return name
+
+
+def is_all_syscalls(rule):
+    # auditctl ignores the last mask word when checking for 'all'
+    masks = [int(mask) & 0xffffffff for mask in rule.mask]
+    for mask in masks[:-1]:
+        if mask != 0xffffffff:
+            return False
+
+    return True
+
+
+def takes_syscalls(rule):
+    return rule.listnr not in (AUDIT_FILTER_USER, AUDIT_FILTER_TASK,
+                               AUDIT_FILTER_EXCLUDE, AUDIT_FILTER_FS)
+
+
+def get_mask_str(rule, arch_val, show_numbers=False):
+    if not takes_syscalls(rule):
+        return ""
+    if is_all_syscalls(rule):
+        return "-S all"
+
+    table_addr = get_syscall_table_addr(arch_val)
+    syscalls = []
+    for index, value in enumerate(rule.mask):
         for bit in range(32):
             if value & (1 << bit):
                 syscall_number = index * 32 + bit
-                enabled_syscalls.append(syscall_number)
+                name = None
+                if table_addr:
+                    name = get_syscall_name(table_addr, syscall_number)
+                if name is None:
+                    syscalls.append("%d" % syscall_number)
+                elif show_numbers:
+                    syscalls.append("%s(%d)" % (name, syscall_number))
+                else:
+                    syscalls.append(name)
 
-    if len(enabled_syscalls) > 0:
-        result_str = " -S " + ",".join(str(x) for x in enabled_syscalls)
+    if len(syscalls) == 0:
+        return ""
 
-    #result_str = ''
+    return "-S " + ",".join(syscalls)
 
-    return result_str
+
+def is_watch_rule(rule, fields):
+    """Same test auditctl uses to print a rule in '-w path -p perm' form"""
+    has_perm = False
+    for field in fields:
+        if field.type == AUDIT_PERM:
+            has_perm = True
+        elif field.type not in (AUDIT_FILTERKEY, AUDIT_DIR, AUDIT_WATCH):
+            return False
+
+    if takes_syscalls(rule) and not is_all_syscalls(rule):
+        return False
+
+    return has_perm
+
+
+def get_audit_rule_str(rule, options):
+    fields = [rule.fields[i] for i in range(rule.field_count)]
+    keys = get_audit_keys(rule)
+    result = []
+
+    if is_watch_rule(rule, fields):
+        for field in fields:
+            if field.type == AUDIT_WATCH:
+                result.append("-w %s" % get_audit_watch_path(rule))
+            elif field.type == AUDIT_DIR:
+                result.append("-w %s" % get_audit_dir_str(rule))
+        for field in fields:
+            if field.type == AUDIT_PERM:
+                result.append("-p %s" % get_audit_perm_str(field.val))
+        for key in keys:
+            result.append("-k %s" % key)
+
+        return " ".join(result)
+
+    result.append("-a %s,%s" % (get_audit_action_str(rule.action),
+                                get_audit_list_str(rule.listnr)))
+    # auditctl prints arch first as it decides the syscall names
+    arch_val = None
+    for field in fields:
+        if field.type == AUDIT_ARCH:
+            arch_val = int(field.val) & 0xffffffff
+            result.append(get_audit_field_str(rule, field))
+
+    mask_str = get_mask_str(rule, arch_val, options.show_details)
+    if mask_str != "":
+        result.append(mask_str)
+
+    for field in fields:
+        if field.type == AUDIT_ARCH:
+            continue
+        if field.type == AUDIT_FILTERKEY:
+            for key in keys:
+                result.append("-F key=%s" % key)
+            continue
+        result.append(get_audit_field_str(rule, field))
+
+    return " ".join(result)
 
 
 def show_audit_rules(options):
@@ -440,33 +816,32 @@ def show_audit_rules(options):
     offset = member_offset("struct audit_entry", "rule")
     offset = offset + member_offset("struct audit_krule", "list")
 
+    rule_count = 0
     for audit_rules in audit_rules_list:
+        seen = set()
         next_addr = audit_rules.next
         while next_addr != audit_rules:
+            # Don't spin forever on a corrupted list in a vmcore
+            if not next_addr or int(next_addr) in seen:
+                print("WARNING: audit_rules_list is corrupted at 0x%x" %
+                      (int(next_addr)))
+                break
+            seen.add(int(next_addr))
+
             audit_entry = readSU("struct audit_entry", next_addr - offset)
-            result_str = ""
-            if audit_entry.rule.watch:
-                result_str = "-w %s " % audit_entry.rule.watch.path
-            flag_str = get_audit_flag_str(audit_entry.rule.flags & ~AUDIT_FILTER_PREPEND)
-            if audit_entry.rule.field_count > 0:
-                result_str = result_str + ("%s " % get_audit_fields_details(audit_entry))
-            action_str = get_audit_action_str(audit_entry.rule.action)
-            listnr_str = get_audit_flag_str(audit_entry.rule.listnr)
-            #if audit_entry.rule.listnr == AUDIT_FILTER_ENTRY:
-            if "-w " not in result_str:
-                if listnr_str != "":
-                    listnr_str = action_str + "," + listnr_str + get_mask_str(audit_entry.rule.mask)
-                    result_str = result_str + ("-a %s " % (listnr_str))
-
-            filter_key = audit_entry.rule.filterkey
-            if filter_key != "":
-                result_str = result_str + ("-k %s " % filter_key)
-
+            try:
+                result_str = get_audit_rule_str(audit_entry.rule, options)
+            except Exception as e:
+                result_str = "<failed to read rule: %s>" % (e)
 
             if options.show_details:
                 print("struct audit_entry 0x%x\n\t" % (audit_entry), end="")
             print("%s" % (result_str))
+            rule_count = rule_count + 1
             next_addr = audit_entry.rule.list.next
+
+    if rule_count == 0:
+        print("No rules")
 
 
 def audit_enabled_str(audit_enabled):
