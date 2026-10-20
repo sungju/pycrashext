@@ -848,12 +848,12 @@ def get_audit_rule_str(rule, options):
     return " ".join(result)
 
 
-def show_audit_rules(options):
+def get_audit_entries():
+    """All struct audit_entry in audit_rules_list, in evaluation order"""
     audit_rules_list = readSymbol("audit_rules_list")
     offset = member_offset("struct audit_entry", "rule")
     offset = offset + member_offset("struct audit_krule", "list")
 
-    rule_count = 0
     for audit_rules in audit_rules_list:
         seen = set()
         next_addr = audit_rules.next
@@ -866,16 +866,22 @@ def show_audit_rules(options):
             seen.add(int(next_addr))
 
             audit_entry = readSU("struct audit_entry", next_addr - offset)
-            try:
-                result_str = get_audit_rule_str(audit_entry.rule, options)
-            except Exception as e:
-                result_str = "<failed to read rule: %s>" % (e)
-
-            if options.show_details:
-                print("struct audit_entry 0x%x\n\t" % (audit_entry), end="")
-            print("%s" % (result_str))
-            rule_count = rule_count + 1
+            yield audit_entry
             next_addr = audit_entry.rule.list.next
+
+
+def show_audit_rules(options):
+    rule_count = 0
+    for audit_entry in get_audit_entries():
+        try:
+            result_str = get_audit_rule_str(audit_entry.rule, options)
+        except Exception as e:
+            result_str = "<failed to read rule: %s>" % (e)
+
+        if options.show_details:
+            print("struct audit_entry 0x%x\n\t" % (audit_entry), end="")
+        print("%s" % (result_str))
+        rule_count = rule_count + 1
 
     if rule_count == 0:
         print("No rules")
@@ -1044,19 +1050,380 @@ def show_audit_status(options):
         if crash_sec:
             print("crash time %s" % (colored(wall_sec_to_str(crash_sec), TIME_COLOR)))
         print("-" * 40)
-        NLMSG_HDRLEN = struct_size("struct nlmsghdr")
         for sk_buff in readSUListFromHead(audit_queue,
                                           "next",
                                           "struct sk_buff",
                                           maxel=1000000):
-            s = readmem(sk_buff.head + NLMSG_HDRLEN, sk_buff.tail - NLMSG_HDRLEN)
-            if (s != None):
-                try:
-                    s = s.decode("UTF-8", "ignore")
-                except:
-                    pass
+            s = read_skb_record(sk_buff)
             print("%s%s" % (get_record_time_str(s, crash_sec), s))
 
+
+
+#------------------------------------------------------------------------
+# Matching queued audit records back to the rule that generated them.
+#
+# The kernel doesn't remember which rule matched, but the SYSCALL record
+# carries the key of the matching rule and the values the rule filter
+# looked at, so the exit rules can be evaluated again in the same order.
+#------------------------------------------------------------------------
+AUDIT_SYSCALL_TYPE = 1300
+AUDIT_PATH_TYPE = 1302
+
+# Record types that are part of a syscall event. Any other type logged
+# during a syscall forces the SYSCALL record out even without a rule.
+audit_syscall_aux_types = [
+    1300, 1302, 1303, 1304, 1306, 1307, 1309, 1311, 1312, 1313, 1314,
+    1315, 1317, 1318, 1320, 1321, 1322, 1323, 1327, 1330, 1331, 1332,
+    1333, 1336, 1337,
+]
+
+AUDITSC_SUCCESS = 1
+AUDITSC_FAILURE = 2
+
+# Rule field : (SYSCALL record field, number base)
+audit_record_int_fields = {
+    AUDIT_PID : ("pid", 10),
+    AUDIT_PPID : ("ppid", 10),
+    AUDIT_UID : ("uid", 10),
+    AUDIT_EUID : ("euid", 10),
+    AUDIT_SUID : ("suid", 10),
+    AUDIT_FSUID : ("fsuid", 10),
+    AUDIT_GID : ("gid", 10),
+    AUDIT_EGID : ("egid", 10),
+    AUDIT_SGID : ("sgid", 10),
+    AUDIT_FSGID : ("fsgid", 10),
+    AUDIT_LOGINUID : ("auid", 10),
+    AUDIT_SESSIONID : ("ses", 10),
+    AUDIT_ARCH : ("arch", 16),
+    AUDIT_EXIT : ("exit", 10),
+    AUDIT_ARG0 : ("a0", 16),
+    AUDIT_ARG1 : ("a1", 16),
+    AUDIT_ARG2 : ("a2", 16),
+    AUDIT_ARG3 : ("a3", 16),
+}
+
+audit_record_field_re = re.compile(r'(\w+)=("[^"]*"|\S+)')
+audit_serial_re = re.compile(r"audit\(\d+\.\d+:(\d+)\)")
+
+
+def read_skb_record(sk_buff):
+    NLMSG_HDRLEN = struct_size("struct nlmsghdr")
+    s = readmem(sk_buff.head + NLMSG_HDRLEN, sk_buff.tail - NLMSG_HDRLEN)
+    if (s != None):
+        try:
+            s = s.decode("UTF-8", "ignore")
+        except:
+            pass
+
+    return s
+
+
+def read_skb_type(sk_buff):
+    try:
+        return int(readSU("struct nlmsghdr", sk_buff.head).nlmsg_type)
+    except:
+        return 0
+
+
+def get_audit_queues():
+    queues = []
+    for name in ["audit_skb_queue", "audit_queue", "audit_retry_queue",
+                 "audit_hold_queue", "audit_skb_hold_queue"]:
+        if symbol_exists(name):
+            try:
+                queues.append((name, readSymbol(name)))
+            except:
+                pass
+
+    return queues
+
+
+def get_msgtype_str(msgtype):
+    if msgtype in audit_msgtype_dict:
+        return audit_msgtype_dict[msgtype]
+    if 1100 <= msgtype <= 1199 or 2100 <= msgtype <= 2999:
+        return "%d(user message)" % msgtype
+
+    return "%d" % msgtype
+
+
+def parse_audit_record(text):
+    fields = {}
+    for name, value in audit_record_field_re.findall(text):
+        if name not in fields:
+            fields[name] = value
+
+    return fields
+
+
+def get_record_int(record, name, base=10):
+    value = record.get(name)
+    if value is None:
+        return None
+    try:
+        return int(value.strip('"'), base)
+    except ValueError:
+        return None
+
+
+def get_record_keys(record):
+    value = record.get("key")
+    if value is None or value == "(null)":
+        return []
+    if value.startswith('"'):
+        key = value.strip('"')
+    else:
+        # Keys with the separator are logged hex encoded
+        try:
+            key = bytes.fromhex(value).decode("UTF-8", "ignore")
+        except ValueError:
+            key = value
+
+    return [k for k in key.split(AUDIT_KEY_SEPARATOR) if k]
+
+
+class AuditEvent:
+    def __init__(self, text):
+        self.text = text            # first record, for the time stamp
+        self.types = []
+        self.syscall = None         # parsed SYSCALL record
+        self.paths = []             # parsed PATH records
+
+    def add_record(self, msgtype, text):
+        self.types.append(msgtype)
+        if msgtype == AUDIT_SYSCALL_TYPE:
+            self.syscall = parse_audit_record(text)
+        elif msgtype == AUDIT_PATH_TYPE:
+            self.paths.append(parse_audit_record(text))
+
+    def trigger_type(self):
+        """A record type that was logged on its own, if any"""
+        for msgtype in self.types:
+            if msgtype not in audit_syscall_aux_types:
+                return msgtype
+
+        return None
+
+
+def read_audit_events(queue):
+    """Group the records in a queue into events by serial number"""
+    events = {}
+    record_count = 0
+    for sk_buff in readSUListFromHead(queue, "next", "struct sk_buff",
+                                      maxel=1000000):
+        text = read_skb_record(sk_buff)
+        if not isinstance(text, str):
+            continue
+        record_count = record_count + 1
+        match = audit_serial_re.search(text)
+        serial = match.group(1) if match else "?%d" % record_count
+        if serial not in events:
+            events[serial] = AuditEvent(text)
+        events[serial].add_record(read_skb_type(sk_buff), text)
+
+    return record_count, events
+
+
+def audit_comparator(left, op, right):
+    # Same as the kernel's audit_comparator() which works on u32
+    left = left & 0xffffffff
+    right = right & 0xffffffff
+    if op == Audit_equal:
+        return left == right
+    elif op == Audit_not_equal:
+        return left != right
+    elif op == Audit_bitmask:
+        return (left & right) != 0
+    elif op == Audit_bittest:
+        return (left & right) == right
+    elif op == Audit_lt:
+        return left < right
+    elif op == Audit_gt:
+        return left > right
+    elif op == Audit_le:
+        return left <= right
+    elif op == Audit_ge:
+        return left >= right
+
+    return False
+
+
+def match_watch(rule, event):
+    try:
+        ino = int(rule.watch.ino)
+        dev = int(rule.watch.dev)
+    except:
+        return None
+
+    for path in event.paths:
+        if get_record_int(path, "inode") != ino:
+            continue
+        devs = path.get("dev", "").split(":")
+        try:
+            if len(devs) == 2 and (int(devs[0], 16) != (dev >> 20) or
+                                   int(devs[1], 16) != (dev & 0xfffff)):
+                continue
+        except ValueError:
+            pass
+        return True
+
+    return False
+
+
+def match_rule_field(rule, field, event):
+    """True/False if the record decides it, None if it can't"""
+    ftype = field.type
+    fop = field.op
+    fval = int(field.val) & 0xffffffff
+    record = event.syscall
+
+    if ftype == AUDIT_FILTERKEY:
+        return True
+    if ftype in audit_record_int_fields:
+        name, base = audit_record_int_fields[ftype]
+        left = get_record_int(record, name, base)
+        if left is None:
+            return None
+        return audit_comparator(left, fop, fval)
+    if ftype == AUDIT_LOGINUID_SET:
+        auid = get_record_int(record, "auid")
+        if auid is None:
+            return None
+        return audit_comparator(0 if auid == AUDIT_UID_UNSET else 1, fop, fval)
+    if ftype == AUDIT_SUCCESS:
+        success = record.get("success")
+        if success not in ("yes", "no"):
+            return None
+        left = AUDITSC_SUCCESS if success == "yes" else AUDITSC_FAILURE
+        right = AUDITSC_SUCCESS if fval else AUDITSC_FAILURE
+        return audit_comparator(left, fop, right)
+    if ftype == AUDIT_EXE:
+        exe = record.get("exe", "")
+        if not exe.startswith('"') or fop not in (Audit_equal, Audit_not_equal):
+            return None
+        same = exe.strip('"') == get_audit_exe_path(rule)
+        return same if fop == Audit_equal else not same
+    if ftype == AUDIT_WATCH and rule.watch:
+        return match_watch(rule, event)
+
+    # perm, dir, filetype, inode, LSM labels, ... aren't in the records
+    return None
+
+
+def match_rule(rule, fields, event):
+    nr = get_record_int(event.syscall, "syscall")
+    if nr is not None:
+        try:
+            if not (int(rule.mask[nr // 32]) & (1 << (nr % 32))):
+                return False
+        except:
+            return False
+
+    result = True
+    for field in fields:
+        field_result = match_rule_field(rule, field, event)
+        if field_result is False:
+            return False
+        if field_result is None:
+            result = None
+
+    return result
+
+
+class AuditRuleInfo:
+    def __init__(self, audit_entry, options):
+        self.rule = audit_entry.rule
+        self.fields = [self.rule.fields[i]
+                       for i in range(self.rule.field_count)]
+        self.keys = get_audit_keys(self.rule)
+        self.rule_str = get_audit_rule_str(self.rule, options)
+
+
+def find_event_rule(event, rules):
+    """Returns (how, rule_str) for the rule that generated the event"""
+    trigger = event.trigger_type()
+    if event.syscall is None:
+        if trigger is None:
+            return ("-", "no SYSCALL record")
+        return ("-", "no rule: %s record" % get_msgtype_str(trigger))
+
+    exit_rules = [r for r in rules
+                  if r.rule.listnr in (AUDIT_FILTER_EXIT, AUDIT_FILTER_ENTRY)]
+    keys = get_record_keys(event.syscall)
+    if len(keys) > 0:
+        # The kernel copies the key of the matching rule into the record
+        keyed = [r for r in exit_rules if set(r.keys) & set(keys)]
+        if len(keyed) == 0:
+            return ("key", "no rule has key %s" % ",".join(keys))
+        for rule_info in keyed:
+            if match_rule(rule_info.rule, rule_info.fields, event) != False:
+                return ("key", rule_info.rule_str)
+        return ("key", keyed[0].rule_str)
+
+    # No key, so a rule with a key didn't match. First match wins.
+    for rule_info in exit_rules:
+        if len(rule_info.keys) > 0:
+            continue
+        result = match_rule(rule_info.rule, rule_info.fields, event)
+        if result is False:
+            continue
+        if rule_info.rule.action == AUDIT_NEVER:
+            break
+        return ("fields" if result else "possible", rule_info.rule_str)
+
+    if trigger is not None:
+        return ("-", "no rule: forced by %s record" % get_msgtype_str(trigger))
+
+    return ("-", "no matching rule found")
+
+
+def get_event_summary(event):
+    types = ",".join(get_msgtype_str(t) for t in event.types)
+    if event.syscall is None:
+        return "type=%s" % (types)
+
+    result = "type=%s" % (types)
+    for name in ["syscall", "success", "exit", "pid", "auid", "comm", "key"]:
+        if name in event.syscall:
+            result = result + " %s=%s" % (name, event.syscall[name])
+
+    return result
+
+
+def show_audit_rule_match(options):
+    rules = []
+    for audit_entry in get_audit_entries():
+        try:
+            rules.append(AuditRuleInfo(audit_entry, options))
+        except Exception as e:
+            print("WARNING: failed to read rule 0x%x: %s" % (audit_entry, e))
+
+    crash_sec = get_crash_wall_sec()
+    match_count = {}
+    for name, queue in get_audit_queues():
+        record_count, events = read_audit_events(queue)
+        print("%-20s %d records, %d events" % (name, record_count, len(events)))
+        for serial in events:
+            event = events[serial]
+            how, rule_str = find_event_rule(event, rules)
+            match_count[(how, rule_str)] = match_count.get((how, rule_str), 0) + 1
+            if options.show_details:
+                print("  %sserial=%s %s" % (get_record_time_str(event.text, crash_sec),
+                                           serial, get_event_summary(event)))
+                print("    -> %s: %s" % (how, rule_str))
+
+    if len(match_count) == 0:
+        print("\nNo queued audit records")
+        return
+
+    print("\n%7s  %-8s  %s" % ("EVENTS", "MATCH", "RULE"))
+    for (how, rule_str), count in sorted(match_count.items(),
+                                         key=lambda x: x[1], reverse=True):
+        print("%7d  %-8s  %s" % (count, how, rule_str))
+    print("\nMATCH: key = by the key in the SYSCALL record, " \
+          "fields = the record matches every field,\n" \
+          "       possible = first rule that isn't ruled out " \
+          "(perm/dir/... can't be checked from records)")
 
 
 def auditinfo():
@@ -1067,6 +1434,9 @@ def auditinfo():
     op.add_option("-d", "--details", dest="show_details", default=False,
                   action="store_true",
                   help="Show details if possible")
+    op.add_option("-m", "--match", dest="show_match", default=False,
+                  action="store_true",
+                  help="Show which rule generated the queued audit records")
     op.add_option("-r", "--rules", dest="show_rules", default=False,
                   action="store_true",
                   help="Show audit rules")
@@ -1084,6 +1454,9 @@ def auditinfo():
         sys.exit(0)
     if (o.show_backlog):
         show_audit_backlog(o)
+        sys.exit(0)
+    if (o.show_match):
+        show_audit_rule_match(o)
         sys.exit(0)
 
     show_audit_status(o)
