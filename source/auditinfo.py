@@ -910,32 +910,48 @@ def audit_failure_str(audit_failure):
 
 
 def get_audit_pid():
-    audit_pid = -1
-    try:
-        audit_pid = readSymbol("audit_pid")
-        return audit_pid
-    except:
-        pass
+    """auditd pid, 0 if auditd isn't connected, -1 if it can't be read"""
+    if symbol_exists("audit_pid"):
+        try:
+            return int(readSymbol("audit_pid"))
+        except:
+            return -1
 
     try:
         ac = readSymbol("auditd_conn")
-        pid = ac.pid
-        audit_pid = pid.numbers[0].nr
-        # To complicate to find 'current'.
-        # So, no implementation for now for RHEL8
+        if not ac:
+            return 0
+        return int(ac.pid.numbers[0].nr)
     except:
-        pass
-
-    return audit_pid
+        return -1
 
 
-def get_task_from_pid(pid):
+# '[ 0 00:00:12.345] [UN]  PID: 1234  TASK: ...  CPU: 1  COMMAND: "auditd"'
+ps_m_re = re.compile(r'\s*>?\s*\[([^\]]+)\]\s+\[(\w+)\]\s+PID:\s+(\d+)'
+                     r'.*COMMAND:\s+"([^"]*)"')
+
+
+def get_ps_m_info(target):
+    """(pid, comm, state, time since last ran) of tasks by pid or command"""
+    result = []
     try:
-        task = readSU("struct task_struct", pid_to_task(pid))
+        output = exec_crash_command("ps -m %s" % (target))
     except:
-        task = None
+        return result
+    for line in output.splitlines():
+        match = ps_m_re.match(line)
+        if match:
+            result.append((int(match.group(3)), match.group(4),
+                           match.group(2), match.group(1).strip()))
 
-    return task
+    return result
+
+
+def get_task_run_str(info):
+    pid, comm, state, last_ran = info
+    state_color = crashcolor.LIGHTRED if state == "UN" else crashcolor.GREEN
+    return "%d (%s) [%s] last ran %s ago" % \
+        (pid, comm, colored(state, state_color), colored(last_ran, TIME_COLOR))
 
 
 def show_audit_backlog(options):
@@ -943,10 +959,27 @@ def show_audit_backlog(options):
         print("No audit_backlog_wait symbol exist")
         return
 
-    audit_backlog_wait = readSymbol("audit_backlog_wait")
-    print("audit_backlog_wait :", audit_backlog_wait)
-    result = exec_crash_command("waitq 0x%x" % (audit_backlog_wait))
-    print(result)
+    wait_addr = sym2addr("audit_backlog_wait")
+    wait_time = readSymbol("audit_backlog_wait_time")
+    print("%-17s 0x%x" % ("audit_backlog_wait", wait_addr))
+    print("%-17s %d (%s)" % ("backlog_wait_time", wait_time,
+                             jiffies_to_str(wait_time)))
+    for info in get_ps_m_info("kauditd"):
+        print("%-17s %s" % ("kauditd", get_task_run_str(info)))
+
+    result = exec_crash_command("waitq 0x%x" % (wait_addr))
+    pids = re.findall(r"PID:\s+(\d+)", result)
+    if len(pids) == 0:
+        print("\nNo tasks waiting for audit backlog space")
+    else:
+        # Time since last ran is about how long each task has been waiting
+        print("\n%d tasks waiting for audit backlog space" % (len(pids)))
+        for info in get_ps_m_info(" ".join(pids)):
+            print("  %s" % (get_task_run_str(info)))
+
+    if options.show_details:
+        for info in get_ps_m_info("kauditd"):
+            print("\n%s" % (exec_crash_command("bt %d" % (info[0])).rstrip()))
 
 
 def get_hz():
@@ -1002,7 +1035,7 @@ def get_timekeeper_nsec(timekeeper):
 
 
 def wall_sec_to_str(wall_sec):
-    msec = int((wall_sec - int(wall_sec)) * 1000)
+    msec = min(int((wall_sec - int(wall_sec)) * 1000 + 0.5), 999)
     return "%s.%03d UTC" % (time.strftime("%Y-%m-%d %H:%M:%S",
                                           time.gmtime(int(wall_sec))), msec)
 
@@ -1027,54 +1060,113 @@ def get_record_time_str(record, crash_sec):
     return result + "] "
 
 
+def get_panic_str():
+    try:
+        for line in exec_crash_command("sys").splitlines():
+            words = line.split(":", 1)
+            if words[0].strip() == "PANIC" and len(words) == 2:
+                return words[1].strip().strip('"')
+    except:
+        pass
+
+    return ""
+
+
 def show_audit_status(options):
     audit_enabled = readSymbol("audit_enabled")
     audit_failure = readSymbol("audit_failure")
     audit_pid = get_audit_pid()
-    audit_task = get_task_from_pid(audit_pid)
     rate_limit = readSymbol("audit_rate_limit")
     audit_backlog_limit = readSymbol("audit_backlog_limit")
     audit_lost = readSymbol("audit_lost").counter
-    try:
-        audit_queue = readSymbol("audit_skb_queue")
-    except:
-        audit_queue = readSymbol("audit_queue")
-
+    queues = get_audit_queues()
     audit_backlog_wait_time = readSymbol("audit_backlog_wait_time")
+    warnings = []
 
     print("%-17s %d (%s)" % ("enabled", audit_enabled,
                           audit_enabled_str(audit_enabled)))
     print("%-17s %d (%s)" % ("failure", audit_failure,
                           audit_failure_str(audit_failure)))
-    try:
-        print("%-17s %d (%s)" % ("pid", audit_pid, audit_task.comm))
-    except:
-        if symbol_exists("audit_sig_pid"):
-            sig_pid = readSymbol("audit_sig_pid")
-            if sig_pid != -1:
-                print("%-17s %d" % ("auditd killed by", sig_pid))
-        pass
-    print("%-17s %d" % ("rate_limit", rate_limit))
-    print("%-17s %d" % ("backlog_limit", audit_backlog_limit))
-    print("%-17s %d" % ("lost", audit_lost))
-    print("%-17s %d" % ("backlog", audit_queue.qlen))
+
+    pid_infos = get_ps_m_info(audit_pid) if audit_pid > 0 else []
+    if len(pid_infos) > 0:
+        print("%-17s %s" % ("pid", get_task_run_str(pid_infos[0])))
+    elif audit_pid > 0:
+        print("%-17s %d (no such task)" % ("pid", audit_pid))
+    elif audit_pid == 0:
+        print("%-17s 0 (%s)" % ("pid", colored("auditd not connected",
+                                             crashcolor.LIGHTRED)))
+        if audit_enabled:
+            warnings.append("auditd is not connected, so records are held "
+                            "in the queues or lost")
+
+    if symbol_exists("audit_sig_pid"):
+        # Last task that sent a signal to auditd, e.g. 'service auditd stop'
+        sig_pid = int(readSymbol("audit_sig_pid"))
+        if sig_pid > 0:
+            sig_infos = get_ps_m_info(sig_pid)
+            comm = sig_infos[0][1] if len(sig_infos) > 0 else "exited"
+            print("%-17s pid %d (%s)" % ("auditd signal by", sig_pid, comm))
+
+    for info in get_ps_m_info("kauditd"):
+        print("%-17s %s" % ("kauditd", get_task_run_str(info)))
+
+    print("%-17s %d%s" % ("rate_limit", rate_limit,
+                          " (unlimited)" if rate_limit == 0 else ""))
+    print("%-17s %d%s" % ("backlog_limit", audit_backlog_limit,
+                          " (unlimited)" if audit_backlog_limit == 0 else ""))
+    lost_str = "%d" % (audit_lost)
+    if audit_lost > 0:
+        lost_str = colored(lost_str, crashcolor.LIGHTRED)
+    print("%-17s %s" % ("lost", lost_str))
+
+    for name, queue in queues:
+        qlen = queue.qlen
+        label = "backlog" if name in ("audit_queue", "audit_skb_queue") \
+                else name.replace("audit_", "").replace("skb_", "")
+        qlen_str = "%d" % (qlen)
+        if label == "backlog" and audit_backlog_limit and \
+           qlen >= audit_backlog_limit:
+            qlen_str = colored("%d (FULL)" % (qlen), crashcolor.LIGHTRED)
+            warnings.append("backlog is full: new records wait up to "
+                            "backlog_wait_time, then are lost")
+        elif qlen > 0 and label != "backlog":
+            qlen_str = colored(qlen_str, crashcolor.YELLOW)
+        print("%-17s %s" % (label, qlen_str))
+
     print("%-17s %d (%s)" % ("backlog_wait_time", audit_backlog_wait_time,
                              jiffies_to_str(audit_backlog_wait_time)))
+
+    if audit_failure == 2:
+        panic_str = get_panic_str()
+        if "audit" in panic_str:
+            warnings.append("the crash is audit_panic(): \"%s\"" % (panic_str))
+        elif audit_lost > 0:
+            warnings.append("failure=2 panics when records are lost")
+    for warning in warnings:
+        print(colored("WARNING: %s" % (warning), crashcolor.LIGHTRED))
 
     if (options.show_details):
         crash_sec = get_crash_wall_sec()
         print("----< details >----")
-        print("struct sk_buff_head 0x%x" % (audit_queue))
         if crash_sec:
             print("crash time %s" % (colored(wall_sec_to_str(crash_sec), TIME_COLOR)))
-        print("-" * 40)
-        for sk_buff in readSUListFromHead(audit_queue,
-                                          "next",
-                                          "struct sk_buff",
-                                          maxel=1000000):
-            s = read_skb_record(sk_buff)
-            print("%s%s" % (get_record_time_str(s, crash_sec), s))
-
+        for name, queue in queues:
+            if queue.qlen == 0:
+                continue
+            print("-" * 40)
+            print("%s: struct sk_buff_head 0x%x, %d records" %
+                  (name, queue, queue.qlen))
+            print("-" * 40)
+            for sk_buff in readSUListFromHead(queue,
+                                              "next",
+                                              "struct sk_buff",
+                                              maxel=1000000):
+                s = read_skb_record(sk_buff)
+                if not isinstance(s, str):
+                    print("<unreadable record in sk_buff 0x%x>" % (sk_buff,))
+                    continue
+                print("%s%s" % (get_record_time_str(s, crash_sec), s))
 
 
 #------------------------------------------------------------------------

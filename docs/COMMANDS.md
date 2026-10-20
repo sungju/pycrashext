@@ -800,11 +800,11 @@ Linux audit subsystem information including status, rules, and backlog.
 
 | Option | Long Form | Description |
 |--------|-----------|-------------|
-| `-b` | `--backlog` | Show backlog process list |
+| `-b` | `--backlog` | Show tasks waiting for backlog space and how long, plus kauditd state (`-d` adds kauditd backtrace) |
 | `-d` | `--details` | Show details if possible |
 | `-m` | `--match` | Show which rule generated the queued audit records, counted per rule (`-d` lists each event) |
 | `-r` | `--rules` | Show audit rules in `auditctl -l` format (`-d` adds entry addresses and syscall numbers) |
-| `-s` | `--status` | Show audit status |
+| `-s` | `--status` | Show audit status: auditd/kauditd state, all queues, and warnings for a full backlog, lost records or audit_panic (default) |
 
 #### Examples
 
@@ -812,7 +812,7 @@ Linux audit subsystem information including status, rules, and backlog.
 auditinfo -s           # Show audit status
 auditinfo -r           # Show audit rules
 auditinfo -b           # Show audit backlog processes
-auditinfo -s -d        # Show detailed audit status
+auditinfo -s -d        # Show audit status and dump the queued records
 auditinfo -r -d        # Show rules with audit_entry addresses and syscall numbers
 auditinfo -m           # Count queued audit events per rule that generated them
 ```
