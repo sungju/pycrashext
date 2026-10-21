@@ -6188,7 +6188,8 @@ def meminfo():
     op.add_option("-a", "--all", dest="all", default=0,
                   action="store_true",
                   help="Show all the output")
-    op.add_option("-b", "--budyinfo", dest="buddyinfo", default=0,
+    # --budyinfo is the old misspelling, kept so existing scripts still work
+    op.add_option("-b", "--buddyinfo", "--budyinfo", dest="buddyinfo", default=0,
                   action="store_true",
                   help="Show /proc/buddyinfo like output")
     op.add_option("-c", "--compact", dest="compact", default=0,
