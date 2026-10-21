@@ -13,7 +13,7 @@ The server loads every plugin under `web/plugins/` at start-up. The currently ac
 | `/api/disasm` | POST | edis | Source-level disassembly using the kernel source tree |
 | `/api/setgit/<asm_str>` | GET | edis | Select the git source repo for disassembly |
 | `/api/git` | POST | git | Run `git log` / `git show` / `git find` in the kernel source repos |
-| `/api/ai` | POST | ai | Forward command output to an AI engine (ollama/podman) and return the analysis |
+| `/api/ai` | POST | ai | Forward command output to an AI engine and return the analysis: ollama at `localhost:11434` (default) or podman at `localhost:65445`, model `llama3.2` unless the request names one. `ai` uses this only when no local `claude`/`gemini` CLI is chosen |
 | `/list` | GET | — | List all registered routes |
 | `/reload` | GET | — | Reload plugins without restarting |
 
@@ -64,9 +64,10 @@ $ export INSIGHTS_RULES="/home/sungju/support-rules:/home/sungju/new-rules"
 | RHEL_SOURCE_DIR | (required) | Path to the directory holding the kernel source git repositories |
 | PYCRASHEXT_PORT | 5000 | Port the server listens on |
 | INSIGHTS_RULES | (unset) | Colon-separated list of extra insights rule directories |
-| PYCRASHEXT_API_KEY | (unset) | If set, requests must send a matching `X-API-Key` header; otherwise auth is disabled |
+| PYCRASHEXT_API_KEY | (unset) | If set, requests must send a matching `X-API-Key` header; otherwise auth is disabled. The crash commands (`edis`, `git`, `ai`, `insights`) send it from their own `PYCRASHEXT_API_KEY`, so set the same value on the machine running crash; a missing or wrong key is reported as such |
 | PYCRASHEXT_DEBUG | (unset) | Set to `1`/`true`/`yes` to enable Flask reloader/debug behavior |
 | PYCRASHEXT_NO_WEB | (unset) | Set to `1`/`true`/`yes` to stop `git find` from consulting the public kernel sources |
+| DEBUG | (unset) | Set to `1`/`true`/`yes`/`on` to print the `git` plugin's debug messages |
 | GITHUB_TOKEN | (unset) | Optional GitHub token used by `git find`; raises the API rate limit from 60 to 5000 requests/hour |
 | PYCRASHEXT_PLUGIN_PATH | (unset) | Colon-separated list of directories holding external plugins (see below) |
 
@@ -133,9 +134,10 @@ Both scripts accept `-h`/`--help` and validate that `RHEL_SOURCE_DIR` exists bef
 
 ## Pointing crash at the server ##
 
-On the machine that runs 'crash', set `CRASHEXT_SERVER` to this server's address before launching 'crash'. The pycrashext `install.sh` can also configure this for you.
+On the machine that runs 'crash', set `CRASHEXT_SERVER` to this server's address before launching 'crash'. The pycrashext `install.sh` can also configure this for you. If the server was started with `PYCRASHEXT_API_KEY`, export the same key there too.
 
 ```
 $ export CRASHEXT_SERVER=http://myserver:5000
+$ export PYCRASHEXT_API_KEY=<the server's key>    # only when the server has one
 $ crash
 ```

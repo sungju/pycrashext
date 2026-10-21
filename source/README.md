@@ -16,21 +16,24 @@ $ logout
 
 'install.sh' does the following:
 
-- Adds the 'mpykdump' extension loading and the command registration (`epython .../source/regext.py`) into '~/.crashrc'
+- Adds the 'mpykdump' extension loading (asking for its directory, `/usr/lib64/crash/extensions` by default) and the command registration (`epython .../source/regext.py`) into '~/.crashrc', unless mpykdump is already there
 - Sets 'PYKDUMPPATH' in '~/.bash_profile' so the command scripts under this directory can be found
-- Optionally sets 'CRASHEXT_SERVER' in '~/.bash_profile' which is needed for the commands that talk to the 'remoteapi' server ('edis', 'git', 'ai' and 'insights'). See README.md under the ./remoteapi directory for the server setup.
+- Optionally sets 'CRASHEXT_SERVER' in '~/.bash_profile', which is needed for the commands that talk to the 'remoteapi' server ('edis', 'git', 'insights', and 'ai' when no local AI CLI is installed). See README.md under the ./remoteapi directory for the server setup.
+- Saves a timestamped backup ('*.YYYYmmdd-HHMMSS.bak') of '~/.crashrc' and '~/.bash_profile' before changing them
 
 ### Environment variables ###
 
 | Variable | Description |
 |---|---|
 | PYKDUMPPATH | Path list that contains this 'source' directory. Used to locate the command scripts |
-| CRASHEXT_SERVER | remoteapi server address (example: `http://myserver:5000`). Used by 'edis', 'git', 'ai' and 'insights' |
-| AI_ENGINE | Default AI engine for the 'ai' command ('ollama' or 'podman') |
-| AI_MODEL | Default AI model name for the 'ai' command (example: llama3.2) |
-| AI_REQUEST_TIMEOUT | Request timeout in seconds for the 'ai' command (default: 30) |
-| CODE_THEME | Color theme used when rendering the markdown output of the 'ai' command |
+| CRASHEXT_SERVER | remoteapi server address (example: `http://myserver:5000`). Used by 'edis', 'git', 'insights', and by 'ai' when no local AI CLI is installed |
+| AI_ENGINE | Engine the remoteapi server uses for 'ai' ('ollama' or 'podman'; the server defaults to ollama). '-e' overrides it |
+| AI_MODEL | Model the remoteapi server uses for 'ai' (example: llama3.2, the server default). '-m' overrides it |
+| AI_REQUEST_TIMEOUT | Request timeout in seconds for 'ai' requests to the server (default: 30) |
+| CODE_THEME | Color theme for the markdown and source output of 'ai' and 'edis' (default: tango) |
 | PYTHON_LIB | Additional python library paths to be added into sys.path |
+| PYCRASHEXT_COMMAND_PATH | Directories with extra crash commands kept outside this repository (see the top-level README.md) |
+| PYCRASHEXT_API_KEY | Sent as the `X-API-Key` header on every request to the remoteapi server; set it to the server's key when the server has one |
 
 ### Command registration ###
 
@@ -47,30 +50,34 @@ Commands are registered by 'regext.py' which reads 'config.json' in this directo
 
 ## Provided commands ##
 
-Every command accepts '-h' to show the available options.
+Every command accepts '-h' to show the available options, except 'git', which takes 'git log --help', 'git show --help' or 'git find --help'. [docs/COMMANDS.md](../docs/COMMANDS.md) lists every option of every command; the sections below walk through some of them with real output.
 
 | Command | Description |
 |---|---|
-| ai | Analyse command output using an AI model (needs remoteapi) |
+| ai | Analyse command output with an AI model: a local 'claude' or 'gemini' CLI if installed, otherwise the remoteapi server |
 | auditinfo | Audit subsystem information |
 | autocheck | Diagnose known issues using the rules under ./rules |
 | bh | Bottom half (softirq/tasklet) information |
 | caseinfo | Show case number when running on a retrace server |
 | cginfo | cgroup information (v1/v2/hybrid) |
 | cpuinfo | CPU information |
-| devinfo | Device information |
+| devinfo | Storage status (SCSI hosts and devices, FC ports, stuck I/O), block and character devices, block requests, swiotlb, paravirtual I/O rings |
 | edis | Enhanced disassembly with source lines (needs remoteapi) |
+| evidence | Run a vmcore analysis's commands in one session and write their output into one evidence file |
 | fsinfo | Filesystem information, incl. page cache breakdown per superblock |
 | git | Run 'git log/show' on remote kernel source repositories, and 'git find' to check whether an upstream patch is backported into this kernel (needs remoteapi) |
 | hangcheck | Show hung (D-state) tasks with details |
 | insights | Run insights rules (needs remoteapi; server plugin currently deprecated) |
 | ipcinfo | IPC information |
 | ipmi | IPMI information |
+| kvercmp | Is a fix already in this kernel? Compares the dump's kernel with the fixed kernels an errata or KCS lists |
 | lockinfo | Lock related information (spinlock/mcs lock) |
 | lockup | Detect long running tasks on CPUs |
+| logscan | Count the known kernel log signatures and print their first and last lines |
 | meminfo | Memory information |
 | modinfo | Module related information |
 | netinfo | Network information |
+| preempt | Decode preempt_count values, or every one the kernel log prints (-l) |
 | psinfo | 'ps'-like process information |
 | pstree | Process list in tree format |
 | revs | Reverse engineering helper |
@@ -1334,7 +1341,8 @@ Usage: meminfo.py [options]
 Options:
   -h, --help            show this help message and exit
   -a, --all             Show all the output
-  -b, --budyinfo        Show /proc/buddyinfo like output
+  -b, --buddyinfo, --budyinfo
+                        Show /proc/buddyinfo like output
   -c, --compact         Show compact data for other options
   -d, --details         Show detailed output
   --debug               Show debug output
@@ -1357,6 +1365,8 @@ Options:
                         (default: 0, no limit)
   -n, --nogroup         Show data in individual tasks
   -o, --page_owner      Show page_owner details
+  --po-slab             Show slab-only allocations in page_owner mode (use
+                        with -o)
   -O, --OOM             Analyse OOM messages in log
   --overall             Show overall memory usage breakdown with bar graphs
   --oom-summary         Show OOM summary dashboard with pattern analysis
@@ -1365,6 +1375,8 @@ Options:
                         regex)
   --oom-count=OOM_COUNT
                         Limit number of OOM events to display
+  --oom-tree            show the OOM task dump as a process tree
+  --oom-ascii           use ASCII instead of Unicode glyphs in --oom-tree
   --oom-top=OOM_TOP     Show top N memory consumers (default: 10)
   -P, --pss             Show memory usages(pss) by tasks
   -p PERCPU, --percpu=PERCPU
@@ -1961,16 +1973,24 @@ Notes:
 
 ### ai ###
 
-It sends the output of a crash command (or a file) to an AI engine running behind the 'remoteapi' server and prints the analysis in markdown. It needs 'CRASHEXT_SERVER' to be set; the engine/model can be selected per invocation or via the 'AI_ENGINE'/'AI_MODEL' environment variables.
+It sends the output of crash commands (or a file), with an optional question, to an AI model and prints the analysis in markdown. The engine is chosen in this order:
+
+- `-e claude` or `-e gemini`: that CLI, run locally (it must be installed)
+- no `-e`: the first of the 'claude' and 'gemini' CLIs found on the PATH
+- otherwise: the 'remoteapi' server at 'CRASHEXT_SERVER', which forwards to ollama or podman. `-e`/`-m` (or 'AI_ENGINE'/'AI_MODEL') choose its engine and model
 
 ```
 crash> ai -h
+Usage: ai.py [options]
+
 Options:
   -h, --help            show this help message and exit
-  -c CMD_STR, --cmd=CMD_STR
+  -c CMD_LIST, --cmd=CMD_LIST
                         The output of this command will be analysed
+                        (repeatable)
   -e AI_ENGINE, --engine=AI_ENGINE
-                        Choose AI engine to use (ollama, podman)
+                        Choose AI engine to use (claude, gemini, or remote
+                        engine)
   -i INPUT_FILE, --input=INPUT_FILE
                         Use file for input data
   -m AI_MODEL, --model=AI_MODEL
@@ -1980,9 +2000,13 @@ Options:
                         vmcore taskid
 ```
 
+It needs something to analyse: at least one `-c`, an `-i` file, or a question.
+
 Examples)
 
 ```
 crash> ai -c "bt"
-crash> ai -c "log" -m llama3.2
+crash> ai -c "bt" -c "log" What caused this panic?
+crash> ai -e gemini -c "kmem -i"
+crash> ai -c "log" -m llama3.2      # no local CLI: the server's ollama model
 ```

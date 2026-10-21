@@ -1,6 +1,6 @@
 # Pycrashext Command Reference
 
-Pycrashext is a PyKdump-based extension suite for the Linux crash utility. It provides 30+ commands for kernel crash dump analysis covering memory, CPU, networking, filesystem, processes, locking, tracing, and more.
+Pycrashext is a PyKdump-based extension suite for the Linux crash utility. It provides 37 commands for kernel crash dump analysis covering memory, CPU, storage, networking, filesystem, processes, locking, tracing, and more.
 
 All commands are invoked inside the crash utility as `epython <command>.py [options]` or directly by name if registered via `install.sh`.
 
@@ -92,7 +92,7 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 
 | Option | Long Form | Description |
 |--------|-----------|-------------|
-| `-b` | `--buddyinfo` | Show /proc/buddyinfo-like output |
+| `-b` | `--buddyinfo` | Show /proc/buddyinfo-like output (the old spelling `--budyinfo` still works) |
 | `-i` | `--meminfo` | Show /proc/meminfo-like output |
 | `-m` | `--numa` | Show NUMA info |
 | `--overall` | | Show overall memory usage breakdown with bar graphs |
@@ -121,6 +121,8 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | `--oom-summary` | | | Show OOM summary dashboard with pattern analysis |
 | `--oom-count` | | `N` | Limit number of OOM events to display |
 | `--oom-top` | | `N` | Show top N memory consumers (default: 10) |
+| `--oom-tree` | | | Show the OOM task dump as a process tree |
+| `--oom-ascii` | | | Use ASCII instead of Unicode glyphs in `--oom-tree` |
 | `--process-filter` | | `<name>` | Filter OOM events by process name (comma-separated or regex) |
 | `--shared` | | | Account for shared memory in OOM analysis to prevent double-counting |
 
@@ -397,15 +399,21 @@ Filesystem information including dentries, inodes, page caches, swap, and open f
 | `--findpidbyfile` | | `<addr>` | Find PID from /proc file address |
 | `--findpidbydentry` | | `<addr>` | Find PID from /proc dentry address |
 | `-i` | `--inode` | `<addr>` | Show detailed inode info |
-| `-n` | `--fsnotify` | | Show fsnotify details |
+| `-I` | `--icache` | `[<super_block>]` | What is holding the dentry and inode caches: cache sizes and per-superblock reclaimable counts; with a superblock, its pinned vs reclaimable inodes and the directories holding its dentries |
+| `--max` | | `N` | With `-I <super_block>`, stop each walk after N objects (default: 2000000) |
+| `-n` | `--fsnotify` | `<addr>` | Show fsnotify details for an `fsnotify_group` |
 | `--negdents` | | | Show negative dentries |
-| `-r` | `--page_caches` | | Show page caches |
+| `-r` | `--page_caches` | `[<super_block>]` | Page cache per superblock; with a superblock, what is consuming its cache |
+| `--top` | | `N` | With `-r` or `-I <super_block>`, rows in each table (default: 20) |
+| `--breakdown` | | | With `-r <super_block>`, group the cache by directory, filename pattern and owner, and report cache held by unlinked files |
+| `--holders` | | | With `-r <super_block>`, the processes holding the cache by open fd and by mapping; with `-I <super_block>`, the processes holding pinned inodes open |
+| `--depth` | | `N` | With `--breakdown`, group directories at N path components (default: 3; 0 for full paths) |
 | `-s` | `--slab` | | Show dentry details in slab |
 | `--show_open_files` | | | Show open files per process |
 | `--show_open_file_size` | | | Show file size of open files |
 | `-S` | `--swap` | | Show swap usage |
-| `-t` | `--task` | | Show task-related information |
-| `-p` | `--dumpe2fs` | | Show dumpe2fs-like information |
+| `-t` | `--task` | `<task_struct>` | Show the task and its executable's file details |
+| `-p` | `--dumpe2fs` | `<regex>` | Show dumpe2fs-like information for the superblocks whose root name matches (`*` for all) |
 | `-z` | `--frozen` | | Is a filesystem freeze blocking the system (`-d` adds backtraces) |
 
 #### Examples
@@ -413,16 +421,19 @@ Filesystem information including dentries, inodes, page caches, swap, and open f
 ```
 fsinfo -z                       # Freeze verdict: frozen fs, blocked tasks, agents
 fsinfo -c                       # Show dentry/inode caches
-fsinfo -r                       # Show page caches
+fsinfo -r                       # Page cache per filesystem
+fsinfo -r 0xffff888100aabbcc --breakdown --holders   # What holds one filesystem's cache, and who
+fsinfo -I                       # What holds the dentry and inode caches
+fsinfo -I 0xffff888100aabbcc    # Pinned vs reclaimable inodes of one filesystem
 fsinfo -S                       # Show swap usage
 fsinfo --show_open_files        # Show open files per process
 fsinfo --show_open_file_size    # Show file sizes of open files
 fsinfo -f 0xffff88003e500000    # Inspect struct file
 fsinfo -i 0xffff88003a100000    # Inspect inode
 fsinfo --findpidbyfile 0xffff...  # Find PID from file address
-fsinfo -n                       # Show fsnotify details
+fsinfo -n 0xffff88003b200000    # Show fsnotify_group details
 fsinfo --negdents               # Show negative dentries
-fsinfo -p                       # Show dumpe2fs-like output
+fsinfo -p '*'                   # dumpe2fs-like output for every superblock
 ```
 
 ---
@@ -629,7 +640,8 @@ Kernel module information including taint status, symbols, disassembly, and gap 
 | `--target_dir` | | `<dir>` | Save results to this directory |
 | `--nodate` | | | Do not use date in target filename |
 | `-m` | `--module` | `<addr>` | Retrieve module structure from address |
-| `-y` | `--symtab` | `<module>` | Retrieve module's symbol table |
+| `-y` | `--symtab` | | Retrieve the module's symbol table (with `-m`) |
+| `-r` | `--reverse` | | Disassemble from an unloaded module |
 
 #### Examples
 
@@ -811,22 +823,25 @@ seinfo -t              # Show total SID count
 
 ### selinuxinfo
 
-SELinux status and policy information.
+SELinux status and policy information. Without options it prints the status (enabled or disabled, and enforcing or permissive) and any `selinux=`/`enforcing=` boot parameter.
+
+Older kernels keep the state in the `selinux_enabled`, `selinux_enforcing` and `selinux_disabled` ints. RHEL8.10, RHEL9 and RHEL10 keep it in `struct selinux_state` (`initialized` stands for enabled, since `selinux_enabled_boot` is freed after boot; `disabled` is gone from RHEL10). `-d` shows which symbol each value came from.
 
 **Usage:** `selinuxinfo [options]`
 
 | Option | Long Form | Description |
 |--------|-----------|-------------|
-| `-d` | `--detail` | Show SELinux status |
-| `-i` | `--info` | Show SELinux basic policy |
-| `-f` | `--fsmount` | Show SELinux filesystem mount information |
+| `-d` | `--detail` | Show the status and the kernel symbols it was read from |
+| `-i` | `--info` | Show what enforcing, permissive and disabled mean |
+| `-f` | `--fsmount` | Show the selinuxfs superblock (`selinuxfs_mount`, or `selinux_null.mnt` on RHEL9 and later) and where it is mounted |
 
 #### Examples
 
 ```
-selinuxinfo -d         # Show SELinux status
-selinuxinfo -i         # Show basic policy info
-selinuxinfo -f         # Show SELinux fs mounts
+selinuxinfo            # Status
+selinuxinfo -d         # Status and the kernel symbols behind it
+selinuxinfo -i         # What the modes mean
+selinuxinfo -f         # selinuxfs mounts
 ```
 
 ### auditinfo
@@ -1007,7 +1022,7 @@ autocheck -r           # Reload rules after modification
 
 ### insights
 
-Run Red Hat Insights checks against the crash dump data.
+Run Red Hat Insights checks against the crash dump data. Needs a remoteapi server with the insights plugin re-enabled; it ships disabled (`remoteapi/web/plugins/insights.py.deprecated`). `autocheck` runs the local rules instead.
 
 **Usage:** `insights [options]`
 
@@ -1059,14 +1074,14 @@ The plan and the layout are in `evidplan.py`; `python3 evidplan_test.py` and `py
 
 ### ai
 
-Submit crash data to an AI engine for analysis. Supports multiple engines and models.
+Submit crash command output (or a file), with an optional question, to an AI model. The engine is a local `claude` or `gemini` CLI when `-e` names one or, without `-e`, when one is on the PATH; otherwise the remoteapi server (`CRASHEXT_SERVER`), which forwards to ollama or podman (`-e`/`AI_ENGINE`, `-m`/`AI_MODEL`). It needs something to analyse: at least one `-c`, an `-i` file, or a question.
 
 **Usage:** `ai [options] [prompt]`
 
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
 | `-c` | `--cmd` | `<command>` | The output of this command will be analysed (repeatable) |
-| `-e` | `--engine` | `<engine>` | Choose AI engine to use |
+| `-e` | `--engine` | `<engine>` | `claude` or `gemini` (local CLI), or an engine of the remoteapi server (`ollama`, `podman`) |
 | `-i` | `--input` | `<file>` | Use file for input data |
 | `-m` | `--model` | `<model>` | Choose AI model to use |
 | `-r` | `--reset` | | Reset AI prompt history |
@@ -1077,10 +1092,10 @@ Submit crash data to an AI engine for analysis. Supports multiple engines and mo
 ```
 ai What caused this crash?              # Ask about the crash
 ai -c "bt" -c "log" Analyze this       # Analyze bt and log output
-ai -e gemini What happened?            # Use Gemini engine
-ai -m gpt-4 Explain the panic          # Use specific model
+ai -e gemini -c "bt" What happened?    # Use the local Gemini CLI
+ai -e ollama -m llama3.2 -c "log"      # Use the remoteapi server's ollama model
 ai -i /tmp/data.txt Analyze this       # Use file as input
-ai -r                                  # Reset conversation history
+ai -r -c "bt"                          # Start a fresh conversation (server history)
 ```
 
 ---
@@ -1147,9 +1162,9 @@ caseinfo -s            # Show sys output
 
 ### git
 
-Execute `git log` and `git show` commands against remote kernel source repositories. Useful for looking up commit details and searching kernel source history.
+Execute `git log` and `git show` against remote kernel source repositories, and `git find` to check whether an upstream patch is backported into this kernel. Needs the remoteapi server (`CRASHEXT_SERVER`).
 
-**Usage:** `git <log|show> [git-options]`
+**Usage:** `git <log|show|find> [options]` (`git -h` is not accepted; use `git log --help`, `git show --help` or `git find --help`)
 
 #### Subcommands
 
@@ -1157,6 +1172,7 @@ Execute `git log` and `git show` commands against remote kernel source repositor
 |------------|-------------|
 | `log` | Search git log (supports all standard git log options, default: --max-count=1) |
 | `show` | Show commit details (supports all standard git show options) |
+| `find` | Find an upstream patch by subject or commit ID and report whether it is backported into this kernel |
 
 #### Options
 
@@ -1166,9 +1182,30 @@ Execute `git log` and `git show` commands against remote kernel source repositor
 | `--timeout` | `N` | Request timeout in seconds (default: 3600) |
 | `--verbose` | | Show verbose output |
 
+#### `git find` options
+
+| Option | Argument | Description |
+|--------|----------|-------------|
+| `--commit` | `<id>` | Force commit ID lookup |
+| `--subject` | `<text>` | Force subject text search |
+| `--max-count` | `N` | Maximum matches to report (default: 10) |
+| `--upstream` | `<dir>` | Upstream repo directory name (default: auto-detect) |
+| `--web` / `--no-web` | | Always / never query the public kernel sources (default: only when the local repos miss) |
+| `--web-timeout` | `N` | Per-request web timeout in seconds (default: 20) |
+| `--message-lines` | `N` | Lines of commit message to show (default: 20) |
+| `--no-message` | | Show only the subject, not the message body |
+| `--no-backport` | | Skip the backport cross-check |
+| `--no-tags` | | Skip the release-tag lookup (much faster) |
+| `--patch`, `--stat` | | Show the diff / diffstat of each match |
+| `--update` | | Fetch the latest branch and tags into every repo first |
+
+The query type is detected automatically: 7-40 hex characters are a commit ID, anything else is subject text, which does not need quoting.
+
 #### Examples
 
 ```
+git find <commit-id> --stat                  # Is this upstream fix in this kernel?
+git find net/mlx5e: Fix crash moving to switchdev mode
 git log -Sclip_push --max-count=5           # Search for commits touching 'clip_push'
 git show abc123def --stat                    # Show commit with diffstat
 git log -Sinit_new_ldt --repos=rhel9,upstream  # Search specific repos

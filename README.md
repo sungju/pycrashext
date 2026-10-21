@@ -1,6 +1,6 @@
 # pycrashext
 
-Crash extension commands for the Linux [crash utility](https://github.com/crash-utility/crash), built on [PyKdump](https://sourceforge.net/projects/pykdump/). It provides 30+ commands for kernel crash dump analysis covering memory, processes, networking, cgroups, modules, filesystems, scheduling, locks, and more — plus a rule-based engine that automatically detects known issues.
+Crash extension commands for the Linux [crash utility](https://github.com/crash-utility/crash), built on [PyKdump](https://sourceforge.net/projects/pykdump/). It provides 37 commands for kernel crash dump analysis covering memory, processes, storage, networking, cgroups, modules, filesystems, scheduling, locks, and more — plus a rule-based engine that automatically detects known issues, and a one-screen system summary (`sysinfo`) that says where to start.
 
 ![Example screen of "edis -lrg"](https://github.com/sungju/pycrashext/blob/main/docs/edis_example.png)
 
@@ -19,32 +19,43 @@ $ logout
 < login again >
 ```
 
-The installer configures `~/.crashrc` to load the mpykdump extension and register all commands, and sets `PYKDUMPPATH` in `~/.bash_profile`. It also optionally configures `CRASHEXT_SERVER` for commands that require the remote API server (`edis`, `git`, `ai`).
+The installer configures `~/.crashrc` to load the mpykdump extension (asking for its directory unless it is already loaded there) and register all commands, and sets `PYKDUMPPATH` in `~/.bash_profile`. It also optionally configures `CRASHEXT_SERVER` for the commands that use the remote API server (`edis`, `git`, and `ai` when no local AI CLI is installed). Both files are backed up as `<file>.<timestamp>.bak` before they are changed.
+
+After logging in again, start crash on a vmcore and try:
+
+```
+crash> sysinfo          # what this machine was, and which commands to run first
+crash> autocheck        # known issues, with KCS links
+crash> devinfo -s       # storage: hosts in error handling, devices down, stuck I/O
+```
 
 ## Project Structure
 
 ```
 pycrashext/
 ├── source/               # Command modules and detection rules
-│   ├── *.py              # 30+ crash commands (one per file)
-│   ├── rules/            # 14 autocheck detection rules
+│   ├── *.py              # 37 crash commands (one per file) and their helpers
+│   ├── *_test.py         # Checks that run without crash (see Tests)
+│   ├── rules/            # 15 autocheck detection rules
 │   ├── config.json       # Command registration config
 │   ├── regext.py         # Registration logic
 │   ├── crashhelper.py    # Shared helper utilities
 │   └── crashcolor.py     # Color output support
 ├── remoteapi/            # Backend server for edis, git, ai commands
 │   └── web/              # Flask app with plugin architecture
-├── docs/                 # Screenshots and images
+├── docs/
+│   ├── COMMANDS.md       # Every command and option
+│   └── *.png             # Screenshots
 └── install.sh            # Installer script
 ```
 
 ## Commands
 
-Every command accepts `-h` to show its available options. See [`source/README.md`](source/README.md) for detailed usage and examples.
+Every command accepts `-h` to show its available options, except `git`, which takes `git log --help`, `git show --help` or `git find --help`. [`docs/COMMANDS.md`](docs/COMMANDS.md) lists every option of every command, and [`source/README.md`](source/README.md) walks through many of them with real output.
 
 | Command | Description |
 |---|---|
-| **ai** | Analyse command output using an AI model (needs remoteapi) |
+| **ai** | Analyse command output with an AI model: a local `claude` or `gemini` CLI if installed, otherwise the remoteapi server |
 | **auditinfo** | Audit subsystem information |
 | **autocheck** | Diagnose known issues using the built-in detection rules |
 | **bh** | Bottom half (softirq/tasklet) information |
@@ -53,17 +64,21 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **cpuinfo** | CPU information, core topology, effective frequency analysis |
 | **devinfo** | Storage status, block/char devices, block requests, swiotlb, paravirtual I/O rings |
 | **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
-| **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style, page cache breakdown) |
+| **evidence** | Run a vmcore analysis's commands in one session and write their output into one evidence file |
+| **fsinfo** | Filesystem information (freeze status, dumpe2fs-style, page cache and dentry/inode cache breakdown) |
 | **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss, with every match labelled `local` or `web` (needs remoteapi) |
 | **hangcheck** | Show hung (D-state) tasks with details |
 | **insights** | Run insights rules (needs remoteapi; currently deprecated) |
 | **ipcinfo** | IPC information |
 | **ipmi** | IPMI information |
+| **kvercmp** | Is a fix already in this kernel? Compares the dump's kernel with the fixed kernels an errata or KCS lists |
 | **lockinfo** | Lock related information (spinlock/MCS lock) |
 | **lockup** | Detect long running tasks on CPUs |
+| **logscan** | Count the known kernel log signatures and print their first and last lines |
 | **meminfo** | Memory information (usage, NUMA, slab, OOM, buddyinfo, swap) |
 | **modinfo** | Module information, disassembly, unloaded module recovery |
 | **netinfo** | Network information |
+| **preempt** | Decode `preempt_count` values, or every one the kernel log prints (`-l`) |
 | **psinfo** | `ps`-like process information (`--aux`, `--ef`, stack search) |
 | **pstree** | Process list in tree format |
 | **rcuinfo** | RCU information (stalls, grace periods, node tree, per-CPU callbacks) |
@@ -73,15 +88,34 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **seinfo** | SELinux sidtab information |
 | **selinuxinfo** | SELinux status |
 | **syscallinfo** | System call table listing and modification check |
+| **sysinfo** | One screen on what the machine was (vendor, hypervisor or cloud), RHEL minor release, taint, third-party products, workloads, and the commands to start with |
 | **timeinfo** | Time related information (clock sources) |
 | **traceinfo** | ftrace/BPF tracing information |
-| **vminfo** | Virtual machine information (balloon, hypervisor overcommit) |
+| **vminfo** | Virtual machine information (memory ballooning, VM context, hypervisor CPU/memory overcommit) |
 
 ## Autocheck (Automated Issue Detection)
 
 The `autocheck` command runs all rules under `source/rules/` against the current crash dump and reports any known issues it finds, along with KCS article links and resolution steps.
 
 Rules implement a standard interface (`add_rule()`, `run_rule()`, `is_major()`, `description()`) and can be added by dropping a new `.py` file into the `source/rules/` directory.
+
+## Storage Status
+
+`devinfo -s` answers whether storage is why a system hung, on every RHEL
+release (`scsishow -p` needs `Scsi_Host->host_busy`, which is gone from RHEL8):
+
+```
+crash> devinfo -s         # answer on top, then hosts, devices, other disks
+crash> devinfo -s -d      # also idle devices and every FC remote port
+crash> devinfo -q         # the requests behind it, oldest first
+crash> devinfo -p         # VMs: did the host stop completing I/O?
+```
+
+The answer names the worst finding and where it is: a SCSI host in error
+handling, a device or FC path down, I/O stalled (requests at the device past
+30s or their timeout, timers a driver keeps restarting, completions the kernel
+never finished), a stopped queue, or a blocked device. On a terminal the
+fields are colored; piped output stays plain.
 
 ## Investigating Page Cache Usage
 
@@ -285,6 +319,13 @@ $ export CRASHEXT_SERVER=http://<address>:5000
 | `CODE_THEME` | Color theme for AI markdown output |
 | `PYTHON_LIB` | Additional Python library paths for `sys.path` |
 | `PYCRASHEXT_COMMAND_PATH` | Directories with extra crash commands kept outside this repository (see below) |
+| `PYCRASHEXT_API_KEY` | Sent as the `X-API-Key` header to the remoteapi server; set it to the server's key when the server has one |
+
+`AI_ENGINE`, `AI_MODEL` and `AI_REQUEST_TIMEOUT` apply when `ai` goes through
+the remoteapi server; with a local `claude` or `gemini` CLI installed, `ai`
+uses that CLI unless `-e` names another engine. `CODE_THEME` (default `tango`)
+also colors `edis` source output. The server's own variables are listed in
+[`remoteapi/README.md`](remoteapi/README.md).
 
 ## External Commands
 
@@ -303,6 +344,19 @@ $ crash ...
 - External commands can import pycrashext modules such as `crashcolor` and `netutil` (`netutil.urlopen_post()` handles the POST to a `CRASHEXT_SERVER` URL).
 
 Run `python3 source/extcmds_test.py` to check the registration rules.
+
+## Tests
+
+The checks for the logic that does not need a vmcore run with plain Python 3:
+
+```
+$ cd source
+$ for t in *_test.py; do [ "$t" = cmds_test.py ] || python3 "$t" || break; done
+$ python3 ../remoteapi/web/load_plugins_test.py
+```
+
+`cmds_test.py` is different: it runs sets of commands inside crash
+(`epython cmds_test.py --list`, then `epython cmds_test.py --cmd <set>`).
 
 ## License
 
