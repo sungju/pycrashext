@@ -518,28 +518,65 @@ cginfo -g                     # task_group scheduling details
 
 ### devinfo
 
-Device information for block devices, character devices, and IOMMU/IOTLB.
+Storage status, block and character devices, block requests, swiotlb and
+paravirtual I/O rings.
 
 **Usage:** `devinfo [options]`
 
 | Option | Long Form | Description |
 |--------|-----------|-------------|
-| `-b` | `--block` | Show block device details |
-| `-c` | `--char` | Show character device details |
-| `-d` | `--details` | Show detailed information |
-| `-i` | `--iotlb` | Show IOTLB information |
-| `-q` | `--requests` | Show request details |
+| `-s` | `--status` | Storage status: SCSI hosts and devices, FC remote ports, other disks, and the I/O each holds, with an answer on top (`-d` lists idle devices too) |
+| `-b` | `--block` | Block majors and every disk: size, driver, queue type, hardware queues, scheduler (`-d` adds queue limits, stopped hardware queues, bio-based in-flight counts) |
+| `-c` | `--char` | Character device regions and their `file_operations` |
+| `-q` | `--requests` | Block requests queued or in flight, oldest first, and per device (`-d` adds hardware queue and tag) |
+| `-i` | `--iotlb` | swiotlb bounce buffers: size and use (`-d` lists the slots in use) |
 | `-p` | `--pvio` | Paravirtual I/O rings: what the host has not completed (`-d` adds structure addresses) |
+| `-d` | `--details` | More detail for the options above |
 
 #### Examples
 
 ```
-devinfo -b               # Show block devices
-devinfo -c               # Show character devices
-devinfo -b -d            # Detailed block device info
-devinfo -i               # Show IOTLB info
+devinfo -s               # is a host in error handling, a device or path down, I/O stuck?
+devinfo -s -d            # ... and list every device and FC remote port
+devinfo -q               # the requests behind it, oldest first
+devinfo -b               # disks: size, driver, queue type, scheduler
+devinfo -c               # character devices
+devinfo -i               # swiotlb use
 devinfo -p               # virtio / pvscsi / VMBus rings: host or guest side?
 ```
+
+`--status` is `scsishow -p`/`-s` for every RHEL release: `scsishow -p` needs
+`Scsi_Host->host_busy`, which is gone from RHEL8. It reads:
+- SCSI hosts: state, BUSY (commands at the HBA: the `host_busy` counter on
+  RHEL7, the in-flight commands of the tag set later), FAILED
+  (`host_failed`: waiting for the error handler, which starts once it equals
+  BUSY), BLOCKED, `host_eh_scheduled`, and the error handler thread.
+- SCSI devices: state, BUSY (`device_busy`, or `budget_map` from RHEL9),
+  BLOCKED, IOREQ/IODONE/IOERR/IOTMO counters, and the requests the device
+  holds. Devices that are running, idle and error-free are left out unless
+  `-d` is given.
+- FC remote ports that are not online (all of them with `-d`).
+- Other disks (NVMe with its controller state, virtio, dm, md, loop):
+  requests held, or the in-flight count of a bio-based disk.
+
+The answer is the worst finding:
+- `ERROR RECOVERY`: host in recovery or with failed commands; NVMe
+  controller resetting or connecting.
+- `DEVICE OFFLINE`, `PATH DOWN` (FC remote port not online).
+- `I/O STALLED` or `I/O SLOW`: the oldest request at the device is 30s/5s
+  old from dispatch, or past the device timeout, or timed out; requests
+  allocated 30s ago whose timer the driver keeps restarting; requests the
+  device completed that the kernel has not finished; requests not sent to
+  the driver for 30s.
+- `QUEUE STOPPED` (quiesced, or stopped hardware queues with requests
+  waiting), `DEVICE BLOCKED`.
+- `BUSY` or `IDLE`. Errors and timeouts since boot are listed under the
+  answer but are not a verdict.
+
+Request ages are from allocation (`start_time` in jiffies on RHEL7,
+`start_time_ns` against CLOCK_MONOTONIC from `tk_core` later) and from
+dispatch (`jiffies - deadline + timeout`). The verdicts are in
+`source/storstat.py`, with checks in `storstat_test.py`.
 
 `--pvio` reads the rings a paravirtual device shares with the host: virtio
 split virtqueues, VMware pvscsi `rings_state`, and Hyper-V VMBus channels

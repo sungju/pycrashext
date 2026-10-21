@@ -727,7 +727,7 @@ LOG_NEXT = [
     ("rcu_stall", "rcuinfo -s", "RCU stall: which CPU or task held it up?"),
     ("oom", "meminfo -i", "the OOM killer ran"),
     ("oom_cgroup", "cginfo -m", "a memory cgroup ran out"),
-    ("storage", "devinfo -q", "storage errors: requests still in flight"),
+    ("storage", "devinfo -s", "storage errors: host in error handling, device down, I/O stuck?"),
     ("netdev_timeout", "netinfo -i", "a NIC transmit timeout"),
     ("corruption", "kmem -s", "corruption report: check the slab caches"),
     ("hardware", "log | grep -iE 'mce|hardware error|edac'", "hardware errors in the log"),

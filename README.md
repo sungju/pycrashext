@@ -51,7 +51,7 @@ Every command accepts `-h` to show its available options. See [`source/README.md
 | **caseinfo** | Show case number when running on a retrace server |
 | **cginfo** | cgroup information (v1/v2/hybrid) |
 | **cpuinfo** | CPU information, core topology, effective frequency analysis |
-| **devinfo** | Device information |
+| **devinfo** | Storage status, block/char devices, block requests, swiotlb, paravirtual I/O rings |
 | **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
 | **fsinfo** | Filesystem information (mount details, freeze status, dumpe2fs-style, page cache breakdown) |
 | **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss, with every match labelled `local` or `web` (needs remoteapi) |

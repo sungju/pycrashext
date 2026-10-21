@@ -60,7 +60,7 @@ HELPERS = {
     "crashhelper", "crashcolor", "evidplan", "logsig", "sysenv", "netutil",
     "kernel_version", "overcommit", "preemptcount", "rules_helper", "regext",
     "reg_all_ext", "cmds_test", "disasm", "get_x86asm", "revs", "screen",
-    "ai_send", "btgroup", "fsfreeze", "pvring", "__init__",
+    "ai_send", "btgroup", "fsfreeze", "pvring", "storstat", "__init__",
 }
 
 
@@ -252,7 +252,8 @@ def branch_steps(cls, exc, sys_fields):
         if "netdev_timeout" in hits:
             steps.append(Step("netinfo -i -d", "Network interfaces and drivers", 60, 20))
         if "storage" in hits:
-            steps.append(Step("devinfo -b -d", "Block devices and pending requests", 60, 20))
+            steps.append(Step("devinfo -s", "Storage status: SCSI hosts, devices, stuck I/O", 60, 20))
+            steps.append(Step("devinfo -q", "Block requests queued or in flight", 60, 20))
     if "E" in br:
         steps.append(Step("bt 1", "Backtrace of init", 50, 20))
         steps.append(Step("ps 1", "init task", 10, 0))

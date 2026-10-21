@@ -194,7 +194,7 @@ def check_next_steps():
     steps = [c for c, _ in next_steps(plat, ["panic", "hung_task", "storage"], [(0, "P", "")], (),
                                       [("VMware Tools", 1)], kernel_release("4.18.0-553.el8_10.x86_64"))]
     assert steps[0] == "bt"
-    for c in ("hangcheck", "devinfo -q", "vminfo -o", "devinfo -p", "fsinfo -z", "mod -t", "logscan"):
+    for c in ("hangcheck", "devinfo -s", "vminfo -o", "devinfo -p", "fsinfo -z", "mod -t", "logscan"):
         assert c in steps, (c, steps)
     assert steps.index("hangcheck") < steps.index("vminfo -o")
     assert len(steps) == len(set(steps))
