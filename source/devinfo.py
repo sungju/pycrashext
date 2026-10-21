@@ -85,17 +85,61 @@ def _driver(gd):
     return _symbol(fops) or "-"
 
 
-def _print_colored(color, text, end="\n"):
-    crashcolor.set_color(color)
-    print(text, end=end)
-    crashcolor.set_color(crashcolor.RESET)
-
-
 def _age_color(age):
     if age is None or age < storstat.SLOW_SEC:
         return crashcolor.RESET
     return crashcolor.LIGHTRED if age >= storstat.STALL_SEC \
         else crashcolor.YELLOW
+
+
+# Field colors; empty when not on a terminal, so piped output stays plain.
+TITLE_COLOR = crashcolor.LIGHTCYAN
+HEADER_COLOR = crashcolor.BOLD
+NAME_COLOR = crashcolor.CYAN
+INFLIGHT_COLOR = crashcolor.LIGHTBLUE
+DRIVER_COLOR = crashcolor.MAGENTA
+SYMBOL_COLOR = crashcolor.GREEN
+OK_COLOR = crashcolor.GREEN
+WARN_COLOR = crashcolor.YELLOW
+BAD_COLOR = crashcolor.LIGHTRED
+OK_STATES = ("SHOST_RUNNING", "SDEV_RUNNING", "FC_PORTSTATE_ONLINE",
+             "NVME_CTRL_LIVE")
+
+
+def _c(text, color):
+    """text in color on a terminal; pad it before, so columns line up."""
+    start = crashcolor.get_color(color)
+    if not start or color == crashcolor.RESET:
+        return text
+    return start + text + crashcolor.get_color(crashcolor.RESET)
+
+
+def _title(text):
+    print(_c(text, TITLE_COLOR))
+
+
+def _header(text):
+    print(_c(text, HEADER_COLOR))
+
+
+def _state_value_color(state):
+    if state in OK_STATES:
+        return OK_COLOR
+    if state in ("-", ""):
+        return crashcolor.RESET
+    if state in storstat.SDEV_HELD:
+        return WARN_COLOR
+    return BAD_COLOR
+
+
+def _count(value, width, color=WARN_COLOR):
+    """A right-aligned count, colored when it is not zero."""
+    text = "%*s" % (width, value)
+    return _c(text, color) if value not in (0, "0", "-", None) else text
+
+
+def _age_field(age, width):
+    return _c("%*s" % (width, storstat.age_text(age)), _age_color(age))
 
 
 # ---------------------------------------------------------------------------
@@ -298,15 +342,15 @@ def _block_majors():
 
 def show_blkdevs(options):
     majors = _block_majors()
-    print("Block device majors")
+    _title("Block device majors")
     for name, nums in sorted(majors.items(), key=lambda e: min(e[1])):
-        print("  %-16s %s" % (name, _ranges(nums)))
+        print("  %s %s" % (_c("%-16s" % name, DRIVER_COLOR), _ranges(nums)))
 
     disks = block_disks()
-    print("\nDisks (%d)" % len(disks))
-    print("  %-9s %-14s %8s %-14s %-4s %4s %-12s %-18s %-18s"
-          % ("MAJ:MIN", "NAME", "SIZE", "DRIVER", "TYPE", "HWQ", "SCHED",
-             "gendisk", "request_queue"))
+    _title("\nDisks (%d)" % len(disks))
+    _header("  %-9s %-14s %8s %-14s %-4s %4s %-12s %-18s %-18s"
+            % ("MAJ:MIN", "NAME", "SIZE", "DRIVER", "TYPE", "HWQ", "SCHED",
+               "gendisk", "request_queue"))
     hz = get_hz()
     for gd in disks:
         q = gd.queue
@@ -318,11 +362,11 @@ def show_blkdevs(options):
                 hwq = str(int(q.nr_hw_queues))
             except Exception:
                 pass
-        print("  %-9s %-14s %8s %-14s %-4s %4s %-12s 0x%-16x 0x%-16x"
+        print("  %-9s %s %8s %s %-4s %4s %-12s 0x%-16x 0x%-16x"
               % ("%d:%d" % (int(gd.major), int(gd.first_minor)),
-                 gd.disk_name, _size_text(sectors * 512 if sectors is not None
-                                          else None),
-                 _driver(gd)[:14], kind, hwq,
+                 _c("%-14s" % gd.disk_name, NAME_COLOR),
+                 _size_text(sectors * 512 if sectors is not None else None),
+                 _c("%-14s" % _driver(gd)[:14], DRIVER_COLOR), kind, hwq,
                  _elevator(q)[:12] if q and kind != "bio" else "-",
                  int(gd), int(q) if q else 0))
         if options.show_details and q:
@@ -334,7 +378,7 @@ def _show_queue_details(q, kind, gd, hz):
     if kind == "bio":
         inflight = _bio_inflight(gd)
         print("%sbio-based, %s in flight" % (indent,
-              "?" if inflight is None else inflight))
+              "?" if inflight is None else _count(inflight, 0)))
         return
     parts = []
     try:
@@ -351,7 +395,7 @@ def _show_queue_details(q, kind, gd, hz):
         except Exception:
             pass
         if stopped:
-            parts.append(stopped)
+            parts.append(_c(stopped, WARN_COLOR))
         print("%s%s" % (indent, ", ".join(parts)))
         return
     hctxs = _hctxs(q)
@@ -365,7 +409,8 @@ def _show_queue_details(q, kind, gd, hz):
     if member_offset("struct request_queue", "quiesce_depth") >= 0:
         try:
             if int(q.quiesce_depth):
-                parts.append("quiesced (depth %d)" % int(q.quiesce_depth))
+                parts.append(_c("quiesced (depth %d)" % int(q.quiesce_depth),
+                                WARN_COLOR))
         except Exception:
             pass
     print("%s%s" % (indent, ", ".join(parts)))
@@ -374,8 +419,9 @@ def _show_queue_details(q, kind, gd, hz):
         dispatch = _hctx_dispatch(hctx)
         if flags or dispatch:
             print("%shctx %d 0x%x: %s%s" % (indent, int(hctx.queue_num),
-                  int(hctx), " ".join(flags) or "-",
-                  ", %d on the dispatch list" % dispatch if dispatch else ""))
+                  int(hctx), _c(" ".join(flags), WARN_COLOR) if flags else "-",
+                  ", %s on the dispatch list" % _count(dispatch, 0)
+                  if dispatch else ""))
 
 
 def _cdev_probes():
@@ -414,8 +460,8 @@ def show_chrdevs(options):
             rows.append((major, base, count, str(cd.name), cdev))
             addr, n = int(cd.next), n + 1
     rows.sort()
-    print("%5s  %-14s %-18s %-18s %s" % ("MAJOR", "MINORS", "NAME", "cdev",
-                                         "OPERATIONS"))
+    _header("%5s  %-14s %-18s %-18s %s" % ("MAJOR", "MINORS", "NAME", "cdev",
+                                           "OPERATIONS"))
     for major, base, count, name, cdev in rows:
         minors = str(base) if count <= 1 else "%d-%d" % (base, base + count - 1)
         ops = 0
@@ -424,9 +470,11 @@ def show_chrdevs(options):
                 ops = int(readSU("struct cdev", cdev).ops)
             except Exception:
                 pass
-        print("%5d  %-14s %-18s %-18s %s" % (
-            major, minors, name, "0x%x" % cdev if cdev else "-",
-            "0x%x <%s>" % (ops, _symbol(ops)) if ops else "-"))
+        print("%5d  %-14s %s %-18s %s" % (
+            major, minors, _c("%-18s" % name, NAME_COLOR),
+            "0x%x" % cdev if cdev else "-",
+            "0x%x %s" % (ops, _c("<%s>" % _symbol(ops), SYMBOL_COLOR))
+            if ops else "-"))
     print("\ncdev '-': the driver registered the region but its cdev is not "
           "in cdev_map (no device node behind it yet, or a misc/tty-style "
           "driver that adds its own)")
@@ -513,7 +561,7 @@ def _iotlb_pools():
 
 def show_iotlb(options):
     pools = _iotlb_pools()
-    print("swiotlb (bounce buffers for DMA to memory a device cannot reach)")
+    _title("swiotlb (bounce buffers for DMA to memory a device cannot reach)")
     if not pools:
         print("  not in this kernel")
         return
@@ -523,24 +571,25 @@ def show_iotlb(options):
                   "buffers, or swiotlb=noforce / an IOMMU is in use" % label)
             continue
         total = nslabs << IO_TLB_SHIFT
-        print("  pool       %s, phys 0x%x-0x%x" % (label, start, end))
+        print("  pool       %s, phys 0x%x-0x%x" % (_c(label, NAME_COLOR), start,
+                                                  end))
         print("  size       %s, %d slots of %d bytes" % (
-            _size_text(total), nslabs, 1 << IO_TLB_SHIFT))
+            _c(_size_text(total), NAME_COLOR), nslabs, 1 << IO_TLB_SHIFT))
         if force is not None:
-            print("  bounce     %s" % ("forced for every DMA (swiotlb=force or "
-                                       "a confidential guest)" if force
+            print("  bounce     %s" % (_c("forced for every DMA (swiotlb=force "
+                                          "or a confidential guest)",
+                                          WARN_COLOR) if force
                                        else "only where needed"))
         if used is None:
             print("  used       unknown")
             continue
         pct = 100.0 * used / nslabs
-        text = "  used       %d slots, %s (%.1f%%)" % (
-            used, _size_text(used << IO_TLB_SHIFT), pct)
-        if pct >= 90:
-            _print_colored(crashcolor.LIGHTRED, text + "  nearly full: expect "
-                           "'swiotlb buffer is full' and failed DMA mappings")
-        else:
-            print(text)
+        color = BAD_COLOR if pct >= 90 else WARN_COLOR if pct >= 50 \
+            else OK_COLOR
+        print("  used       %s" % _c("%d slots, %s (%.1f%%)%s" % (
+            used, _size_text(used << IO_TLB_SHIFT), pct,
+            "  nearly full: expect 'swiotlb buffer is full' and failed DMA "
+            "mappings" if pct >= 90 else ""), color))
         busy_areas = [(i, a[0]) for i, a in enumerate(areas) if a[0]]
         if len(areas) > 1:
             print("  areas      %d, %d in use%s" % (
@@ -553,7 +602,7 @@ def show_iotlb(options):
             except Exception as e:
                 print("  slots in use: not read (%s)" % e)
                 continue
-            print("\n  Slots in use (%d runs)" % len(runs))
+            _header("\n  Slots in use (%d runs)" % len(runs))
             for first, last in runs:
                 print("    %6d-%-6d %4d slots  phys 0x%x" % (
                     first, last, last - first + 1,
@@ -748,44 +797,49 @@ def _per_queue(requests):
     return agg
 
 
+REQUEST_STATE_COLORS = {"active": INFLIGHT_COLOR, "timeout": BAD_COLOR,
+                        "softirq": WARN_COLOR, "flushq": DRIVER_COLOR}
+
+
 def show_requests(options):
     names = disk_names()
     requests = scan_requests(names)
     if not requests:
         print("No block requests are queued or in flight")
         return
-    print("Block requests, oldest first (ALLOCATED: since the request was "
-          "allocated, DISPATCHED: since it was sent to the driver)")
-    print("  %-18s %-10s %-8s %-11s %13s %7s %10s %10s%s"
-          % ("REQUEST", "DEVICE", "STATE", "OP", "SECTOR", "SIZE",
-             "ALLOCATED", "DISPATCHED", "  HWQ   TAG" if options.show_details
-             else ""))
+    _title("Block requests, oldest first (ALLOCATED: since the request was "
+           "allocated, DISPATCHED: since it was sent to the driver)")
+    _header("  %-18s %-10s %-8s %-11s %13s %7s %10s %10s%s"
+            % ("REQUEST", "DEVICE", "STATE", "OP", "SECTOR", "SIZE",
+               "ALLOCATED", "DISPATCHED", "  HWQ   TAG" if options.show_details
+               else ""))
     for r in requests:
-        age = r["dispatch"] if r["dispatch"] is not None else r["alloc"]
-        line = "  0x%-16x %-10s %-8s %-11s %13s %7s %10s %10s" % (
-            r["req"], r["name"][:10], r["state"], r["op"][:11],
+        line = "  0x%-16x %s %s %-11s %13s %7s %s %s" % (
+            r["req"], _c("%-10s" % r["name"][:10], NAME_COLOR),
+            _c("%-8s" % r["state"], REQUEST_STATE_COLORS.get(
+                r["state"], crashcolor.RESET)), r["op"][:11],
             "-" if r["sector"] is None else r["sector"],
             _size_text(r["bytes"]) if r["bytes"] else "-",
-            storstat.age_text(r["alloc"]), storstat.age_text(r["dispatch"]))
+            _age_field(r["alloc"], 10), _age_field(r["dispatch"], 10))
         if options.show_details:
             line += " %4s %5s" % ("-" if r["hctx"] is None else r["hctx"],
                                   "-" if r["tag"] is None else r["tag"])
-        _print_colored(_age_color(age), line)
+        print(line)
 
     agg = _per_queue(requests)
-    print("\nPer device")
-    print("  %-10s %5s %6s %6s %7s %7s %5s %10s %10s"
-          % ("DEVICE", "HELD", "QUEUED", "ACTIVE", "TIMEOUT", "SOFTIRQ",
-             "OTHER", "ALLOCATED", "DISPATCHED"))
+    _title("\nPer device")
+    _header("  %-10s %5s %6s %6s %7s %7s %5s %10s %10s"
+            % ("DEVICE", "HELD", "QUEUED", "ACTIVE", "TIMEOUT", "SOFTIRQ",
+               "OTHER", "ALLOCATED", "DISPATCHED"))
     for qaddr, a in sorted(agg.items(), key=lambda e: names.get(e[0], "")):
-        _print_colored(_age_color(a["oldest"]),
-                       "  %-10s %5d %6d %6d %7d %7d %5d %10s %10s" % (
-                           (names.get(qaddr) or "0x%x" % qaddr)[:10],
-                           a["held"], a["queued"], a["active"], a["timeout"],
-                           a["softirq"], a["other"],
-                           storstat.age_text(a["oldest_alloc"]),
-                           storstat.age_text(a["oldest"])))
-    print("\nNotes")
+        print("  %s %5d %6d %6d %s %s %5d %s %s" % (
+            _c("%-10s" % (names.get(qaddr) or "0x%x" % qaddr)[:10],
+               NAME_COLOR),
+            a["held"], a["queued"], a["active"],
+            _count(a["timeout"], 7, BAD_COLOR), _count(a["softirq"], 7),
+            a["other"], _age_field(a["oldest_alloc"], 10),
+            _age_field(a["oldest"], 10)))
+    _title("\nNotes")
     print("  - queued: waiting in the scheduler or for a driver tag; active: "
           "sent to the driver; timeout: its timer fired (SCSI error")
     print("    handling); softirq: completed by the device, waiting for the "
@@ -1052,14 +1106,14 @@ def show_status(options):
 
     findings.sort(key=lambda f: storstat.STATES.index(f[0]))
 
-    _print_colored(crashcolor.LIGHTCYAN, "Storage status\n==============")
+    _title("Storage status\n==============")
     print("Answer : ", end="")
     problems = [f for f in findings if f[0] in storstat.PROBLEMS]
     if problems:
         for i, (state, where, note) in enumerate(problems[:20]):
             if i:
                 print("         ", end="")
-            _print_state(state, "%s: %s" % (where, note))
+            _print_state(state, "%s: %s" % (_c(where, NAME_COLOR), note))
         if len(problems) > 20:
             print("         ... and %d more, see below" % (len(problems) - 20))
     elif not hosts and not others:
@@ -1073,99 +1127,109 @@ def show_status(options):
                         % len(busy) if busy else ""))
     errors = [f for f in findings if f[0] == "ERRORS SEEN"]
     if errors:
-        print("         errors or timeouts since boot on %d device(s): %s" % (
-            len(errors), ", ".join(f[1].split()[0] for f in errors[:8])
+        print("         %s on %d device(s): %s" % (
+            _c("errors or timeouts since boot", WARN_COLOR), len(errors),
+            ", ".join(f[1].split()[0] for f in errors[:8])
             + (", ..." if len(errors) > 8 else "")))
 
     if hosts:
-        print("\nSCSI hosts")
-        print("  %-8s %-12s %-22s %5s %6s %7s %3s %9s %5s  %s"
-              % ("HOST", "DRIVER", "STATE", "BUSY", "FAILED", "BLOCKED", "EH",
-                 "CAN_QUEUE", "DEVS", "EH THREAD"))
+        _title("\nSCSI hosts")
+        _header("  %-8s %-12s %-22s %5s %6s %7s %3s %9s %5s  %s"
+                % ("HOST", "DRIVER", "STATE", "BUSY", "FAILED", "BLOCKED",
+                   "EH", "CAN_QUEUE", "DEVS", "EH THREAD"))
         for h in hosts:
             bad = storstat.host_findings(h["state"], h["busy"], h["failed"],
                                          h["blocked"], h["eh_scheduled"])
-            _print_colored(_state_color(bad),
-                           "  %-8s %-12s %-22s %5s %6d %7d %3d %9d %5d  %s" % (
-                               h["name"], h["driver"][:12], h["state"],
-                               "?" if h["busy"] is None else h["busy"],
-                               h["failed"], h["blocked"], h["eh_scheduled"],
-                               h["can_queue"], h["devices"], h["eh"]))
+            print("  %s %s %s %s %s %s %s %9d %5d  %s" % (
+                _row_name("%-8s" % h["name"], bad),
+                _c("%-12s" % h["driver"][:12], DRIVER_COLOR),
+                _c("%-22s" % h["state"], _state_value_color(h["state"])),
+                _count("?" if h["busy"] is None else h["busy"], 5,
+                       INFLIGHT_COLOR),
+                _count(h["failed"], 6, BAD_COLOR),
+                _count(h["blocked"], 7), _count(h["eh_scheduled"], 3,
+                                                BAD_COLOR),
+                h["can_queue"], h["devices"], h["eh"]))
         rports = [(h, rp) for h in hosts for rp in h["rports"]
                   if options.show_details
                   or storstat.rport_findings(rp["state"])]
         if rports:
-            print("\nFC remote ports%s" % ("" if options.show_details else
-                                          " not online (-d lists all)"))
-            print("  %-8s %-16s %-24s %-10s %12s %16s  %s"
-                  % ("HOST", "TARGET", "STATE", "PORT_ID", "DEV_LOSS_TMO",
-                     "FAST_IO_FAIL_TMO", "fc_rport"))
+            _title("\nFC remote ports%s" % ("" if options.show_details else
+                                           " not online (-d lists all)"))
+            _header("  %-8s %-16s %-24s %-10s %12s %16s  %s"
+                    % ("HOST", "TARGET", "STATE", "PORT_ID", "DEV_LOSS_TMO",
+                       "FAST_IO_FAIL_TMO", "fc_rport"))
             for h, rp in rports:
-                _print_colored(
-                    _state_color(storstat.rport_findings(rp["state"])),
-                    "  %-8s %-16s %-24s 0x%-8x %12s %16s  0x%x" % (
-                        h["name"], rp["name"], rp["state"], rp["port_id"],
-                        _tmo_text(rp["dev_loss_tmo"]),
-                        _tmo_text(rp["fast_io_fail_tmo"]), rp["addr"]))
+                print("  %-8s %s %s 0x%-8x %12s %16s  0x%x" % (
+                    h["name"],
+                    _row_name("%-16s" % rp["name"],
+                              storstat.rport_findings(rp["state"])),
+                    _c("%-24s" % rp["state"], _state_value_color(rp["state"])),
+                    rp["port_id"], _tmo_text(rp["dev_loss_tmo"]),
+                    _tmo_text(rp["fast_io_fail_tmo"]), rp["addr"]))
 
     if devices:
         shown = [d for d in devices if options.show_details or _sdev_notable(d)]
-        print("\nSCSI devices (%s)" % (
+        _title("\nSCSI devices (%s)" % (
             "%d" % len(devices) if len(shown) == len(devices) else
             "%d of %d; the others are SDEV_RUNNING, idle and error-free, "
             "-d lists all" % (len(shown), len(devices))))
         if shown:
-            print("  %-9s %-12s %-22s %-22s %4s %3s %10s %10s %7s %5s %5s "
-                  "%4s %4s %4s %4s %4s %8s"
-                  % ("DEVICE", "H:C:T:L", "VENDOR/MODEL", "STATE", "BUSY",
-                     "BLK", "IOREQ", "IODONE", "NOTDONE", "IOERR", "IOTMO",
-                     "TMO", "REQS", "ACT", "TMOD", "DONE", "OLDEST"))
+            _header("  %-9s %-12s %-22s %-22s %4s %3s %10s %10s %7s %5s %5s "
+                    "%4s %4s %4s %4s %4s %8s"
+                    % ("DEVICE", "H:C:T:L", "VENDOR/MODEL", "STATE", "BUSY",
+                       "BLK", "IOREQ", "IODONE", "NOTDONE", "IOERR", "IOTMO",
+                       "TMO", "REQS", "ACT", "TMOD", "DONE", "OLDEST"))
         for d in shown:
             a = d["reqs"] or {}
             bad = storstat.device_findings(d["state"], d["blocked"]) + \
                 _queue_verdicts(d["reqs"], d["timeout"], d["stopped"])
-            _print_colored(_state_color(bad),
-                           "  %-9s %-12s %-22s %-22s %4s %3d %10d %10d %7d %5d "
-                           "%5s %4s %4d %4d %4d %4d %8s" % (
-                               d["name"][:9], d["id"][:12], d["model"][:22],
-                               d["state"][:22],
-                               "?" if d["busy"] is None else d["busy"],
-                               d["blocked"], d["ioreq"], d["iodone"],
-                               (d["ioreq"] - d["iodone"]) & 0xffffffff,
-                               d["ioerr"],
-                               "-" if d["iotmo"] is None else d["iotmo"],
-                               "-" if d["timeout"] is None
-                               else "%ds" % d["timeout"],
-                               a.get("held", 0),
-                               a.get("active", 0) + a.get("timeout", 0),
-                               a.get("timeout", 0), a.get("softirq", 0),
-                               storstat.age_text(a.get("oldest"))))
+            print("  %s %-12s %-22s %s %s %s %10d %10d %7d %s %s %4s %4d %s "
+                  "%s %s %s" % (
+                      _row_name("%-9s" % d["name"][:9], bad), d["id"][:12],
+                      d["model"][:22],
+                      _c("%-22s" % d["state"][:22],
+                         _state_value_color(d["state"])),
+                      _count("?" if d["busy"] is None else d["busy"], 4,
+                             INFLIGHT_COLOR),
+                      _count(d["blocked"], 3), d["ioreq"], d["iodone"],
+                      (d["ioreq"] - d["iodone"]) & 0xffffffff,
+                      _count(d["ioerr"], 5),
+                      _count("-" if d["iotmo"] is None else d["iotmo"], 5),
+                      "-" if d["timeout"] is None else "%ds" % d["timeout"],
+                      a.get("held", 0),
+                      _count(a.get("active", 0) + a.get("timeout", 0), 4,
+                             INFLIGHT_COLOR),
+                      _count(a.get("timeout", 0), 4, BAD_COLOR),
+                      _count(a.get("softirq", 0), 4),
+                      _age_field(a.get("oldest"), 8)))
 
     shown = [o for o in others if options.show_details or o["inflight"]
              or o["reqs"] or o["state"] not in ("-", "NVME_CTRL_LIVE")]
     if others:
-        print("\nOther disks (%s)" % (
+        _title("\nOther disks (%s)" % (
             "%d" % len(others) if len(shown) == len(others) else
             "%d of %d; the others are idle, -d lists all"
             % (len(shown), len(others))))
     if shown:
-        print("  %-12s %-14s %-4s %-22s %8s %4s %4s %8s  %s"
-              % ("DISK", "DRIVER", "TYPE", "STATE", "INFLIGHT", "REQS", "TMOD",
-                 "OLDEST", "QUEUE"))
+        _header("  %-12s %-14s %-4s %-22s %8s %4s %4s %8s  %s"
+                % ("DISK", "DRIVER", "TYPE", "STATE", "INFLIGHT", "REQS",
+                   "TMOD", "OLDEST", "QUEUE"))
         for o in shown:
             a = o["reqs"] or {}
             bad = storstat.nvme_findings(o["state"]) + \
                 _queue_verdicts(o["reqs"], None, o["stopped"])
-            _print_colored(_state_color(bad),
-                           "  %-12s %-14s %-4s %-22s %8s %4d %4d %8s  %s" % (
-                               o["name"][:12], o["driver"][:14], o["kind"],
-                               o["state"][:22],
-                               "?" if o["inflight"] is None else o["inflight"],
-                               a.get("held", 0), a.get("timeout", 0),
-                               storstat.age_text(a.get("oldest")),
-                               o["stopped"] or "-"))
+            print("  %s %s %-4s %s %s %4d %s %s  %s" % (
+                _row_name("%-12s" % o["name"][:12], bad),
+                _c("%-14s" % o["driver"][:14], DRIVER_COLOR), o["kind"],
+                _c("%-22s" % o["state"][:22], _state_value_color(o["state"])),
+                _count("?" if o["inflight"] is None else o["inflight"], 8,
+                       INFLIGHT_COLOR),
+                a.get("held", 0), _count(a.get("timeout", 0), 4, BAD_COLOR),
+                _age_field(a.get("oldest"), 8),
+                _c(o["stopped"], WARN_COLOR) if o["stopped"] else "-"))
 
-    print("\nNotes")
+    _title("\nNotes")
     print("  - BUSY: commands at the HBA (host) or LUN (device); FAILED: "
           "commands waiting for the error handler, which")
     print("    starts once FAILED equals BUSY; BLOCKED: the driver or device "
@@ -1194,6 +1258,12 @@ def _sdev_notable(d):
         d["ioerr"] or d["iotmo"] or d["reqs"]
 
 
+def _row_name(text, findings):
+    """A row's name: red or yellow when the row has a problem."""
+    color = _state_color(findings)
+    return _c(text, NAME_COLOR if color == crashcolor.RESET else color)
+
+
 def _state_color(findings):
     states = [f[0] for f in findings if f[0] in storstat.PROBLEMS]
     if not states:
@@ -1203,13 +1273,10 @@ def _state_color(findings):
 
 
 def _print_state(state, note):
-    color = (crashcolor.LIGHTRED if state in storstat.PROBLEMS[:4]
-             else crashcolor.YELLOW if state in storstat.PROBLEMS
-             else crashcolor.RESET)
-    crashcolor.set_color(color)
-    print("%-15s" % state, end="")
-    crashcolor.set_color(crashcolor.RESET)
-    print(" %s" % note)
+    color = (BAD_COLOR if state in storstat.PROBLEMS[:4]
+             else WARN_COLOR if state in storstat.PROBLEMS
+             else OK_COLOR)
+    print("%s %s" % (_c("%-15s" % state, color), note))
 
 
 # ---------------------------------------------------------------------------
