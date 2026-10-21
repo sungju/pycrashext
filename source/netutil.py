@@ -36,6 +36,9 @@ import urllib.error
 # the socket layer, which never involves NSS.
 #
 
+# remoteapi refuses requests without this key once the server sets one.
+API_KEY_VAR = "PYCRASHEXT_API_KEY"
+
 DNS_PORT = 53
 DNS_TIMEOUT = 2
 DNS_TYPE_A = 1
@@ -437,8 +440,15 @@ def is_dns_failure(reason):
 
 
 def post_url(url, encoded_data, timeout=None, host_header=None):
-    """POST 'encoded_data' to 'url', optionally overriding the Host: header."""
+    """POST 'encoded_data' to 'url', optionally overriding the Host: header.
+
+    Sends PYCRASHEXT_API_KEY as the X-API-Key header when it is set, which
+    is what the remoteapi server checks when it has a key of its own.
+    """
     req = urllib.request.Request(url, data=encoded_data, method='POST')
+    api_key = os.environ.get(API_KEY_VAR, "")
+    if api_key:
+        req.add_header('X-API-Key', api_key)
     if host_header is not None:
         # The URL now carries an address rather than a name, so the name has
         # to travel in the header instead, or a name-based virtual host on
@@ -482,6 +492,17 @@ def urlopen_post(url, encoded_data, timeout=None, verbose=False, trace=None):
 
         # Report what the caller actually asked for, not the retry's failure
         raise e
+
+
+def api_key_hint(error):
+    """What a 401 from remoteapi means for the key, or '' for other errors."""
+    if getattr(error, "code", None) != 401:
+        return ""
+    if os.environ.get(API_KEY_VAR, ""):
+        return ("The server rejected the API key: %s does not match the "
+                "server's key." % API_KEY_VAR)
+    return ("The server requires an API key: set %s to the server's key."
+            % API_KEY_VAR)
 
 
 def print_dns_failure_help(url, reason, trace=None):

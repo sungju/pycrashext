@@ -64,7 +64,10 @@ def disasm():
         res = response.read().decode('utf-8')
     except (urllib.error.URLError, urllib.error.HTTPError) as e:
         reason = getattr(e, "reason", None)
-        if reason is not None and netutil.is_dns_failure(reason):
+        hint = netutil.api_key_hint(e)
+        if hint:
+            res = "\t" + hint + "\n" + orig_asm
+        elif reason is not None and netutil.is_dns_failure(reason):
             res = "\tCannot resolve the server's hostname.\n" + \
                   "\tServer address is <" + encode_url + ">\n" + \
                   "\tIf the name resolves outside crash, set " + \

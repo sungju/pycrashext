@@ -121,7 +121,8 @@ def ai_send():
               "\tServer address is <" + encode_url + ">" + \
               "\n" + orig_query
     except urllib.error.HTTPError as e:
-        res = e.read().decode('utf-8')
+        hint = netutil.api_key_hint(e)
+        res = ("\t" + hint + "\n" if hint else "") + e.read().decode('utf-8')
     except urllib.error.URLError as e:
         if isinstance(e.reason, socket.timeout):
             res = "\tServer is not reachable.\n" + \

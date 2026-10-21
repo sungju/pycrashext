@@ -172,9 +172,13 @@ def exec_insights(o, args, cmd_path_list):
         response = netutil.urlopen_post(remoteapi_url, url_data.encode())
         res = response.read()
     except Exception as e:
-        res = "\tServer is not reachable.\n" + \
-              "\tServer address is <" + remoteapi_url + ">" + \
-              "\n" + str(e)
+        hint = netutil.api_key_hint(e)
+        if hint:
+            res = "\t" + hint
+        else:
+            res = "\tServer is not reachable.\n" + \
+                  "\tServer address is <" + remoteapi_url + ">" + \
+                  "\n" + str(e)
         print(res)
         return
 

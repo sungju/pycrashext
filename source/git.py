@@ -159,6 +159,9 @@ def send_request(server_url, data, timeout, verbose):
 
     except urllib.error.HTTPError as e:
         print("Error: Server returned status code %d" % e.code)
+        hint = netutil.api_key_hint(e)
+        if hint:
+            print(hint)
         print(e.read().decode('utf-8'))
     except urllib.error.URLError as e:
         if netutil.is_dns_failure(e.reason):
