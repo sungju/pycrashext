@@ -71,7 +71,7 @@ Every command accepts '-h' to show the available options, except 'git', which ta
 | ipcinfo | IPC information |
 | ipmi | IPMI information |
 | kvercmp | Is a fix already in this kernel? Compares the dump's kernel with the fixed kernels an errata or KCS lists |
-| lockinfo | Spinlock state and the CPUs queued on it (qspinlock, ticket, MCS queues) |
+| lockinfo | Spinlock state, the CPUs queued on it, likely holders and deadlocks |
 | lockup | Detect long running tasks on CPUs |
 | logscan | Count the known kernel log signatures and print their first and last lines |
 | meminfo | Memory information |

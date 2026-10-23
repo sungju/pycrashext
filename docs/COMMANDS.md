@@ -670,8 +670,8 @@ Spinlock state and the CPUs waiting for it.
 
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
-| `-s` | `--spinlock` | `<addr>` | Decode the spinlock at `<addr>` and list the CPUs queued on it |
-| `-m` | `--mcslock` | | List every MCS queue and the lock each one waits for |
+| `-s` | `--spinlock` | `<addr>` | Decode the spinlock at `<addr>`, list the CPUs queued on it and its likely holder |
+| `-m` | `--mcslock` | | List every MCS queue, its lock and likely holders, and possible deadlocks |
 | `-x` | `--excluded` | | With `-m`, also list the CPUs not in any queue |
 
 #### Examples
@@ -681,8 +681,9 @@ lockinfo -s 0xffff88003e...   # Inspect spinlock
 lockinfo -m                   # Show MCS queues and their locks
 ```
 
-A spinlock does not record which CPU holds it, so lockinfo reports the
-waiters. The holder has to be found from the other CPUs' backtraces.
+A spinlock does not record which CPU holds it. lockinfo reports the
+waiters it can read from the dump, then infers the likely holders from
+every CPU's backtrace.
 
 - **qspinlock (RHEL8 and later).** `-s` decodes the locked byte, the pending
   bit and the tail. The layout comes from `CONFIG_NR_CPUS` (`help -k`), not
@@ -700,6 +701,36 @@ waiters. The holder has to be found from the other CPUs' backtraces.
   waiters, not counting the holder. With `CONFIG_PARAVIRT_SPINLOCKS` the
   ticket step is 2 and the slowpath flag is masked out. It also lists the
   waiters that halted, from `klock_waiting` (KVM) or `lock_waiting` (Xen).
+- **Holder.** On debug kernels (`CONFIG_DEBUG_SPINLOCK`), lockinfo prints
+  the owner recorded in `raw_spinlock`. Otherwise it lists the CPUs outside
+  the lock's queue that have the lock address, or a pointer up to 512 bytes
+  below it (the containing object), in their `bt -f` words or registers.
+  - An exact address ranks above a nearby pointer.
+  - A CPU spinning on a lock that could not be identified ranks lower.
+  - Where the kernel keeps a preempt count (RHEL9 and later, read from
+    `pcpu_hot`; `CONFIG_DEBUG_ATOMIC_SLEEP` kernels), a CPU with preempt
+    depth 0 is ruled out, because a spinlock holder runs with preemption
+    disabled. If that would rule out every CPU, they are all shown anyway:
+    `arch_spin_lock()` users such as the ring buffer don't raise the count.
+    On RHEL8 (`__preempt_count`) the depth is only shown, because a 0
+    proves nothing there.
+  - A CPU waiting for the lock from interrupt or softirq context stays on
+    the list as a possible AA deadlock: the code it interrupted may hold
+    the lock.
+  - If no CPU references the lock, the likely causes are a missed unlock,
+    a holder that slept with the lock held, or a corrupted lock word.
+- **Pending spinners.** The first CPU to find a qspinlock held spins as the
+  pending waiter and takes no queue node. lockinfo finds that CPU's lock
+  among its own words: a word whose locked byte is 1 or 3 and whose
+  pending byte is 1. `-m` lists such locks too, so a two-CPU deadlock
+  shows up even when no queue exists.
+- **Deadlocks (`-m`).** A likely holder that is itself queued or pending on
+  another lock links the two locks. A cycle of such links is reported as a
+  possible deadlock (ABBA).
+- **PREEMPT_RT (kernel-rt).** `spinlock_t` is a sleeping rt_mutex. `-s`
+  prints its recorded owner task first, then decodes the first word as a
+  raw spinlock: that is either the lock itself, if it is a
+  `raw_spinlock_t`, or the rt_mutex's `wait_lock`.
 
 The decoding is in `source/lockdecode.py`, with checks in
 `lockdecode_test.py`. Also `python3 source/lockdecode.py <value>...`

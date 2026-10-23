@@ -84,6 +84,9 @@ def read_mcs_nodes():
     if not struct_exists("struct mcs_spinlock"):
         return None
     name, stride, mcs_off = mcs_node_layout()
+    # get_cpu_var() of a missing symbol reads each CPU's per-CPU base.
+    if not symbol_exists(name):
+        return None
     try:
         bases = percpu.get_cpu_var(name)
     except:
@@ -106,16 +109,153 @@ def read_mcs_nodes():
     return nodes, ranges, deep
 
 
-stack_words = {}
+cpu_bts = {}
 
-def cpu_stack_words(cpu):
-    if cpu not in stack_words:
+def cpu_bt(cpu):
+    """{"words", "funcs", "pid", "task", "comm"} of the CPU's active task."""
+    if cpu not in cpu_bts:
         try:
             text = exec_crash_command("bt -f -c %d" % cpu)
         except:
             text = ""
-        stack_words[cpu] = lockdecode.candidate_words(text)
-    return stack_words[cpu]
+        bt = lockdecode.parse_bt(text)
+        bt["words"] = lockdecode.candidate_words(text)
+        cpu_bts[cpu] = bt
+    return cpu_bts[cpu]
+
+
+def cpu_stack_words(cpu):
+    return cpu_bt(cpu)["words"]
+
+
+preempt_counts = None
+
+def get_preempt_counts():
+    """({cpu: preempt_count}, whether the count is kept).  Without
+    CONFIG_PREEMPT_COUNT (RHEL8: no preemption, no DEBUG_ATOMIC_SLEEP)
+    spin_lock does not raise it, so a 0 proves nothing."""
+    global preempt_counts
+
+    if preempt_counts is None:
+        preempt_counts = {}
+        # RHEL9 and later keep it in pcpu_hot, RHEL8 in __preempt_count,
+        # RHEL7 in thread_info (not read).
+        if symbol_exists("pcpu_hot"):
+            name = "pcpu_hot"
+            offset = member_offset("struct pcpu_hot", "preempt_count")
+        elif symbol_exists("__preempt_count"):
+            name, offset = "__preempt_count", 0
+        else:
+            name, offset = None, -1
+        if name is not None and offset >= 0:
+            try:
+                for cpu, addr in enumerate(percpu.get_cpu_var(name)):
+                    preempt_counts[cpu] = readUInt(int(addr) + offset)
+            except:
+                preempt_counts.clear()
+    kept = symbol_exists("preempt_schedule") or symbol_exists("__might_sleep")
+    return preempt_counts, kept
+
+
+def debug_owner(lock_addr):
+    """The owner CONFIG_DEBUG_SPINLOCK records in struct raw_spinlock, as
+    (cpu, task), (None, None) when unowned, or None when not recorded."""
+    if member_offset("struct raw_spinlock", "owner_cpu") < 0:
+        return None
+    try:
+        raw = readSU("struct raw_spinlock", lock_addr)
+        if raw.magic != 0xdead4ead:     # SPINLOCK_MAGIC
+            return None
+        # owner_cpu is unsigned: -1 reads back as 0xffffffff.
+        task = int(raw.owner) & 0xffffffffffffffff
+        cpu = int(raw.owner_cpu) & 0xffffffff
+        if task in (0, 0xffffffffffffffff) or cpu == 0xffffffff:
+            return None, None
+        return cpu, task
+    except:
+        return None
+
+
+def show_holders(lock_addr, held, waiters, waits_for):
+    """Print who may hold the lock; returns the best-scored CPUs."""
+    if not held:
+        return []
+    owner = debug_owner(lock_addr)
+    if owner is not None:
+        cpu, task = owner
+        if cpu is None:
+            print("    owner: none recorded (CONFIG_DEBUG_SPINLOCK)")
+            return []
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("    owner: CPU %d task 0x%x (CONFIG_DEBUG_SPINLOCK)" % (cpu, task))
+        crashcolor.set_color(crashcolor.RESET)
+        return [cpu]
+
+    counts, kept = get_preempt_counts()
+    cpus = {cpu: cpu_bt(cpu) for cpu in range(sys_info.CPUS)}
+    candidates, ruled_out = lockdecode.rank_holders(
+        lock_addr, cpus, set(waiters), waits_for, counts, kept)
+    if not candidates:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("    holder: no CPU outside the queue references the lock: an"
+              " unlock missed, the holder")
+        print("            slept with it held, or the lock word is corrupted")
+        crashcolor.set_color(crashcolor.RESET)
+    else:
+        print("    possible holders (a spinlock does not record its holder):")
+    best = candidates[0]["score"] if candidates else None
+    for c in candidates:
+        bt = cpus[c["cpu"]]
+        crashcolor.set_color(crashcolor.LIGHTRED if c["score"] == best
+                             else crashcolor.RESET)
+        print("      CPU %-4d pid %-7s %-16s %s" %
+              (c["cpu"], bt["pid"], bt["comm"], "; ".join(c["notes"])))
+    crashcolor.set_color(crashcolor.RESET)
+    if ruled_out:
+        print("      ruled out, preempt depth 0: CPU %s" %
+              ", ".join(str(c["cpu"]) for c in ruled_out))
+    return [c["cpu"] for c in candidates if c["score"] == best and best > 0]
+
+
+def queue_locks(queues, nodes, ranges):
+    """[(chain, broken, matches)], {cpu: lock} for every queued CPU whose
+    queue's lock was found and every pending spinner, and {lock: [cpu]}
+    of the pending spinners."""
+    result = []
+    waits_for = {}
+    for chain, broken in queues:
+        matches = find_queue_lock(chain, nodes, ranges)
+        result.append((chain, broken, matches))
+        if matches:
+            for addr in chain:
+                waits_for[nodes[addr][0]] = matches[0][0]
+
+    # The first CPU to find a lock held spins as the pending waiter without
+    # a queue node, so two CPUs in an ABBA deadlock may have no queue at all.
+    queued = set(cpu for cpu, _, _ in nodes.values())
+    pending = {}
+    for cpu in range(sys_info.CPUS):
+        bt = cpu_bt(cpu)
+        if cpu in queued or not any(lockdecode.SLOWPATH in f for f in bt["funcs"]):
+            continue
+        targets = lockdecode.pending_targets(bt["words"], read_u32,
+                                             get_nr_cpus(), ranges)
+        if len(targets) == 1:
+            waits_for[cpu] = targets[0]
+            pending.setdefault(targets[0], []).append(cpu)
+    return result, waits_for, pending
+
+
+def show_deadlocks(holders, waits_for):
+    cycles = lockdecode.find_deadlocks(holders, waits_for)
+    for cycle in cycles:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("Possible deadlock:")
+        for lock, cpu in cycle:
+            print("    lock 0x%x%s likely held by CPU %d, which waits for lock 0x%x" %
+                  (lock, lock_name(lock), cpu, waits_for[cpu]))
+        crashcolor.set_color(crashcolor.RESET)
+        print()
 
 
 def find_queue_lock(chain, nodes, ranges):
@@ -220,12 +360,27 @@ def show_qspinlock(lock_addr, options):
     nodes = result[0] if result else {}
     if d["locked"] == lockdecode.Q_SLOW_VAL:
         show_pv_hashed_head(lock_addr, nodes)
-    if d["tail_cpu"] is None:
+    chain = show_qspinlock_waiters(lock_addr, d, result)
+    if not d["locked"]:
         return
+
+    waits_for = {}
+    if result:
+        _, waits_for, _ = queue_locks(lockdecode.build_queues(nodes), nodes, result[1])
+    print()
+    print("Holder:")
+    show_holders(lock_addr, True, [nodes[addr][0] for addr in chain], waits_for)
+
+
+def show_qspinlock_waiters(lock_addr, d, result):
+    """Print the queue the lock's tail names; returns it, head first."""
+    if d["tail_cpu"] is None:
+        return []
     print()
     if result is None:
         print("no MCS queue nodes (qnodes/mcs_nodes) in this kernel")
-        return
+        return []
+    nodes = result[0]
 
     tail = [addr for addr, (cpu, idx, _) in nodes.items()
             if (cpu, idx) == (d["tail_cpu"], d["tail_idx"])]
@@ -234,7 +389,7 @@ def show_qspinlock(lock_addr, options):
         print("CPU %d slot %d is not queued: the dump caught the lock changing,"
               " or 0x%x is not a qspinlock" % (d["tail_cpu"], d["tail_idx"], lock_addr))
         crashcolor.set_color(crashcolor.RESET)
-        return
+        return []
 
     for chain, broken in lockdecode.build_queues(nodes):
         if tail[0] not in chain:
@@ -245,7 +400,8 @@ def show_qspinlock(lock_addr, options):
         print("Waiters, %d queued:" % len(chain))
         queue_legend()
         print_queue(chain, broken, nodes)
-        return
+        return chain
+    return []
 
 
 def show_ticket_spinlock(lock_addr, options):
@@ -269,12 +425,17 @@ def show_ticket_spinlock(lock_addr, options):
         print("No one is holding the lock at the moment")
         return
     print("Held, %d CPU(s) waiting" % (d["waiters"]))
-    show_pv_ticket_waiters(lock_addr, d["head"], bits, inc)
+    halted = show_pv_ticket_waiters(lock_addr, d["head"], bits, inc)
+    print()
+    print("Holder:")
+    show_holders(lock_addr, True, halted, {})
 
 
 def show_pv_ticket_waiters(lock_addr, head, bits, inc):
     """Paravirt ticket waiters that gave up spinning and halted record
-    {lock, want} per CPU: klock_waiting on KVM, lock_waiting on Xen."""
+    {lock, want} per CPU: klock_waiting on KVM, lock_waiting on Xen.
+    Returns those CPUs."""
+    halted = []
     for var, stype in (("klock_waiting", "struct kvm_lock_waiting"),
                        ("lock_waiting", "struct xen_lock_waiting")):
         if not symbol_exists(var) or not struct_exists(stype):
@@ -298,6 +459,29 @@ def show_pv_ticket_waiters(lock_addr, head, bits, inc):
             else:
                 turn = "%d ahead" % pos
             print("\tCPU %-4d ticket %-6d %s" % (cpu, want, turn))
+            halted.append(cpu)
+    return halted
+
+
+def show_rt_spinlock(lock_addr):
+    """PREEMPT_RT: spinlock_t is a sleeping rt_mutex that records its owner.
+    Its first word is the rt_mutex's own wait_lock, a raw spinlock."""
+    print("PREEMPT_RT: if 0x%x is a spinlock_t, it is an rt_mutex:" % lock_addr)
+    try:
+        rtm = readSU("struct rt_mutex_base",
+                     lock_addr + member_offset("struct spinlock", "lock"))
+        owner = int(rtm.owner) & ~0x1       # RT_MUTEX_HAS_WAITERS
+        if owner == 0:
+            print("%12s : none" % "owner")
+        else:
+            task = readSU("struct task_struct", owner)
+            print("%12s : pid %d %s (task 0x%x)" % ("owner", task.pid, task.comm, owner))
+        print("%12s : %s" % ("waiters", "yes" if int(rtm.owner) & 0x1 else "no"))
+    except:
+        print("%12s : cannot read struct rt_mutex_base" % "owner")
+    print()
+    print("If it is a raw_spinlock_t, or for the rt_mutex's wait_lock:")
+    print()
 
 
 def show_spinlock(options):
@@ -306,6 +490,10 @@ def show_spinlock(options):
     except ValueError:
         print("invalid address '%s'" % options.spinlock)
         return
+
+    if member_offset("struct spinlock", "rlock") < 0 and \
+       member_offset("struct spinlock", "lock") >= 0:
+        show_rt_spinlock(lock_addr)
 
     # RHEL7 ticket locks; RHEL7 also has struct mcs_spinlock (for mutexes),
     # so its presence does not mean qspinlock.
@@ -331,13 +519,37 @@ def show_mcslock(options):
     queues.sort(key=lambda q: -len(q[0]))
     if not queues:
         print("No CPU is queued on a spinlock")
+        print()
     else:
         queue_legend()
-    for i, (chain, broken) in enumerate(queues):
+    queues, waits_for, pending = queue_locks(queues, nodes, ranges)
+    holders = {}
+    for i, (chain, broken, matches) in enumerate(queues):
         print("MCS queue %d: %d waiter(s)" % (i + 1, len(chain)))
         print_queue(chain, broken, nodes)
-        print_queue_lock(find_queue_lock(chain, nodes, ranges), chain, nodes)
+        print_queue_lock(matches, chain, nodes)
+        if matches:
+            lock_addr, d, _ = matches[0]
+            best = show_holders(lock_addr, d["locked"] != 0,
+                                [nodes[addr][0] for addr in chain], waits_for)
+            if best:
+                holders[lock_addr] = best
         print()
+
+    queue_lock_addrs = set(m[0][0] for _, _, m in queues if m)
+    for lock_addr, cpus in sorted(pending.items()):
+        if lock_addr in queue_lock_addrs:
+            continue
+        val = read_u32(lock_addr)
+        d = lockdecode.decode_qspinlock(val, get_nr_cpus())
+        print("Pending spinner, no queue: CPU %s" % ", ".join(map(str, cpus)))
+        print("    lock: 0x%x%s: 0x%08x, %s" % (lock_addr, lock_name(lock_addr),
+              val, lockdecode.describe_qspinlock(d)))
+        best = show_holders(lock_addr, True, [], waits_for)
+        if best:
+            holders[lock_addr] = best
+        print()
+    show_deadlocks(holders, waits_for)
 
     for cpu, count in sorted(deep.items()):
         print("CPU %d: nested %d deep, past %d nodes: spinning on trylock"
@@ -353,10 +565,10 @@ def lockinfo():
     op = OptionParser()
     op.add_option("-s", "--spinlock", dest="spinlock", default="",
                   action="store", type="string",
-                  help="Shows spinlock details and the CPUs queued on it")
+                  help="Shows spinlock details, the CPUs queued on it and its likely holder")
     op.add_option("-m", "--mcslock", dest="mcslock", default=0,
                   action="store_true",
-                  help="Shows every MCS queue and the lock it waits for")
+                  help="Shows every MCS queue, its lock, the likely holders and deadlocks")
     op.add_option("-x", "--excluded", dest="show_excluded", default=0,
                   action="store_true",
                   help="With -m, shows CPUs not in any MCS queue")

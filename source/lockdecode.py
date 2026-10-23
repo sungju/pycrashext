@@ -17,6 +17,11 @@ Ticket spinlock (RHEL7): head is the ticket being served, tail the next one
 handed out.  With CONFIG_PARAVIRT_SPINLOCKS tickets step by 2 and bit 0 is
 TICKET_SLOWPATH_FLAG.
 
+The holder has to be inferred: a CPU outside the queue that has the lock
+(or a pointer just below it) on its stack, and whose preempt depth is not
+0 where the kernel keeps one.  A likely holder that is itself queued on
+another lock links the two, and a cycle of such links is a deadlock.
+
     python3 lockdecode.py 0x00140101 ...
 
 Written by Sungju Kwon <sungju.kwon@gmail.com>
@@ -207,6 +212,165 @@ def match_lock(candidates, read_val, tail_cpu, tail_idx, nr_cpus, exclude=()):
         found.append((addr, decode_qspinlock(val, nr_cpus), len(cpus)))
     found.sort(key=lambda f: (-f[2], f[0]))
     return found
+
+
+BT_HEADER = re.compile(r'PID:\s*(\d+)\s+TASK:\s*([0-9a-f]+)\s+CPU:\s*(\d+)'
+                       r'\s+COMMAND:\s*"([^"]*)"')
+BT_FRAME = re.compile(r"#\d+\s+\[[0-9a-f]+\]\s+(\S+)\s+at\s|"
+                      r"\[exception RIP:\s*([A-Za-z0-9_.]+)")
+# Functions a CPU spins or halts in while waiting for a spinlock: the
+# qspinlock slowpath, the RHEL7 ticket spin inlined in _raw_spin_lock*, and
+# the paravirt ticket halt.
+SLOWPATH = "queued_spin_lock_slowpath"
+SPIN_FUNCS = (SLOWPATH, "_raw_spin_lock",
+              "kvm_lock_spinning", "xen_lock_spinning")
+
+
+def parse_bt(text):
+    """The active task and the functions on a 'bt -f -c <cpu>' backtrace,
+    innermost first (an exception RIP before the frame it interrupted)."""
+    info = {"pid": None, "task": None, "comm": "", "funcs": []}
+    m = BT_HEADER.search(text)
+    if m:
+        info["pid"] = int(m.group(1))
+        info["task"] = int(m.group(2), 16)
+        info["comm"] = m.group(4)
+    for m in BT_FRAME.finditer(text):
+        info["funcs"].append(m.group(1) or m.group(2))
+    return info
+
+
+# A pointer this far below the lock may be to the object that contains it.
+NEAR_WINDOW = 512
+
+
+def lock_refs(lock, words):
+    """('exact', 0) when the lock's address is among the words, ('near', d)
+    for the closest pointer d bytes below it, else None."""
+    if lock in words:
+        return "exact", 0
+    near = [lock - w for w in words if 0 < lock - w <= NEAR_WINDOW]
+    if near:
+        return "near", min(near)
+    return None
+
+
+# Frames of interrupt or softirq context.  The NMI that stopped a CPU for
+# the dump is not one: every CPU but the panicking one shows it.
+IRQ_FUNCS = ("do_IRQ", "common_interrupt", "sysvec_", "apic_timer_interrupt",
+             "call_function_interrupt", "handle_irq_event", "__do_softirq",
+             "do_softirq", "irq_exit")
+
+
+def is_spinning(funcs):
+    return any(s in f for f in funcs for s in SPIN_FUNCS)
+
+
+def in_interrupt(funcs):
+    return any(s in f for f in funcs for s in IRQ_FUNCS)
+
+
+def pending_targets(words, read_val, nr_cpus, exclude=()):
+    """Words that can be the qspinlock a CPU spins on as the pending waiter
+    (it takes no queue node): locked byte 1 or _Q_SLOW_VAL and pending set,
+    with nothing else in the pending byte on the small layout."""
+    pending_bits = qspinlock_layout(nr_cpus)[0]
+    found = []
+    for addr in sorted(words):
+        if any(start <= addr < end for start, end in exclude):
+            continue
+        val = read_val(addr)
+        if val is None:
+            continue
+        pend = (val >> 8) & ((1 << pending_bits) - 1)
+        if pend == 1 and (val & Q_LOCKED_MASK) in (Q_LOCKED_VAL, Q_SLOW_VAL):
+            found.append(addr)
+    return found
+
+
+def rank_holders(lock, cpus, waiters, waits_for, preempt, preempt_kept):
+    """CPUs that may hold 'lock', most likely first.
+
+    cpus is {cpu: {"words": set, "funcs": [...]}}; waiters the CPUs queued
+    on this lock; waits_for {cpu: lock} for CPUs queued or pending on any
+    lock; preempt {cpu: preempt_count}.  A non-RT spinlock holder runs with
+    preemption disabled, so with preempt_kept (CONFIG_PREEMPT_COUNT) a
+    preempt depth of 0 rules a CPU out -- unless that would rule out every
+    CPU, since arch_spin_lock() users do not raise it.  A waiter on this
+    lock spinning in interrupt context is kept: the code it interrupted may
+    hold the lock (AA deadlock).  Returns ([candidate], [ruled out]), each
+    {"cpu", "score", "notes"}."""
+    candidates = []
+    ruled_out = []
+    for cpu in sorted(cpus):
+        funcs = cpus[cpu]["funcs"]
+        own = cpu in waiters or waits_for.get(cpu) == lock
+        if own and not in_interrupt(funcs):
+            continue
+        ref = lock_refs(lock, cpus[cpu]["words"])
+        if ref is None:
+            continue
+        kind, dist = ref
+        notes = ["lock address on stack" if kind == "exact" else
+                 "pointer to lock-0x%x on stack (containing object?)" % dist]
+        score = 2 if kind == "exact" else 1
+        count = preempt.get(cpu)
+        if count is not None:
+            notes.append("preempt depth %d" % (count & 0xff))
+        other = waits_for.get(cpu)
+        if own:
+            notes.append("waits for this lock from interrupt context: possible"
+                         " AA deadlock if the interrupted code holds it")
+            score = 1
+        elif other is not None:
+            notes.append("itself waiting for lock 0x%x" % other)
+        elif is_spinning(funcs):
+            # A ticket waiter, or a qspinlock waiter whose lock was not found:
+            # on this lock or another.
+            notes.append("spinning on a spinlock not identified (a waiter?)")
+            score -= 1
+        entry = {"cpu": cpu, "score": score, "notes": notes}
+        if preempt_kept and count is not None and (count & 0xff) == 0:
+            ruled_out.append(entry)
+        else:
+            candidates.append(entry)
+    if not candidates and ruled_out:
+        for entry in ruled_out:
+            entry["notes"].append("holds it only if taken with arch_spin_lock()")
+        candidates, ruled_out = ruled_out, []
+    candidates.sort(key=lambda c: (-c["score"], c["cpu"]))
+    return candidates, ruled_out
+
+
+def find_deadlocks(holders, waits_for):
+    """Cycles lock -> likely holder -> lock it waits for -> ... .
+
+    holders is {lock: [cpu, ...]} (the best-scored candidates); waits_for
+    {cpu: lock}.  Returns each cycle once as [(lock, cpu), ...]."""
+    cycles = []
+    seen = set()
+    for start in sorted(holders):
+        path = []
+        lock = start
+        on_path = {}
+        while lock in holders and lock not in on_path:
+            on_path[lock] = len(path)
+            nxt = None
+            for cpu in holders[lock]:
+                if waits_for.get(cpu) not in (None, lock):
+                    nxt = (cpu, waits_for[cpu])
+                    break
+            if nxt is None:
+                break
+            path.append((lock, nxt[0]))
+            lock = nxt[1]
+        if lock in on_path:
+            cycle = path[on_path[lock]:]
+            key = frozenset(cycle)
+            if cycle and key not in seen:
+                seen.add(key)
+                cycles.append(cycle)
+    return cycles
 
 
 if (__name__ == '__main__'):
