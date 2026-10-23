@@ -675,13 +675,18 @@ Lock owners and waiters: spinlocks, mutexes and rw_semaphores, and which locks h
 | `-x` | `--excluded` | | With `-m`, also list the CPUs not in any queue |
 | `-M` | `--mutex` | `<addr>` | Show a mutex's owner and its waiters in queue order |
 | `-R` | `--rwsem` | `<addr>` | Show an rw_semaphore's writer or readers and its waiters |
-| `-b` | `--blocked` | | Group every UN task by the mutex or rwsem it waits for, with owners, wait chains and deadlocks |
+| `-w` | `--rwlock` | `<addr>` | Show an rwlock_t's readers or writer, the CPUs spinning on it and its likely holders |
+| `-P` | `--percpu-rwsem` | `<addr>` | Show a percpu_rw_semaphore's readers, writer and waiters |
+| `-b` | `--blocked` | | Group every UN task by the mutex, rwsem or percpu-rwsem it waits for, with owners, wait chains and deadlocks |
+| `-i` | `--interruptible` | | With `-b` or `-a`, also scan IN tasks (`mutex_lock_interruptible`, ...) |
+| `-a` | `--all` | | One report: spinlock queues and holders, then the sleeping-lock chains |
 
 #### Examples
 
 ```
 lockinfo -s 0xffff88003e...   # Inspect spinlock
 lockinfo -m                   # Show MCS queues and their locks
+lockinfo -a                   # Everything, spinlocks then sleeping locks
 lockinfo -b                   # Who blocks the hung (UN) tasks
 lockinfo -M 0xffff9e2a...     # Inspect a mutex
 ```
@@ -775,8 +780,45 @@ guessing for writers:
     `mmap_lock` or `i_rwsem`, whose readers are the real blockers.
   - Tasks in `TASK_INTERRUPTIBLE` (`mutex_lock_interruptible`) are not
     scanned.
-- **PREEMPT_RT:** a mutex's rt_mutex owner is shown, but rw_semaphores
-  (`rwbase_rt`) are not decoded.
+- **PREEMPT_RT:** a mutex shows its rt_mutex owner. An rw_semaphore
+  (`rwbase_rt`) shows its reader count, or the writer, which is the
+  rt_mutex owner (also while it waits for the readers to leave). RT
+  waiters sit in the rt_mutex tree and are not listed.
+- **`-i`** adds TASK_INTERRUPTIBLE waiters to `-b` and `-a`. IN tasks are
+  many, so lockinfo reads their plain backtraces first and runs `bt -f`
+  only for those in a lock slowpath.
+
+**percpu_rw_semaphore** (`-P`, and in `-b`): `cgroup_threadgroup_rwsem`, a
+superblock's `s_writers` during a freeze.
+
+- **RHEL8 and later.** The reader count is the sum of the per-CPU
+  `read_count`. A writer sets `block`, waits in the rcuwait `writer` for
+  the readers to leave, and is not recorded once it is in. Readers and
+  writers that wait queue on `waiters`, where a reader's entry carries
+  `WQ_FLAG_CUSTOM` (0x08 on RHEL8, 0x04 from RHEL9).
+- **RHEL7.** Fast-path readers count per CPU, slow-path readers in
+  `slow_read_ctr`, and writers hold the embedded `rw_sem` (shown with
+  `-R`).
+- **In `-b`,** a task in `percpu_rwsem_wait()` is matched through its wait
+  queue entry. A writer waiting for readers is matched through the
+  semaphore whose `writer` names it and whose `block` is set. A writer
+  still waiting for the RCU grace period that `percpu_down_write()` starts
+  with holds nothing yet. It is listed apart, and `rcuinfo` is the place
+  to look for it.
+
+**rwlock_t** (`-w`): the qrwlock count holds the writer byte (0xff), a
+waiting writer (bit 8; RHEL7: low byte 1) and the readers (from bit 9;
+RHEL7 bit 8). Readers and the writer are not recorded, so the holders are
+inferred as for spinlocks. The CPUs in `queued_{read,write}_lock_slowpath`
+are the waiters. Their queue is the rwlock's `wait_lock`. `-m` reports
+the rwlock and its holders instead of the wait_lock's when a queued CPU
+entered the spinlock slowpath directly from the rwlock slowpath; an
+interrupt that came in during the rwlock spin doesn't count. On
+PREEMPT_RT, `rwlock_t` is an `rwbase_rt` and `-w` shows its readers or
+its writer (the rt_mutex owner).
+
+**`-a`** prints `-m` (on qspinlock kernels), then `-b`. `evidence` runs it
+for a hang, lockup or stall.
 
 The decoding is in `source/lockdecode.py`, with checks in
 `lockdecode_test.py`. Also `python3 source/lockdecode.py <value>...`
@@ -1140,7 +1182,7 @@ insights -t            # Run with test data
 
 ### evidence
 
-Collects, in one crash session, the raw output a vmcore analysis rests on, into one Markdown file an AI (or an engineer) writes the report from, instead of an AI driving crash one command at a time. It runs a base set (`sys`, `caseinfo`, `sysinfo`, `bt`, `logscan`, the last 150 log lines, `mod -t`, `kmem -i`, `ps -S`, `autocheck`), picks the analysis branch from `sys` and the log signatures (`logsig.py`): panic/oops, OOM, hang/lockup/stall, sysrq, death of init. It then runs that branch's commands, with follow-ups from what it already saw (`edis -r <RIP>`, `sym`, `modinfo --details <module>`, `kmem <address>`, `hangcheck -g`, `lockup`, `rcuinfo`, `vminfo --overcommit -d` on a hung VM, ...).
+Collects, in one crash session, the raw output a vmcore analysis rests on, into one Markdown file an AI (or an engineer) writes the report from, instead of an AI driving crash one command at a time. It runs a base set (`sys`, `caseinfo`, `sysinfo`, `bt`, `logscan`, the last 150 log lines, `mod -t`, `kmem -i`, `ps -S`, `autocheck`), picks the analysis branch from `sys` and the log signatures (`logsig.py`): panic/oops, OOM, hang/lockup/stall, sysrq, death of init. It then runs that branch's commands, with follow-ups from what it already saw (`edis -r <RIP>`, `sym`, `modinfo --details <module>`, `kmem <address>`, `hangcheck -g`, `lockinfo -a`, `lockup`, `rcuinfo`, `vminfo --overcommit -d` on a hung VM, ...).
 
 Each output goes into the file under a `**Source:** \`/cores/tasks/<task>\` → \`<command>\`` line, exactly as printed, without colour codes. A long output keeps its first and last lines with a `<<< SKIPPED N lines >>>` line carrying the true count, so excerpts copied from it can be checked by `excerpt-markers --revive` and `/datacheck`. A short summary at the top (branches, fault, log signatures, commands that failed) is labelled as derived.
 

@@ -118,7 +118,8 @@ def check_branch_steps_hang_on_vm():
            "rcu: INFO: rcu_sched detected stalls on CPUs/tasks:"]
     c = classify({"PANIC": "Kernel panic - not syncing: softlockup: hung tasks"}, log)
     cmds = [s.cmd for s in branch_steps(c, parse_exception(""), {})]
-    for want in ("bt -a", "runq -m", "hangcheck -g", "lockup -r -d", "rcuinfo -s", "vminfo --overcommit -d"):
+    for want in ("bt -a", "runq -m", "hangcheck -g", "lockinfo -a", "lockup -r -d", "rcuinfo -s",
+                 "vminfo --overcommit -d"):
         assert want in cmds, (want, cmds)
     assert len(cmds) == len(set(cmds))
 

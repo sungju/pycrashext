@@ -223,7 +223,14 @@ BT_FRAME = re.compile(r"#\d+\s+\[[0-9a-f]+\]\s+(\S+)\s+at\s|"
 # the paravirt ticket halt.
 SLOWPATH = "queued_spin_lock_slowpath"
 SPIN_FUNCS = (SLOWPATH, "_raw_spin_lock",
-              "kvm_lock_spinning", "xen_lock_spinning")
+              "kvm_lock_spinning", "xen_lock_spinning",
+              "read_lock_slowpath", "write_lock_slowpath")
+# rwlock_t waiters: queued_{read,write}_lock_slowpath.
+RW_SPIN_FUNCS = ("read_lock_slowpath", "write_lock_slowpath")
+# Waiting for an RCU grace period (percpu_down_write() does, before it
+# takes the semaphore: rcu_sync_enter(), RHEL7 synchronize_sched_expedited()).
+RCU_WAIT_FUNCS = ("synchronize_rcu", "synchronize_sched", "wait_rcu_gp",
+                  "rcu_sync_enter")
 
 
 def parse_bt(text):
@@ -260,6 +267,33 @@ def lock_refs(lock, words):
 IRQ_FUNCS = ("do_IRQ", "common_interrupt", "sysvec_", "apic_timer_interrupt",
              "call_function_interrupt", "handle_irq_event", "__do_softirq",
              "do_softirq", "irq_exit")
+
+
+def rw_wait_lock_frame(funcs):
+    """'read' / 'write' when the frame right outside the qspinlock slowpath
+    is a qrwlock slowpath: the CPU queues on that rwlock's wait_lock, not
+    on a spinlock taken in an interrupt that came in during the rwlock
+    spin."""
+    for i, f in enumerate(funcs):
+        if SLOWPATH not in f:
+            continue
+        outer = [g for g in funcs[i + 1:] if SLOWPATH not in g]
+        if outer:
+            if "read_lock_slowpath" in outer[0]:
+                return "read"
+            if "write_lock_slowpath" in outer[0]:
+                return "write"
+        return None
+    return None
+
+
+def waits_for_rcu(funcs, frame):
+    """Whether an RCU grace-period wait is inner to the first frame
+    containing 'frame'."""
+    for i, f in enumerate(funcs):
+        if frame in f:
+            return any(r in g for g in funcs[:i] for r in RCU_WAIT_FUNCS)
+    return False
 
 
 def is_spinning(funcs):
@@ -491,8 +525,9 @@ def find_wait_lock(task, slots, words, read_ptr, task_off, list_off, slist=False
                    is_waiter=None, valid_lock=None, exclude=()):
     """The lock a sleeping task waits on, found from its own waiter struct.
 
-    The waiter (mutex_waiter / rwsem_waiter) lives on the task's stack with
-    .task == task.  Its list ring holds the other waiters and the lock's
+    The waiter (mutex_waiter / rwsem_waiter / wait_queue_entry) lives on
+    the task's stack with .task (.private) == task, task_off bytes from its
+    list node (negative when the node comes after it).  Its list ring holds the other waiters and the lock's
     wait_list head.  With is_waiter(entry) the head is the one ring entry
     that is not a waiter, and the lock pointer need not be on the stack.
     Otherwise -- or for the RHEL7 rwsem slist, whose head is off the ring
@@ -502,7 +537,7 @@ def find_wait_lock(task, slots, words, read_ptr, task_off, list_off, slist=False
     for slot in sorted(slots):
         if slots[slot] != task:
             continue
-        waiter = slot - task_off
+        waiter = slot - task_off      # its list node
         nxt, prv = read_ptr(waiter), read_ptr(waiter + 8)
         if nxt is None or prv is None or read_ptr(nxt + 8) != waiter or read_ptr(prv) != waiter:
             continue
@@ -525,6 +560,115 @@ def find_wait_lock(task, slots, words, read_ptr, task_off, list_off, slist=False
                 return lock, waiter
         return None, waiter
     return None, None
+
+
+def find_by_field(words, read_ptr, field_off, value):
+    """Stack words W with *(W + field_off) == value: the percpu_rw_semaphore
+    whose rcuwait 'writer' names a task waiting for readers to leave."""
+    return [w for w in sorted(words) if read_ptr(w + field_off) == value]
+
+
+def decode_qrwlock(cnts, old=False):
+    """rwlock_t (qrwlock).  The low byte is 0xff while a writer holds it;
+    a waiting writer sets bit 8 (_QW_WAITING) and readers count from bit 9.
+    old is RHEL7: waiting writer is the low byte == 1, readers from bit 8.
+    A reader that finds a writer adds itself, then backs out, so the count
+    can include CPUs that are about to wait."""
+    cnts &= 0xffffffff
+    low = cnts & 0xff
+    if old:
+        waiting = low == 1
+        readers = cnts >> 8
+    else:
+        waiting = bool(cnts & 0x100)
+        readers = cnts >> 9
+    writer = low == 0xff
+    return {"writer": writer, "waiting_writer": waiting, "readers": readers,
+            "locked": writer or readers > 0}
+
+
+def describe_qrwlock(d):
+    if d["writer"]:
+        state = "write-locked"
+    elif d["readers"]:
+        state = "read-locked by %d reader(s)" % d["readers"]
+    else:
+        state = "unlocked"
+    if d["waiting_writer"]:
+        state += ", a writer waiting"
+    return state
+
+
+def decode_percpu_rwsem(read_counts, block, writer_waiting=None):
+    """percpu_rw_semaphore (5.8+, RHEL8 on).  Readers are the sum of the
+    per-CPU read_count (one CPU's count can go negative: a reader may
+    release it on another CPU).  'block' is set by a writer, which then
+    waits in the rcuwait 'writer' for the readers to leave and, once in,
+    is not recorded."""
+    readers = sum(signed(c, 32) for c in read_counts)
+    block = bool(block)
+    return {
+        "readers": readers,
+        "block": block,
+        "writer_waiting": writer_waiting or None,
+        "writer": block and readers == 0 and not writer_waiting,
+        "locked": block or readers > 0,
+    }
+
+
+def decode_percpu_rwsem_old(fast_counts, slow_read_ctr, write_ctr):
+    """RHEL7 percpu_rw_semaphore: readers on the fast path count per CPU,
+    slow-path readers in slow_read_ctr; write_ctr counts writers holding or
+    waiting for the embedded rw_sem."""
+    readers = sum(signed(c, 32) for c in fast_counts) + signed(slow_read_ctr, 32)
+    writers = signed(write_ctr, 32)
+    return {
+        "readers": readers,
+        "block": writers > 0,
+        "writer_waiting": None,
+        "writer": writers > 0 and readers == 0,
+        "locked": writers > 0 or readers > 0,
+    }
+
+
+def describe_percpu_rwsem(d):
+    if d["writer_waiting"]:
+        return "a writer is waiting for %d reader(s) to leave" % d["readers"]
+    if d["writer"]:
+        return "write-held (the writer is not recorded)"
+    if d["readers"] > 0:
+        state = "read-held by %d reader(s), which are not recorded" % d["readers"]
+        return state + (", blocked for a writer" if d["block"] else "")
+    return "blocked for a writer" if d["block"] else "unlocked"
+
+
+RWBASE_READER_BIAS = 1 << 31
+RWBASE_WRITER_BIAS = 1 << 30
+
+
+def decode_rwbase(readers, rt_owner):
+    """PREEMPT_RT rw_semaphore / rwlock_t (rwbase_rt).  While no writer is
+    in, readers holds READER_BIAS plus the reader count; a writer removes
+    the bias and waits for the count to drain, holding the rt_mutex, then
+    sets WRITER_BIAS."""
+    readers &= 0xffffffff
+    rt_owner &= MASK64
+    task = rt_owner & ~1 & MASK64
+    if readers & RWBASE_READER_BIAS:
+        count, writer, pending = readers - RWBASE_READER_BIAS, False, False
+    elif readers == RWBASE_WRITER_BIAS:
+        count, writer, pending = 0, True, False
+    else:
+        count, writer, pending = readers, False, True
+    return {
+        "writer": writer,
+        "readers": count,
+        "locked": writer or count > 0 or pending,
+        "waiters": bool(rt_owner & 1),
+        "owner": task or None,
+        "last_reader": None,
+        "writer_pending": pending,
+    }
 
 
 def root_owners(owners, waits_for):

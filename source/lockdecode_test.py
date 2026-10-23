@@ -12,7 +12,10 @@ from lockdecode import (decode_qspinlock, encode_tail, describe_qspinlock,
                         parse_bt, lock_refs, rank_holders, find_deadlocks,
                         pending_targets, decode_mutex, decode_rwsem,
                         bt_slots, split_tasks, walk_list, find_wait_lock,
-                        root_owners, in_interrupt)
+                        root_owners, in_interrupt, find_by_field,
+                        decode_qrwlock, describe_qrwlock, decode_percpu_rwsem,
+                        decode_percpu_rwsem_old, describe_percpu_rwsem,
+                        decode_rwbase, rw_wait_lock_frame, waits_for_rcu)
 
 
 def check_qspinlock_small_layout():
@@ -332,6 +335,93 @@ def check_root_owners():
     # The owner waits for a lock with no recorded owner (a read-held
     # rwsem): the chain ends at that lock, not at the waiting owner.
     assert root_owners({"A": "t1"}, {"t1": "R"}) == {"A": ("lock", "R")}
+
+
+def check_find_wait_lock_wait_queue():
+    # wait_queue_entry: .private (the task) at 8, list node at 24: the task
+    # is 16 bytes before the node.
+    task, sem, wq_head_off = 0xffff000000000a00, 0xffff000000777000, 0x28
+    entry = 0xffffb00000001100
+    node = entry + 24
+    mem = {}
+    ring(mem, [sem + wq_head_off, node])
+    slots = {entry + 8: task}
+    assert find_wait_lock(task, slots, {sem}, mem.get, -16, wq_head_off) == (sem, node)
+
+
+def check_qrwlock():
+    d = decode_qrwlock(0x0ff)                         # writer
+    assert (d["writer"], d["readers"], d["waiting_writer"]) == (True, 0, False)
+    d = decode_qrwlock((3 << 9) | 0x100)              # 3 readers, writer waiting
+    assert (d["writer"], d["readers"], d["waiting_writer"]) == (False, 3, True)
+    assert describe_qrwlock(d) == "read-locked by 3 reader(s), a writer waiting"
+    assert decode_qrwlock(0)["locked"] is False
+    # RHEL7: waiting writer is the low byte == 1, readers from bit 8.
+    d = decode_qrwlock((2 << 8) | 0x1, old=True)
+    assert (d["writer"], d["readers"], d["waiting_writer"]) == (False, 2, True)
+
+
+def check_percpu_rwsem():
+    # Per-CPU counts sum; one CPU's can be negative (released elsewhere).
+    d = decode_percpu_rwsem([2, 0xffffffff, 1], 0)
+    assert (d["readers"], d["locked"], d["writer"]) == (2, True, False)
+    assert describe_percpu_rwsem(d).startswith("read-held by 2")
+    # A writer set block and waits in rcuwait for the readers.
+    d = decode_percpu_rwsem([1], 1, 0xffff000000000a00)
+    assert d["writer_waiting"] == 0xffff000000000a00 and not d["writer"]
+    assert "waiting for 1 reader" in describe_percpu_rwsem(d)
+    # block and no readers, nobody waiting in rcuwait: the writer is in.
+    d = decode_percpu_rwsem([0, 0], 1)
+    assert d["writer"] and describe_percpu_rwsem(d).startswith("write-held")
+    assert describe_percpu_rwsem(decode_percpu_rwsem([0], 0)) == "unlocked"
+    d = decode_percpu_rwsem_old([1, 1], 1, 0)
+    assert (d["readers"], d["writer"]) == (3, False)
+    assert decode_percpu_rwsem_old([0], 0, 1)["writer"]
+
+
+def check_rwbase():
+    task = 0xffff000000000a00
+    d = decode_rwbase((1 << 31) + 2, 0)               # 2 readers
+    assert (d["writer"], d["readers"], d["locked"]) == (False, 2, True)
+    assert decode_rwbase(1 << 31, 0)["locked"] is False
+    d = decode_rwbase(1 << 30, task | 1)              # writer in, waiters
+    assert (d["writer"], d["owner"], d["waiters"]) == (True, task, True)
+    d = decode_rwbase(3, task)                        # writer waiting on 3 readers
+    assert (d["writer_pending"], d["readers"], d["owner"]) == (True, 3, task)
+
+
+def check_find_by_field():
+    sem, other, task = 0xffff000000010000, 0xffff000000020000, 0xffff000000000a00
+    mem = {sem + 0x20: task, other + 0x20: 0xffff000000000b00}
+    assert find_by_field({sem, other}, mem.get, 0x20, task) == [sem]
+
+
+def check_interrupt_with_rwlock():
+    # An rwlock spinner is spinning too.
+    assert not in_interrupt(["queued_write_lock_slowpath", "do_work"])
+    assert in_interrupt(["queued_read_lock_slowpath", "net_rx_action", "__do_softirq"])
+
+
+def check_rw_wait_lock_frame():
+    # Queued on the rwlock's wait_lock: the rwlock slowpath is right outside.
+    assert rw_wait_lock_frame(["crash_nmi_callback", "native_queued_spin_lock_slowpath",
+                               "native_queued_spin_lock_slowpath",
+                               "queued_write_lock_slowpath", "do_wait"]) == "write"
+    # An interrupt during the rwlock spin queued on another spinlock.
+    assert rw_wait_lock_frame(["native_queued_spin_lock_slowpath", "_raw_spin_lock",
+                               "handle_irq_event", "common_interrupt",
+                               "queued_write_lock_slowpath"]) is None
+    assert rw_wait_lock_frame(["queued_read_lock_slowpath"]) is None
+
+
+def check_waits_for_rcu():
+    assert waits_for_rcu(["__schedule", "wait_for_completion", "__wait_rcu_gp",
+                          "synchronize_rcu", "rcu_sync_enter", "percpu_down_write"],
+                         "percpu_down_write")
+    # Waiting for the readers in rcuwait: no RCU frame inside.
+    assert not waits_for_rcu(["__schedule", "schedule", "percpu_down_write",
+                              "cgroup_attach_task", "synchronize_rcu_caller"],
+                             "percpu_down_write")
 
 
 if (__name__ == '__main__'):

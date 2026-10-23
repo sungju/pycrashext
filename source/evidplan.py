@@ -60,7 +60,8 @@ HELPERS = {
     "crashhelper", "crashcolor", "evidplan", "logsig", "sysenv", "netutil",
     "kernel_version", "overcommit", "preemptcount", "rules_helper", "regext",
     "reg_all_ext", "cmds_test", "disasm", "get_x86asm", "revs", "screen",
-    "ai_send", "btgroup", "fsfreeze", "pvring", "storstat", "__init__",
+    "ai_send", "btgroup", "fsfreeze", "pvring", "storstat", "lockdecode",
+    "__init__",
 }
 
 
@@ -243,6 +244,8 @@ def branch_steps(cls, exc, sys_fields):
         steps.append(Step("bt -a", "Active task on every CPU", 120, 80))
         steps.append(Step("runq -m", "How long each CPU's task has run", 70, 20))
         steps.append(Step("hangcheck -g", "D-state tasks grouped by where they wait", 120, 40))
+        steps.append(Step("lockinfo -a", "Lock owners, waiters, deadlocks and where the wait chains end",
+                          150, 60, "who holds what the stuck CPUs and hung tasks wait for"))
         if "softlockup" in hits or "hardlockup" in hits:
             steps.append(Step("lockup -r -d", "Locked-up CPUs, longest first", 80, 40))
         if "rcu_stall" in hits:
