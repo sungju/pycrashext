@@ -1,5 +1,10 @@
 """
-'lockinfo' command: spinlock and MCS-lock information.
+'lockinfo' command: who holds and who waits for spinlocks, mutexes and
+rw_semaphores.
+
+Mutexes and rwsems record their owner (readers excepted); -b groups the
+hung (UN) tasks by the lock they sleep on and follows owner -> lock ->
+owner to the tasks at the end of each chain.
 
 A spinlock does not record its holder.  What the dump does record is who
 waits: a qspinlock's tail names the last CPU queued, and each queued CPU's
@@ -17,6 +22,7 @@ from LinuxDump import percpu
 import crashcolor
 import lockdecode
 
+import re
 import sys
 
 
@@ -561,6 +567,408 @@ def show_mcslock(options):
               sorted(set(range(sys_info.CPUS)) - queued - set(deep)))
 
 
+# ---- sleeping locks: mutex and rw_semaphore ----
+
+# Functions a task sleeps in while waiting for each kind of lock.
+SLEEP_FUNCS = (("mutex", ("__mutex_lock",)),
+               ("rwsem", ("rwsem_down_read", "rwsem_down_write")))
+
+
+def read_ptr(addr):
+    try:
+        return readULong(addr)
+    except:
+        return None
+
+
+def offset_or(struct, member, default):
+    off = member_offset(struct, member)
+    return off if off >= 0 else default
+
+
+sleep_layouts = {}
+
+def sleep_layout(kind):
+    """{"task_off", "type_off", "wl_off", "slist"}: where the waiter struct
+    keeps its task and type, where the lock keeps wait_list, and whether
+    wait_list is the RHEL7 rwsem's one-pointer slist_head."""
+    if kind not in sleep_layouts:
+        if kind == "mutex":
+            sleep_layouts[kind] = {
+                "task_off": offset_or("struct mutex_waiter", "task", 16),
+                "type_off": None,
+                "wl_off": member_offset("struct mutex", "wait_list"),
+                "slist": False,
+            }
+        else:
+            sleep_layouts[kind] = {
+                "task_off": offset_or("struct rwsem_waiter", "task", 16),
+                "type_off": offset_or("struct rwsem_waiter", "type", 24),
+                "wl_off": member_offset("struct rw_semaphore", "wait_list"),
+                "slist": member_size("struct rw_semaphore", "wait_list") == 8,
+            }
+    return sleep_layouts[kind]
+
+
+def sleep_kind(funcs):
+    for kind, names in SLEEP_FUNCS:
+        if any(name in f for f in funcs for name in names):
+            return kind
+    return None
+
+
+task_infos = {}
+
+def task_info(task):
+    """{"pid", "comm", "state", "since"}; since is how long ago it last ran
+    ('ps -m')."""
+    if task not in task_infos:
+        info = {"pid": "?", "comm": "?", "state": "??", "since": ""}
+        try:
+            line = exec_crash_command("ps -m 0x%x" % task)
+            m = re.search(r'\[([\d :.]+)\]\s+\[(\w+)\]\s+PID:\s*(\d+).*COMMAND:\s*"([^"]*)"', line)
+            if m:
+                info = {"since": m.group(1).strip(), "state": m.group(2),
+                        "pid": int(m.group(3)), "comm": m.group(4)}
+        except:
+            pass
+        task_infos[task] = info
+    return task_infos[task]
+
+
+def task_desc(task):
+    t = task_info(task)
+    return "pid %-7s %-16s %s %s" % (t["pid"], t["comm"], t["state"], t["since"])
+
+
+blocked_scan = None
+
+def scan_blocked():
+    """Every UN task sleeping on a mutex or rwsem: {task: (kind, lock or None)}
+    and {task: words on its stack}."""
+    global blocked_scan
+
+    if blocked_scan is None:
+        waiting = {}
+        words = {}
+        try:
+            text = exec_crash_command("foreach UN bt -f")
+        except:
+            text = ""
+        for block in lockdecode.split_tasks(text):
+            bt = lockdecode.parse_bt(block)
+            if bt["task"] is None:
+                continue
+            words[bt["task"]] = lockdecode.candidate_words(block)
+            kind = sleep_kind(bt["funcs"])
+            if kind is None:
+                continue
+            waiting[bt["task"]] = (kind, wait_lock_of(bt["task"], kind, block,
+                                                      words[bt["task"]]))
+        blocked_scan = (waiting, words)
+    return blocked_scan
+
+
+# Upper bound of THREAD_SIZE (16K on x86_64, 32K with KASAN, 64K arm64).
+MAX_THREAD_SIZE = 0x10000
+
+
+def task_stack(task):
+    off = member_offset("struct task_struct", "stack")
+    base = read_ptr(task + off) if off >= 0 else None
+    return (base, base + MAX_THREAD_SIZE) if base else None
+
+
+def wait_lock_of(task, kind, text, words):
+    layout = sleep_layout(kind)
+    if layout["wl_off"] < 0:
+        return None
+
+    def is_waiter(entry):
+        # A waiter struct lives on its own task's stack.
+        t = read_ptr(entry + layout["task_off"])
+        stack = task_stack(t) if t else None
+        return bool(stack) and stack[0] <= entry < stack[1]
+
+    valid_lock = None
+    if layout["slist"]:
+        count_off = member_offset("struct rw_semaphore", "count")
+
+        def valid_lock(lock):
+            # RHEL7 bias layout: waiters make the high half negative.
+            count = read_ptr(lock + count_off)
+            return count is not None and (lockdecode.signed(count, 64) >> 32) < 0
+
+    stack = task_stack(task)
+    lock, _ = lockdecode.find_wait_lock(task, lockdecode.bt_slots(text), words,
+                                        read_ptr, layout["task_off"],
+                                        layout["wl_off"], layout["slist"],
+                                        is_waiter, valid_lock,
+                                        [stack] if stack else [])
+    return lock
+
+
+task_waits = {}
+
+def task_waits_for(task):
+    """(kind, lock) the task sleeps on, or None: from the blocked scan, else
+    from the task's own backtrace (the scan covers UN tasks only, not those
+    sleeping interruptibly)."""
+    if blocked_scan is not None and task in blocked_scan[0]:
+        return blocked_scan[0][task]
+    if task not in task_waits:
+        task_waits[task] = None
+        try:
+            text = exec_crash_command("bt -f 0x%x" % task)
+            kind = sleep_kind(lockdecode.parse_bt(text)["funcs"])
+            if kind is not None:
+                task_waits[task] = (kind, wait_lock_of(
+                    task, kind, text, lockdecode.candidate_words(text)))
+        except:
+            pass
+    return task_waits[task]
+
+
+def read_sleeping_lock(kind, addr):
+    """Decoded state plus "waiters": [(task, 'read'/'write' or None)], or
+    {"error": text}."""
+    if kind == "mutex":
+        if member_offset("struct mutex", "rtmutex") >= 0:
+            owner = read_ptr(addr + member_offset("struct mutex", "rtmutex") +
+                             member_offset("struct rt_mutex_base", "owner"))
+            if owner is None:
+                return {"error": "cannot read 0x%x" % addr}
+            d = {"locked": (owner & ~1) != 0, "owner": (owner & ~1) or None,
+                 "flags": ["WAITERS"] if owner & 1 else [], "waiters": [],
+                 "note": "PREEMPT_RT: waiters are in the rt_mutex tree, not listed"}
+            return d
+        owner_off = member_offset("struct mutex", "owner")
+        owner = read_ptr(addr + owner_off) if owner_off >= 0 else 0
+        if owner is None:
+            return {"error": "cannot read 0x%x" % addr}
+        count_off = member_offset("struct mutex", "count")
+        count = readUInt(addr + count_off) if count_off >= 0 else None
+        d = lockdecode.decode_mutex(owner, count)
+    else:
+        if member_offset("struct rw_semaphore", "rwbase") >= 0:
+            return {"error": "PREEMPT_RT rw_semaphore (rwbase_rt) is not decoded"}
+        count = read_ptr(addr + member_offset("struct rw_semaphore", "count"))
+        if count is None:
+            return {"error": "cannot read 0x%x" % addr}
+        owner_off = member_offset("struct rw_semaphore", "owner")
+        owner = (read_ptr(addr + owner_off) or 0) if owner_off >= 0 else 0
+        d = None
+
+    layout = sleep_layout(kind)
+    waiters = []
+    for entry in lockdecode.walk_list(addr + layout["wl_off"], read_ptr, layout["slist"]):
+        task = read_ptr(entry + layout["task_off"])
+        wtype = None
+        if layout["type_off"] is not None:
+            try:
+                wtype = "write" if readUInt(entry + layout["type_off"]) == \
+                        lockdecode.RWSEM_WAITING_FOR_WRITE else "read"
+            except:
+                pass
+        waiters.append((task, wtype))
+    if kind == "rwsem":
+        old = symbol_exists("rwsem_down_read_failed") and \
+              not symbol_exists("rwsem_down_read_slowpath")
+        d = lockdecode.decode_rwsem(count, owner, old, bool(waiters))
+    d["waiters"] = waiters
+    return d
+
+
+def describe_sleeping_lock(kind, d):
+    if kind == "mutex":
+        state = "locked" if d["locked"] else "unlocked"
+        if d["flags"]:
+            state += ", flags " + "|".join(d["flags"])
+        return state
+    if d["writer"]:
+        state = "write-locked"
+    elif d["readers"]:
+        state = "read-locked by %d reader(s)" % d["readers"]
+    else:
+        state = "unlocked"
+    if d["waiters"]:
+        state += ", waiters"
+    return state
+
+
+def show_sleeping_lock(kind, addr, readers_from_scan=False):
+    """Print the lock, its owner and its waiters; returns its owner task
+    (None when not recorded or reader-owned)."""
+    d = read_sleeping_lock(kind, addr)
+    print("%s 0x%x%s" % (kind, addr, lock_name(addr)))
+    if "error" in d:
+        print("    %s" % d["error"])
+        return None
+    print("    state : %s" % describe_sleeping_lock(kind, d))
+    if d.get("note"):
+        print("    note  : %s" % d["note"])
+
+    waiter_tasks = set(t for t, _ in d["waiters"])
+    owner = d.get("owner")
+    if d.get("handoff_to"):
+        print("    owner : none: handed off to %s, which has not run to take it" %
+              task_desc(d["handoff_to"]).strip())
+    elif owner:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("    owner : %s" % task_desc(owner))
+        crashcolor.set_color(crashcolor.RESET)
+        if owner in waiter_tasks:
+            print("            waits for this lock itself: recursive locking, a self-deadlock")
+        else:
+            waits = task_waits_for(owner)
+            if waits and waits[1]:
+                print("            itself waiting for %s 0x%x%s" %
+                      (waits[0], waits[1], lock_name(waits[1])))
+            elif waits:
+                print("            itself sleeping in a %s slowpath (lock not found)" % waits[0])
+    elif d["locked"] and kind == "mutex":
+        print("    owner : not recorded")
+    elif kind == "rwsem" and d["readers"]:
+        if d["last_reader"]:
+            print("    owner : readers are not recorded; the last reader to take it"
+                  " was %s (it may have released it)" % task_desc(d["last_reader"]).strip())
+        else:
+            print("    owner : readers are not recorded")
+        if readers_from_scan:
+            show_possible_readers(addr, waiter_tasks)
+
+    if d["waiters"]:
+        print("    waiters, in queue order (%d):" % len(d["waiters"]))
+        for task, wtype in d["waiters"]:
+            if task is None:
+                print("      (unreadable waiter)")
+                continue
+            print("      %s%s" % (task_desc(task), "  [%s]" % wtype if wtype else ""))
+    return owner
+
+
+def show_possible_readers(addr, waiter_tasks):
+    """Blocked tasks and running CPUs that have the rwsem on their stack
+    without waiting on it: the readers that may hold it."""
+    _, words = scan_blocked()
+    found = [task for task, w in words.items()
+             if task not in waiter_tasks and addr in w]
+    for cpu in range(sys_info.CPUS):
+        bt = cpu_bt(cpu)
+        if bt["task"] and bt["task"] not in waiter_tasks and addr in bt["words"] \
+           and bt["task"] not in found:
+            found.append(bt["task"])
+    if found:
+        print("            possible readers (lock address on their stack, not waiting for it):")
+        for task in found:
+            print("              %s" % task_desc(task))
+
+
+def show_mutex(options):
+    show_one_sleeping_lock("mutex", options.mutex)
+
+
+def show_rwsem(options):
+    show_one_sleeping_lock("rwsem", options.rwsem)
+
+
+def show_one_sleeping_lock(kind, text):
+    try:
+        addr = int(text, 16)
+    except ValueError:
+        print("invalid address '%s'" % text)
+        return
+    show_sleeping_lock(kind, addr, readers_from_scan=(kind == "rwsem"))
+
+
+def show_blocked(options):
+    waiting, _ = scan_blocked()
+    if not waiting:
+        print("No UN task is waiting for a mutex or rwsem")
+        return
+
+    locks = {}
+    lost = []
+    for task, (kind, lock) in waiting.items():
+        if lock is None:
+            lost.append((kind, task))
+        else:
+            locks.setdefault((kind, lock), []).append(task)
+
+    owners = {}
+    order = sorted(locks.items(), key=lambda kv: (-len(kv[1]), kv[0][1]))
+    for (kind, lock), tasks in order:
+        owner = show_sleeping_lock(kind, lock, readers_from_scan=(kind == "rwsem"))
+        if owner:
+            owners[lock] = owner
+        print()
+
+    waits_for = dict((task, lock) for task, (_, lock) in waiting.items() if lock)
+    kinds = dict((lock, kind) for kind, lock in locks)
+    # Owners sleeping interruptibly are not in the UN scan.
+    for owner in owners.values():
+        waits = task_waits_for(owner)
+        if owner not in waits_for and waits and waits[1]:
+            waits_for[owner] = waits[1]
+            kinds.setdefault(waits[1], waits[0])
+    show_sleeping_deadlocks(owners, waits_for)
+    show_root_owners(owners, waits_for, locks, kinds)
+
+    if lost:
+        print("Sleeping in a slowpath, lock not found on the stack:")
+        for kind, task in sorted(lost, key=lambda kt: str(task_info(kt[1])["pid"])):
+            print("    %-5s %s" % (kind, task_desc(task)))
+
+
+def show_sleeping_deadlocks(owners, waits_for):
+    holders = dict((lock, [owner]) for lock, owner in owners.items())
+    for cycle in lockdecode.find_deadlocks(holders, waits_for):
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("Deadlock:")
+        for lock, task in cycle:
+            print("    lock 0x%x%s is owned by %s, which waits for lock 0x%x" %
+                  (lock, lock_name(lock), task_desc(task).strip(), waits_for[task]))
+        crashcolor.set_color(crashcolor.RESET)
+        print()
+
+
+def show_root_owners(owners, waits_for, locks, kinds):
+    """Where the wait chains end: an owner not waiting for another lock, or
+    a lock whose owner is not recorded (read-held rwsem, mutex handed off).
+    That is what the blocked tasks wait on in the end, so where to look."""
+    blocked = {}
+    for lock, root in lockdecode.root_owners(owners, waits_for).items():
+        if root is None:
+            continue
+        tasks = [t for (_, l), ts in locks.items() if l == lock for t in ts]
+        blocked.setdefault(root, set()).update(tasks)
+    # Locks no owner leads to and with no recorded owner end chains too.
+    for (kind, lock), tasks in locks.items():
+        if lock not in owners:
+            blocked.setdefault(("lock", lock), set()).update(tasks)
+    if not blocked:
+        return
+    print("Where the wait chains end (start here):")
+    for root, tasks in sorted(blocked.items(), key=lambda kv: -len(kv[1])):
+        what, value = root
+        if what == "task":
+            print("    %s  blocks %d task(s)" % (task_desc(value), len(tasks)))
+            continue
+        kind = kinds.get(value, "lock")
+        d = read_sleeping_lock(kind, value) if kind in ("mutex", "rwsem") else {}
+        if d.get("handoff_to"):
+            why = "handed off to %s, not yet taken" % task_desc(d["handoff_to"]).strip()
+        elif kind == "rwsem" and d.get("readers"):
+            why = "read-held by %d reader(s), which are not recorded" % d["readers"]
+            if d.get("last_reader"):
+                why += "; last reader %s" % task_desc(d["last_reader"]).strip()
+        else:
+            why = "owner not recorded"
+        print("    %s 0x%x%s  blocks %d task(s): %s" %
+              (kind, value, lock_name(value), len(tasks), why))
+    print()
+
+
 def lockinfo():
     op = OptionParser()
     op.add_option("-s", "--spinlock", dest="spinlock", default="",
@@ -572,8 +980,30 @@ def lockinfo():
     op.add_option("-x", "--excluded", dest="show_excluded", default=0,
                   action="store_true",
                   help="With -m, shows CPUs not in any MCS queue")
+    op.add_option("-M", "--mutex", dest="mutex", default="",
+                  action="store", type="string",
+                  help="Shows a mutex's owner and waiters")
+    op.add_option("-R", "--rwsem", dest="rwsem", default="",
+                  action="store", type="string",
+                  help="Shows an rw_semaphore's owner or readers and waiters")
+    op.add_option("-b", "--blocked", dest="blocked", default=0,
+                  action="store_true",
+                  help="Groups UN tasks by the mutex or rwsem they wait for,"
+                       " with owners, chains and deadlocks")
 
     (o, args) = op.parse_args()
+
+    if o.mutex != "":
+        show_mutex(o)
+        sys.exit(0)
+
+    if o.rwsem != "":
+        show_rwsem(o)
+        sys.exit(0)
+
+    if o.blocked:
+        show_blocked(o)
+        sys.exit(0)
 
 
     if o.spinlock != "":

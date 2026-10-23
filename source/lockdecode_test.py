@@ -10,7 +10,9 @@ from lockdecode import (decode_qspinlock, encode_tail, describe_qspinlock,
                         decode_tickets, ticket_position, in_use_slots,
                         build_queues, candidate_words, match_lock,
                         parse_bt, lock_refs, rank_holders, find_deadlocks,
-                        pending_targets)
+                        pending_targets, decode_mutex, decode_rwsem,
+                        bt_slots, split_tasks, walk_list, find_wait_lock,
+                        root_owners, in_interrupt)
 
 
 def check_qspinlock_small_layout():
@@ -163,6 +165,16 @@ def check_rank_holders():
     assert out == [] and 4 in [c["cpu"] for c in cand]
 
 
+def check_in_interrupt_order():
+    # Spinning inside a softirq: the interrupt frame is outer to the spin.
+    assert in_interrupt(["native_queued_spin_lock_slowpath", "_raw_spin_lock",
+                         "tcp_v4_rcv", "__do_softirq", "irq_exit"])
+    # softlockup_panic: the watchdog interrupt came in during the spin.
+    assert not in_interrupt(["panic", "watchdog_timer_fn", "sysvec_apic_timer_interrupt",
+                             "native_queued_spin_lock_slowpath", "_raw_spin_lock",
+                             "do_work"])
+
+
 def check_rank_holders_aa_and_fallback():
     A = 0xffff000000010000
     cpus = {
@@ -203,6 +215,123 @@ def check_find_deadlocks():
     # A chain that ends in a lock with no known holder is no deadlock.
     assert find_deadlocks({A: [1], B: [2]}, {1: B, 2: C}) == []
     assert find_deadlocks({A: [1]}, {}) == []
+
+
+def check_decode_mutex():
+    d = decode_mutex(0xffff9e2a40e8c000 | 0x3)
+    assert d == {"locked": True, "owner": 0xffff9e2a40e8c000, "handoff_to": None,
+                 "flags": ["WAITERS", "HANDOFF"]}
+    # PICKUP: handed to the next waiter, which has not taken it yet.
+    d = decode_mutex(0xffff9e2a40e8c000 | 0x5)
+    assert (d["owner"], d["handoff_to"]) == (None, 0xffff9e2a40e8c000)
+    assert decode_mutex(0)["locked"] is False
+    # RHEL7: count 1 free, 0 locked, negative locked with waiters.
+    assert decode_mutex(0, 1)["locked"] is False
+    d = decode_mutex(0xffff9e2a40e8c000, 0xffffffff)
+    assert (d["locked"], d["owner"], d["flags"]) == (True, 0xffff9e2a40e8c000, ["WAITERS"])
+
+
+def check_decode_rwsem():
+    task = 0xffff9e2a40e8c000
+    d = decode_rwsem(0x1 | 0x2, task)                       # writer + waiters
+    assert (d["writer"], d["readers"], d["waiters"], d["owner"]) == (True, 0, True, task)
+    d = decode_rwsem(3 << 8, task | 0x1)                    # 3 readers
+    assert (d["writer"], d["readers"], d["owner"], d["last_reader"]) == (False, 3, None, task)
+    assert decode_rwsem(0, task | 0x3)["locked"] is False   # free, stale last reader
+
+
+def check_decode_rwsem_rhel7():
+    task = 0xffff9e2a40e8c000
+    write_bias = 0xffffffff00000001
+    d = decode_rwsem(write_bias, task, old=True)
+    assert (d["writer"], d["readers"], d["waiters"]) == (True, 0, False)
+    # Writer and waiters: the waiting bias goes on top.
+    d = decode_rwsem(0xfffffffe00000001, task, old=True, has_waiters=True)
+    assert (d["writer"], d["waiters"]) == (True, True)
+    # One reader with waiters reads like a lone writer: the list settles it.
+    d = decode_rwsem(write_bias, task | 0x3, old=True, has_waiters=True)
+    assert (d["writer"], d["readers"], d["waiters"]) == (False, 1, True)
+    d = decode_rwsem(2, task | 0x3, old=True)
+    assert (d["writer"], d["readers"]) == (False, 2)
+
+
+def check_bt_slots_and_split():
+    text = """PID: 10  TASK: ffff000000000a00  CPU: 1  COMMAND: "a"
+ #0 [ffffb00000001000] __schedule at ffffffff81000000
+    ffffb00000001008: ffff000000000a00 0000000000000001
+PID: 11  TASK: ffff000000000b00  CPU: 2  COMMAND: "b"
+ #0 [ffffb00000002000] __schedule at ffffffff81000000
+"""
+    blocks = split_tasks(text)
+    assert len(blocks) == 2 and "COMMAND: \"b\"" in blocks[1]
+    assert bt_slots(blocks[0]) == {0xffffb00000001008: 0xffff000000000a00,
+                                   0xffffb00000001010: 1}
+
+
+def ring(mem, nodes):
+    """Link nodes into a list_head ring (next at +0, prev at +8)."""
+    for i, n in enumerate(nodes):
+        mem[n] = nodes[(i + 1) % len(nodes)]
+        mem[n + 8] = nodes[i - 1]
+
+
+def check_walk_list():
+    mem = {}
+    head, w1, w2 = 0x1000, 0x2000, 0x3000
+    ring(mem, [head, w1, w2])
+    assert walk_list(head, mem.get) == [w1, w2]
+    mem[0x4000] = 0x4000
+    assert walk_list(0x4000, mem.get) == []
+    # RHEL7 rwsem slist: head points at the first waiter only.
+    mem2 = {0x5000: w1}
+    ring(mem2, [w1, w2])
+    assert walk_list(0x5000, mem2.get, slist=True) == [w1, w2]
+
+
+def check_find_wait_lock():
+    task, lock, wl_off, task_off = 0xffff000000000a00, 0xffff000000777000, 0x10, 0x10
+    waiter, other = 0xffffb00000001100, 0xffffb00000009100
+    mem = {}
+    ring(mem, [lock + wl_off, other, waiter])
+    slots = {waiter + task_off: task, 0xffffb00000001200: lock}
+    words = {lock, 0xffff000000123450}
+    assert find_wait_lock(task, slots, words, mem.get, task_off, wl_off) == (lock, waiter)
+    # The lock not on the stack: the waiter is still found.
+    assert find_wait_lock(task, slots, {0xffff000000123450}, mem.get,
+                          task_off, wl_off) == (None, waiter)
+    # A slot holding the task that is not a waiter (list links not sane).
+    assert find_wait_lock(task, {0xffffb00000005010: task}, words, mem.get,
+                          task_off, wl_off) == (None, None)
+    # With is_waiter the head is the ring's one non-waiter: no stack word needed.
+    is_waiter = lambda e: e in (other, waiter)
+    assert find_wait_lock(task, slots, set(), mem.get, task_off, wl_off,
+                          is_waiter=is_waiter) == (lock, waiter)
+    # RHEL7 slist: head is off the ring and points at the first waiter.
+    mem = {lock + wl_off: other}
+    ring(mem, [other, waiter])
+    assert find_wait_lock(task, slots, words, mem.get, task_off, wl_off,
+                          slist=True) == (lock, waiter)
+    # A stack word (saved frame pointer) whose +wl_off points at the waiter
+    # is excluded with the stack, or fails valid_lock.
+    fp = 0xffffb00000001000
+    mem[fp + wl_off] = waiter
+    words2 = {fp, lock}
+    assert find_wait_lock(task, slots, words2, mem.get, task_off, wl_off, slist=True,
+                          exclude=[(0xffffb00000000000, 0xffffb00000010000)]) == (lock, waiter)
+    assert find_wait_lock(task, slots, words2, mem.get, task_off, wl_off, slist=True,
+                          valid_lock=lambda l: l == lock) == (lock, waiter)
+
+
+def check_root_owners():
+    # Lock A owned by t1, who waits for B owned by t2 (running): root t2.
+    assert root_owners({"A": "t1", "B": "t2"}, {"t1": "B"}) == \
+        {"A": ("task", "t2"), "B": ("task", "t2")}
+    # A cycle has no root.
+    assert root_owners({"A": "t1", "B": "t2"}, {"t1": "B", "t2": "A"}) == \
+        {"A": None, "B": None}
+    # The owner waits for a lock with no recorded owner (a read-held
+    # rwsem): the chain ends at that lock, not at the waiting owner.
+    assert root_owners({"A": "t1"}, {"t1": "R"}) == {"A": ("lock", "R")}
 
 
 if (__name__ == '__main__'):

@@ -267,7 +267,13 @@ def is_spinning(funcs):
 
 
 def in_interrupt(funcs):
-    return any(s in f for f in funcs for s in IRQ_FUNCS)
+    """Whether the spinning runs in interrupt context: an interrupt frame
+    outer to the first spin frame (funcs are innermost first).  One inner
+    to it, such as the watchdog timer that fired during the spin and
+    panicked, is not."""
+    spin = [i for i, f in enumerate(funcs) if any(s in f for s in SPIN_FUNCS)]
+    start = spin[0] + 1 if spin else 0
+    return any(s in f for f in funcs[start:] for s in IRQ_FUNCS)
 
 
 def pending_targets(words, read_val, nr_cpus, exclude=()):
@@ -371,6 +377,182 @@ def find_deadlocks(holders, waits_for):
                 seen.add(key)
                 cycles.append(cycle)
     return cycles
+
+
+# ---- sleeping locks: mutex and rw_semaphore ----
+#
+# These record their owner.  mutex.owner (4.10+, RHEL8 on) is the owning
+# task with MUTEX_FLAG_* in the low 3 bits; the RHEL7 mutex keeps a count
+# (1 free, 0 locked, < 0 locked with waiters) and a plain owner pointer.
+# rw_semaphore.owner is the writer, or the LAST reader to take it with
+# RWSEM_READER_OWNED set -- readers are not tracked.  Waiters sit on
+# wait_list in mutex_waiter / rwsem_waiter structs on their own stacks.
+
+MUTEX_FLAGS = ((0x1, "WAITERS"), (0x2, "HANDOFF"), (0x4, "PICKUP"))
+RWSEM_READER_OWNED = 0x1
+RWSEM_OWNER_FLAGS = 0x3     # READER_OWNED, NONSPINNABLE (RHEL7: ANONYMOUSLY_OWNED)
+RWSEM_WAITING_FOR_WRITE = 0
+MASK64 = 0xffffffffffffffff
+
+
+def signed(val, bits):
+    val &= (1 << bits) - 1
+    return val - (1 << bits) if val >> (bits - 1) else val
+
+
+def decode_mutex(owner, count=None):
+    """owner is the owner word; count is the RHEL7 atomic_t count (None on
+    4.10+, where the owner word alone says whether it is locked)."""
+    owner &= MASK64
+    if count is None:
+        task = owner & ~0x7 & MASK64
+        flags = [name for bit, name in MUTEX_FLAGS if owner & bit]
+        # PICKUP: __mutex_handoff() named the next waiter, which still has
+        # to run and take it; nobody holds it meanwhile.
+        if "PICKUP" in flags:
+            return {"locked": True, "owner": None, "handoff_to": task or None,
+                    "flags": flags}
+        return {"locked": task != 0, "owner": task or None, "handoff_to": None,
+                "flags": flags}
+    count = signed(count, 32)
+    return {"locked": count < 1, "owner": owner or None, "handoff_to": None,
+            "flags": ["WAITERS"] if count < 0 else []}
+
+
+def decode_rwsem(count, owner, old=False, has_waiters=False):
+    """rw_semaphore state.  old is the RHEL7 x86_64 bias layout: the low 32
+    bits count active lockers, the high half goes down by one for waiters
+    and once more for a writer.  has_waiters (wait_list not empty) settles
+    the one case the old count cannot: one reader with waiters and a writer
+    alone both read 0xffffffff00000001."""
+    count &= MASK64
+    owner &= MASK64
+    task = owner & ~RWSEM_OWNER_FLAGS & MASK64
+    reader_owned = bool(owner & RWSEM_READER_OWNED)
+    if old:
+        active = count & 0xffffffff
+        high = signed(count, 64) >> 32
+        writer = active > 0 and ((task != 0 and not reader_owned) or high <= -2 or
+                                 (high == -1 and not has_waiters))
+        readers = 0 if writer or high < -1 else active
+        waiters = high <= -2 or (high == -1 and not writer) or has_waiters
+    else:
+        writer = bool(count & 0x1)                  # RWSEM_WRITER_LOCKED
+        readers = (count >> 8) & ((1 << 55) - 1)    # bits 8-62
+        waiters = bool(count & 0x2)                 # RWSEM_FLAG_WAITERS
+    return {
+        "writer": writer,
+        "readers": readers,
+        "locked": writer or readers > 0,
+        "waiters": waiters,
+        "owner": task if task and not reader_owned else None,
+        "last_reader": task if task and reader_owned else None,
+    }
+
+
+BT_SLOT_LINE = re.compile(r"^\s*([0-9a-f]{16}):((?:\s+[0-9a-f]{16})+)\s*$",
+                          re.MULTILINE)
+
+
+def bt_slots(text):
+    """{stack address: value} from the 'addr: word word' lines of bt -f."""
+    slots = {}
+    for m in BT_SLOT_LINE.finditer(text.lower()):
+        addr = int(m.group(1), 16)
+        for i, word in enumerate(m.group(2).split()):
+            slots[addr + 8 * i] = int(word, 16)
+    return slots
+
+
+def split_tasks(text):
+    """The per-task blocks of 'foreach ... bt' output."""
+    blocks = re.split(r"(?m)^(?=PID:)", text)
+    return [b for b in blocks if b.startswith("PID:")]
+
+
+def walk_list(head, read_ptr, slist=False, limit=100000):
+    """Entries of a list_head ring at 'head', in order.  With slist (RHEL7
+    rwsem) head only points at the first entry and is not on the ring."""
+    entries = []
+    first = read_ptr(head)
+    if first is None or first == head:
+        return entries
+    stop = first if slist else head
+    entry = first
+    while entry is not None and len(entries) < limit:
+        entries.append(entry)
+        entry = read_ptr(entry)
+        if entry == stop:
+            return entries
+    return entries          # broken or too long: what was read
+
+
+def find_wait_lock(task, slots, words, read_ptr, task_off, list_off, slist=False,
+                   is_waiter=None, valid_lock=None, exclude=()):
+    """The lock a sleeping task waits on, found from its own waiter struct.
+
+    The waiter (mutex_waiter / rwsem_waiter) lives on the task's stack with
+    .task == task.  Its list ring holds the other waiters and the lock's
+    wait_list head.  With is_waiter(entry) the head is the one ring entry
+    that is not a waiter, and the lock pointer need not be on the stack.
+    Otherwise -- or for the RHEL7 rwsem slist, whose head is off the ring
+    -- the lock is a stack word whose wait_list is that head (on the ring,
+    or for slist pointing into it), not in exclude [(start, end)] and
+    passing valid_lock(lock).  Returns (lock or None, waiter or None)."""
+    for slot in sorted(slots):
+        if slots[slot] != task:
+            continue
+        waiter = slot - task_off
+        nxt, prv = read_ptr(waiter), read_ptr(waiter + 8)
+        if nxt is None or prv is None or read_ptr(nxt + 8) != waiter or read_ptr(prv) != waiter:
+            continue
+        ring = set()
+        entry = waiter
+        while entry is not None and entry not in ring and len(ring) < 100000:
+            ring.add(entry)
+            entry = read_ptr(entry)
+        if not slist and is_waiter is not None:
+            heads = [e for e in ring if e != waiter and not is_waiter(e)]
+            if len(heads) == 1:
+                return heads[0] - list_off, waiter
+        for lock in sorted(words):
+            head = lock + list_off
+            if head == waiter or any(start <= lock < end for start, end in exclude):
+                continue
+            if not ((not slist and head in ring) or (slist and read_ptr(head) in ring)):
+                continue
+            if valid_lock is None or valid_lock(lock):
+                return lock, waiter
+        return None, waiter
+    return None, None
+
+
+def root_owners(owners, waits_for):
+    """Follow lock -> owner -> lock the owner waits for, to where each chain
+    ends.  owners is {lock: owner}, waits_for {task: lock}.  Returns
+    {lock: ("task", owner)} for an owner not waiting for a lock, {lock:
+    ("lock", other)} for a chain ending at a lock whose owner is not
+    recorded (a read-held rwsem), and {lock: None} on a cycle."""
+    roots = {}
+    for lock in owners:
+        seen = set()
+        cur = lock
+        root = None
+        while True:
+            if cur in seen:
+                root = None
+                break
+            seen.add(cur)
+            owner = owners[cur]
+            if owner not in waits_for:
+                root = ("task", owner)
+                break
+            cur = waits_for[owner]
+            if cur not in owners:
+                root = ("lock", cur)
+                break
+        roots[lock] = root
+    return roots
 
 
 if (__name__ == '__main__'):

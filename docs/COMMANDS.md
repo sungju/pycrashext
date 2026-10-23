@@ -664,7 +664,7 @@ modinfo -u                        # Show unloaded module info
 
 ### lockinfo
 
-Spinlock state and the CPUs waiting for it.
+Lock owners and waiters: spinlocks, mutexes and rw_semaphores, and which locks hold up the hung (UN) tasks.
 
 **Usage:** `lockinfo [options]`
 
@@ -673,12 +673,17 @@ Spinlock state and the CPUs waiting for it.
 | `-s` | `--spinlock` | `<addr>` | Decode the spinlock at `<addr>`, list the CPUs queued on it and its likely holder |
 | `-m` | `--mcslock` | | List every MCS queue, its lock and likely holders, and possible deadlocks |
 | `-x` | `--excluded` | | With `-m`, also list the CPUs not in any queue |
+| `-M` | `--mutex` | `<addr>` | Show a mutex's owner and its waiters in queue order |
+| `-R` | `--rwsem` | `<addr>` | Show an rw_semaphore's writer or readers and its waiters |
+| `-b` | `--blocked` | | Group every UN task by the mutex or rwsem it waits for, with owners, wait chains and deadlocks |
 
 #### Examples
 
 ```
 lockinfo -s 0xffff88003e...   # Inspect spinlock
 lockinfo -m                   # Show MCS queues and their locks
+lockinfo -b                   # Who blocks the hung (UN) tasks
+lockinfo -M 0xffff9e2a...     # Inspect a mutex
 ```
 
 A spinlock does not record which CPU holds it. lockinfo reports the
@@ -731,6 +736,47 @@ every CPU's backtrace.
   prints its recorded owner task first, then decodes the first word as a
   raw spinlock: that is either the lock itself, if it is a
   `raw_spinlock_t`, or the rt_mutex's `wait_lock`.
+
+**Mutexes and rw_semaphores** record their owner, so there is no
+guessing for writers:
+
+- **Mutex.** RHEL8 and later read the owner word (task | `WAITERS`,
+  `HANDOFF`, `PICKUP`). RHEL7 reads the count (1 free, 0 locked, negative
+  with waiters) and the owner pointer.
+- **rw_semaphore.** The writer is in `owner`. Readers are not tracked:
+  `owner` holds only the last reader to take the lock, and it may have
+  released it since. The reader count comes from `count`: bits 8-62 on
+  RHEL8 and later, or the active count of the RHEL7 bias layout, where the
+  wait list tells "one reader with waiters" apart from "a lone writer".
+  For a read-held rwsem, lockinfo also lists the blocked tasks and
+  running CPUs that have the lock's address on their stack but are not
+  waiting for it, as possible readers.
+- **Waiters** are listed in queue order from `wait_list`, with each task's
+  state, how long ago it last ran (`ps -m`), and read or write for an
+  rwsem. RHEL7's rwsem `slist_head` is handled.
+- **`-b`** runs `foreach UN bt -f`. For each task sleeping in
+  `__mutex_lock*` or `rwsem_down_{read,write}*`, it finds the task's own
+  waiter struct on its stack (the word that equals its `task_struct`, with
+  sane list links). The lock's `wait_list` head is the one entry on that
+  waiter's ring that is not a waiter on some task's stack. For RHEL7's
+  rwsem `slist`, whose head is not on the ring, the lock is instead a
+  stack word, not on the task's own stack, whose `wait_list` points into
+  the ring and whose count shows waiters. The tasks are grouped by lock,
+  busiest lock first.
+  - Each owner that is itself waiting is shown with the lock it waits for,
+    including owners sleeping interruptibly, which the UN scan misses. An
+    owner waiting for its own lock is reported as recursive locking.
+  - A mutex with `PICKUP` set has been handed off to its next waiter,
+    which hasn't run yet. lockinfo shows that, with no holder.
+  - Cycles are reported as deadlocks.
+  - The ends of the chains are listed with how many tasks each blocks.
+    A chain ends at an owner that isn't waiting for a lock, or at a lock
+    whose owner isn't recorded: typically a read-held rwsem such as
+    `mmap_lock` or `i_rwsem`, whose readers are the real blockers.
+  - Tasks in `TASK_INTERRUPTIBLE` (`mutex_lock_interruptible`) are not
+    scanned.
+- **PREEMPT_RT:** a mutex's rt_mutex owner is shown, but rw_semaphores
+  (`rwbase_rt`) are not decoded.
 
 The decoding is in `source/lockdecode.py`, with checks in
 `lockdecode_test.py`. Also `python3 source/lockdecode.py <value>...`
