@@ -664,22 +664,46 @@ modinfo -u                        # Show unloaded module info
 
 ### lockinfo
 
-Lock analysis for spinlocks and MCS locks.
+Spinlock state and the CPUs waiting for it.
 
 **Usage:** `lockinfo [options]`
 
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
-| `-s` | `--spinlock` | `<addr>` | Show spinlock details for the given address |
-| `-m` | `--mcslock` | | Show MCS lock information |
-| `-x` | `--excluded` | | Show excluded details |
+| `-s` | `--spinlock` | `<addr>` | Decode the spinlock at `<addr>` and list the CPUs queued on it |
+| `-m` | `--mcslock` | | List every MCS queue and the lock each one waits for |
+| `-x` | `--excluded` | | With `-m`, also list the CPUs not in any queue |
 
 #### Examples
 
 ```
 lockinfo -s 0xffff88003e...   # Inspect spinlock
-lockinfo -m                   # Show MCS lock info
+lockinfo -m                   # Show MCS queues and their locks
 ```
+
+A spinlock does not record which CPU holds it, so lockinfo reports the
+waiters. The holder has to be found from the other CPUs' backtraces.
+
+- **qspinlock (RHEL8 and later).** `-s` decodes the locked byte, the pending
+  bit and the tail. The layout comes from `CONFIG_NR_CPUS` (`help -k`), not
+  from the number of CPUs online. The tail names the last CPU queued.
+  lockinfo walks back from that CPU's MCS node to the queue head. Only
+  nodes that are in use count: on each CPU, the first `qnodes[0].count`
+  slots, one per nesting level. When the locked byte is `_Q_SLOW_VAL`
+  (paravirt), the halted head is looked up in `pv_lock_hash`.
+- **`-m`** rebuilds every queue from the in-use nodes, then finds each
+  queue's lock on its waiters' `bt -f` output. A stack or register word
+  counts as the lock only if the 32-bit value there has a tail naming that
+  queue's tail CPU and slot. Each match shows how many waiters' stacks it
+  was found on.
+- **Ticket locks (RHEL7).** `-s` shows head and tail and the number of
+  waiters, not counting the holder. With `CONFIG_PARAVIRT_SPINLOCKS` the
+  ticket step is 2 and the slowpath flag is masked out. It also lists the
+  waiters that halted, from `klock_waiting` (KVM) or `lock_waiting` (Xen).
+
+The decoding is in `source/lockdecode.py`, with checks in
+`lockdecode_test.py`. Also `python3 source/lockdecode.py <value>...`
+decodes qspinlock words (`CONFIG_NR_CPUS` 8192 layout).
 
 ### rcuinfo
 
