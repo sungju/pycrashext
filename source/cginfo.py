@@ -697,7 +697,7 @@ def _mem_cgroup_usage(cgrp):
     """
     Read memory usage in bytes for a cgroup.
     Returns (usage_bytes, limit_bytes) or (-1, -1) on failure.
-    Tries several field-name patterns to cover v4.x – v6.x kernels.
+    Tries several field-name patterns to cover v3.x – v6.x kernels.
     """
     usage = -1
     limit = -1
@@ -721,8 +721,8 @@ def _mem_cgroup_usage(cgrp):
         mem_cg = readSU("struct mem_cgroup", int(css) - css_off)
 
         for get_usage in (
-            lambda m: int(m.memory.usage.counter),  # 5.x+  (page_counter in bytes)
-            lambda m: int(m.res.usage.counter) * crash.PAGESIZE,  # 4.x (pages)
+            lambda m: int(m.memory.usage.counter) * crash.PAGESIZE,  # 4.x+
+            lambda m: int(m.res.usage),                              # 3.x
         ):
             try:
                 usage = get_usage(mem_cg)
@@ -731,8 +731,8 @@ def _mem_cgroup_usage(cgrp):
                 pass
 
         for get_limit in (
-            lambda m: int(m.memory.max),            # 5.x+
-            lambda m: int(m.res.limit.counter) * crash.PAGESIZE,  # 4.x
+            lambda m: int(m.memory.max) * crash.PAGESIZE,   # 4.x+
+            lambda m: int(m.res.limit),                     # 3.x
         ):
             try:
                 val = get_limit(mem_cg)
