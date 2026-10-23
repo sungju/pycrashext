@@ -19,10 +19,11 @@ last lines with a '<<< SKIPPED N lines >>>' line carrying the true count.
     evidence -f FILE              commands to run, one per line (with -a too)
     evidence --stdout             print the file instead of writing it
 
-The file goes to ~/gemini/<case>/vmcore-<task>-evidence.md when the case is
-known (from the task's 'caseno', the way 'caseinfo' finds it), else to the
-current directory, else $HOME. The last line printed, "EVIDENCE file=...
-task=... case=... branches=... blocks=... bytes=...", is for scripts.
+The file goes to ~/cases/<case>/vmcore-<task>-evidence.md when the case is
+known (from the task's 'caseno', the way 'caseinfo' finds it), else to
+~/cases/vmcores/<task>/, else the current directory, else $HOME. The last
+line printed, "EVIDENCE file=... task=... case=... branches=... blocks=...
+bytes=...", is for scripts.
 
 What to run, and the layout, are in evidplan.py (checks in evidplan_test.py).
 
@@ -161,7 +162,13 @@ def read_case(task_dir):
 def default_path(task, case):
     name = "vmcore-%s-evidence.md" % (task or "unknown")
     if case:
-        d = os.path.expanduser("~/gemini/%s" % case)
+        dirs = ["~/cases/%s" % case]
+    elif task:
+        dirs = ["~/cases/vmcores/%s" % task]
+    else:
+        dirs = []
+    for d in dirs:
+        d = os.path.expanduser(d)
         try:
             os.makedirs(d, exist_ok=True)
             if os.access(d, os.W_OK):

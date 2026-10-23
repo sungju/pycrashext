@@ -107,7 +107,7 @@ def main():
         src = setup(root)
         rc, out = run(root, src, "-q")
         assert rc == 0, out
-        path = os.path.join(root, "home", "gemini", "04517832", "vmcore-886244457-evidence.md")
+        path = os.path.join(root, "home", "cases", "04517832", "vmcore-886244457-evidence.md")
         assert ("EVIDENCE file=%s task=886244457 case=04517832 branches=A" % path) in out, out
         doc = open(path).read()
         # Header and derived summary.
@@ -142,6 +142,12 @@ def main():
         un = doc2[doc2.index("Follow-up: foreach UN bt"):]
         assert un.split("###")[0].count("error") == 0 and "> (no output)" in un, un[:300]
         assert "Follow-up: log | grep (x" in doc2
+        # No case number: the file goes to ~/cases/vmcores/<task>/.
+        os.remove(os.path.join(root, "cores", "tasks", "886244457", "caseno"))
+        rc, out = run(root, src, "-q")
+        assert rc == 0, out
+        path3 = os.path.join(root, "home", "cases", "vmcores", "886244457", "vmcore-886244457-evidence.md")
+        assert ("EVIDENCE file=%s task=886244457 case=unknown" % path3) in out, out
         print("evidence: end-to-end checks passed (%d bytes written)" % len(doc2))
     finally:
         shutil.rmtree(root, ignore_errors=True)
