@@ -1605,6 +1605,21 @@ def set_jump_op_list(arch=None):
         jump_op_set = [ "j" ]
 
 
+# x86 instruction prefixes objdump prints as a separate word before the
+# mnemonic, as in 'cs call 0x... <__x86_indirect_thunk_r10>'.
+_INSN_PREFIXES = frozenset(("cs", "ds", "es", "ss", "fs", "gs", "lock",
+                            "rep", "repz", "repnz", "repe", "repne",
+                            "notrack", "bnd", "data16", "addr32"))
+
+def insn_words(words):
+    """A split 'dis' line with any prefix before the mnemonic dropped, so
+    words[2] is always the mnemonic."""
+    i = 2
+    while i < len(words) - 1 and words[i] in _INSN_PREFIXES:
+        i = i + 1
+    return words if i == 2 else words[:2] + words[i:]
+
+
 _RE_HEX_ADDR = re.compile(r'^0x[0-9a-fA-F]+$')
 
 def get_branch_target(words):
@@ -1670,7 +1685,7 @@ def draw_branches(disasm_str, jump_op_list):
     for loc, line in enumerate(lines):
         if not line.startswith("0x"):
             continue
-        words = line.split()
+        words = insn_words(line.split())
         if len(words) < 3:
             continue
         if jump_op_list == "":
@@ -1732,7 +1747,7 @@ def get_kernel_version():
     sys_output = exec_crash_command("sys")
     for line in sys_output.splitlines():
         words = line.split()
-        if words[0] == "RELEASE:":
+        if len(words) > 1 and words[0] == "RELEASE:":
             release_ver = words[1]
             idx = words[1].rfind(".")
             kernel_ver = words[1][:idx]
@@ -3025,7 +3040,7 @@ def jump_sources(lines, limit=4):
     """
     For each instruction row that jumps land on, a note naming where they
     come from: {row: "from f+4, f+30"}, listing up to `limit` of them.
-    crash prints '<f+N>' offsets in decimal and so does this.
+    Names are crash's own '<f+N>', in its radix.
     """
     set_jump_op_list()
     rows = {}
@@ -3034,7 +3049,7 @@ def jump_sources(lines, limit=4):
         idx = asm_start(line)
         if idx < 0:
             continue
-        words = line[idx:].split()
+        words = insn_words(line[idx:].split())
         if len(words) < 2:
             continue
         rows[words[0]] = row
@@ -3206,7 +3221,7 @@ def _asm_rows(lines):
     for row, line in enumerate(lines):
         idx = asm_start(line)
         if idx >= 0:
-            words = line[idx:].split()
+            words = insn_words(line[idx:].split())
             if len(words) >= 3:
                 rows.append((row, words))
     return rows
@@ -3351,14 +3366,67 @@ def resolve_field(kind, name, offset, layout=None, depth=0):
 
 _RE_X86_MEM = re.compile(r'^(-?0x[0-9a-fA-F]+|-?\d+)?\(%(\w+)\)$')
 
+def _field_step(words, state, layout):
+    """
+    One instruction of struct_field_notes(): (state after it, note or None).
+    `state` maps a register to the ('struct', name) it points to.
+    """
+    op = words[2]
+    ops = instruction_operands(words)
+    field = None
+    note = None
+    for operand in ops:
+        m = _RE_X86_MEM.match(operand)
+        if m is None:
+            continue
+        base = canonical_register(m.group(2), "x86")
+        if base not in state:
+            continue
+        offset = int(m.group(1), 0) if m.group(1) else 0
+        field = resolve_field(state[base][0], state[base][1], offset, layout)
+        if field:
+            note = "%s%s->%s" % ("&" if op.startswith("lea") else "",
+                                 state[base][1], field[0])
+        break
+
+    state = dict(state)
+    if op in call_op_set:
+        for reg in _X86_CALL_CLOBBERED:
+            state.pop(reg, None)
+        return state, note
+    dest = dest_register(words, "x86")
+    if dest is None:
+        return state, note
+    new = None
+    full_width = ops and ops[-1].lstrip("%") == dest
+    if full_width and op in ("mov", "movq") and len(ops) == 2:
+        if ops[0].startswith("%"):
+            src = canonical_register(ops[0], "x86")
+            if ops[0].lstrip("%") == src:
+                new = state.get(src)
+        elif field:
+            new = pointer_target(field[1])
+    elif full_width and op.startswith("lea") and field:
+        new = embedded_type(field[1])
+    if new:
+        state[dest] = new
+    else:
+        state.pop(dest, None)
+    return state, note
+
+
 def struct_field_notes(lines, get_proto=None, layout=None):
     """
     {row: "page->mapping"} for x86_64 memory accesses through a register
     known to point to a struct. Pointer types start from the function's
     prototype and follow 'mov' of a struct pointer field, 'lea' of an
     embedded struct and register copies. Calls drop the registers they
-    clobber; a jump target drops everything, as another path may arrive
-    with other values.
+    clobber.
+
+    Where paths join, a register is kept only when every way in agrees on
+    it. This is a forward dataflow pass: each instruction starts as not
+    reached, takes what all its reached predecessors agree on, and the
+    passes repeat until nothing changes.
     """
     if sys_info.machine != "x86_64":
         return {}
@@ -3367,60 +3435,69 @@ def struct_field_notes(lines, get_proto=None, layout=None):
     if not asm:
         return {}
     set_call_op_list()
-    targets = set(jump_sources(lines).keys())
+    set_jump_op_list()
 
-    state = {}
+    entry = {}
     first = asm[0][1][1].rstrip(":")
     if get_proto and first.startswith("<") and "+" not in first:
         params = get_proto(first[1:-1]) or []
         for reg, ptype in zip(ARG_REGS["x86"], params):
             t = pointer_target(ptype)
             if t:
-                state[reg] = t
+                entry[reg] = t
 
-    notes = {}
-    for row, words in asm:
-        if row in targets and row != asm[0][0]:
-            state = {}
+    # Predecessors of each instruction: the one above when it falls
+    # through, and the jumps that land on it.
+    count = len(asm)
+    pos_of_addr = dict((words[0], pos) for pos, (row, words) in enumerate(asm))
+    preds = [[] for _ in range(count)]
+    for pos, (row, words) in enumerate(asm):
         op = words[2]
-        ops = instruction_operands(words)
-        field = None
-        for operand in ops:
-            m = _RE_X86_MEM.match(operand)
-            if m is None:
-                continue
-            base = canonical_register(m.group(2), "x86")
-            if base not in state:
-                continue
-            offset = int(m.group(1), 0) if m.group(1) else 0
-            field = resolve_field(state[base][0], state[base][1], offset, layout)
-            if field:
-                notes[row] = "%s%s->%s" % ("&" if op.startswith("lea") else "",
-                                           state[base][1], field[0])
+        if check_jump_op(op):
+            t = pos_of_addr.get(get_branch_target(words))
+            if t is not None:
+                preds[t].append(pos)
+        if pos + 1 < count and not op.startswith(("jmp", "ret", "ud2")):
+            preds[pos + 1].append(pos)
+
+    out = [None] * count        # None: not reached (yet)
+    for _ in range(50):
+        changed = False
+        for pos in range(count):
+            if pos == 0:
+                state = dict(entry)
+            else:
+                state = None
+                for p in preds[pos]:
+                    if out[p] is None:
+                        continue
+                    if state is None:
+                        state = dict(out[p])
+                    else:
+                        state = dict((reg, t) for reg, t in state.items()
+                                     if out[p].get(reg) == t)
+                if state is None:
+                    continue
+            after = _field_step(asm[pos][1], state, layout)[0]
+            if after != out[pos]:
+                out[pos] = after
+                changed = True
+        if not changed:
             break
 
-        if op in call_op_set:
-            for reg in _X86_CALL_CLOBBERED:
-                state.pop(reg, None)
-            continue
-        dest = dest_register(words, "x86")
-        if dest is None:
-            continue
-        new = None
-        full_width = ops and ops[-1].lstrip("%") == dest
-        if full_width and op in ("mov", "movq") and len(ops) == 2:
-            if ops[0].startswith("%"):
-                src = canonical_register(ops[0], "x86")
-                if ops[0].lstrip("%") == src:
-                    new = state.get(src)
-            elif field:
-                new = pointer_target(field[1])
-        elif full_width and op.startswith("lea") and field:
-            new = embedded_type(field[1])
-        if new:
-            state[dest] = new
+    notes = {}
+    for pos, (row, words) in enumerate(asm):
+        if pos == 0:
+            state = entry
         else:
-            state.pop(dest, None)
+            reached = [out[p] for p in preds[pos] if out[p] is not None]
+            if not reached:
+                continue
+            state = dict((reg, t) for reg, t in reached[0].items()
+                         if all(o.get(reg) == t for o in reached[1:]))
+        note = _field_step(words, state, layout)[1]
+        if note:
+            notes[row] = note
     return notes
 
 
@@ -3653,7 +3730,8 @@ def parse_target(ins_addr):
 
 def is_target_line(words, target):
     """True when the split 'dis' line '0x... <func+N>: op ...' is `target`.
-    crash prints the offset in '<func+N>' in decimal."""
+    crash prints the offset in '<func+N>' in decimal, or in hex ('+0x12')
+    after 'set hex'."""
     if target is None or len(words) < 2:
         return False
     if target[0] == "addr":
@@ -3664,7 +3742,7 @@ def is_target_line(words, target):
     sym = sym[1:-1]
     name, _, off = sym.partition("+")
     try:
-        offset = int(off) if off else 0
+        offset = int(off, 0) if off else 0
     except ValueError:
         return False
     return name == target[1] and offset == target[2]
@@ -3802,6 +3880,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 # local source reading existed.
                 print("Source is not readable here (set CRASHEXT_SERVER,"
                       " or EDIS_SOURCE_DIR to a kernel source tree)")
+                # 'dis -r <func>' is just its first instruction: show it all.
+                if target is None:
+                    disasm_str = exec_crash_command("dis %s" % ins_addr)
                 print(add_local_source(disasm_str)[0], end="")
                 return
             for line in full.splitlines():
@@ -4192,7 +4273,7 @@ def get_call_list(disasm_str):
     for line in disasm_str.splitlines():
         if line == "":
             break
-        words = line.split()
+        words = insn_words(line.split())
         if len(words) <= 3:
             continue
         if this_func is None and words[1].startswith("<"):

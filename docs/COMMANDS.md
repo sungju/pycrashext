@@ -919,8 +919,8 @@ When neither is readable the output is plain disassembly, as before.
 `-T` (x86_64) names the struct field each memory access uses (`;
 page->mapping`). Pointer types start from the function's own prototype and
 follow loads of struct pointer fields, `lea` of embedded structs and register
-copies; a call forgets the registers it clobbers and a jump target forgets
-everything, since another path can arrive there.
+copies. A call forgets the registers it clobbers, and where paths join a
+register is kept only when every path into that point agrees on it.
 
 `--save FILE func` writes the function's disassembly with addresses replaced
 by symbols (or `ADDR`); `--diff FILE func` in a session on another kernel

@@ -296,6 +296,22 @@ def check_target_line():
     assert not t(line, pt("__schedule+0x12"))
     assert t(first, pt("schedule+0"))
     assert not t(line, None)
+    # After 'set hex' crash prints the offset in hex.
+    hexline = "0xffffffff8f820c80 <schedule+0x10>:\tmov    0x10(%rbx),%eax".split()
+    assert t(hexline, pt("schedule+0x10")) and t(hexline, pt("schedule+16"))
+
+
+def check_insn_prefixes():
+    w = edis.insn_words
+    words = "0xffffffff8f132ada <f+0x1da>: cs call 0xffffffff8f827800 <__x86_indirect_thunk_r10>".split()
+    assert w(words)[2:] == ["call", "0xffffffff8f827800", "<__x86_indirect_thunk_r10>"]
+    assert w("0x1 <f+1>: lock xadd %eax,(%rdx)".split())[2] == "xadd"
+    assert w("0x1 <f+1>: notrack jmp *%rax".split())[2] == "jmp"
+    assert w("0x1 <f+1>: rep".split()) == "0x1 <f+1>: rep".split()
+
+    _set_arch("x86_64")
+    edis.set_call_op_list("x86_64")
+    assert edis.get_call_list(_dis([" ".join(words)])) == ["*%r10"]
 
 
 _FUNC = [
@@ -522,15 +538,42 @@ def check_struct_field_notes():
         10: "page->refcnt",
     }, notes                     # %rcx did not: no note on row 9
 
-    # A jump target forgets what was known.
+    # At a jump target only registers set in the entry block and never
+    # written again are kept: %rdi (the argument) and %rbp here, which the
+    # cold path jumping back to f+8 does not touch. %rbx is written on a
+    # path that reaches f+8, so it is dropped there.
     lines = [
-        "0x1000 <f>:\tje     0x1004 <f+4>",
-        "0x1002 <f+2>:\tnop",
-        "0x1004 <f+4>:\tmov    0x18(%rdi),%rax",
+        "0x1000 <f>:\tmov    %rdi,%rbp",
+        "0x1003 <f+3>:\tmov    %rdi,%rbx",
+        "0x1006 <f+6>:\tje     0x1020 <f+32>",
+        "0x1008 <f+8>:\tmov    0x18(%rdi),%rax",
+        "0x100c <f+12>:\tmov    0x18(%rbp),%rax",
+        "0x1010 <f+16>:\tmov    0x18(%rbx),%rax",
+        "0x1013 <f+19>:\tpop    %rbp",      # epilogue: doesn't count
+        "0x1014 <f+20>:\tret",
+        "0x1020 <f+32>:\tmov    %rsi,%rbx",
+        "0x1023 <f+35>:\tjmp    0x1008 <f+8>",
     ]
     notes = _with_arch("x86_64", lambda: edis.struct_field_notes(
         lines, protos.get, _layout))
-    assert notes == {}, notes
+    assert notes == {3: "page->mapping", 4: "page->mapping"}, notes
+
+    # kmem_cache_alloc_node's shape: a cold block placed after a later
+    # write to %rbp, but run before it, jumps back near the start. %rbp is
+    # still the argument there.
+    lines = [
+        "0x1000 <f>:\tmov    %rdi,%rbp",
+        "0x1003 <f+3>:\tjne    0x1030 <f+48>",
+        "0x1005 <f+5>:\tmov    0x18(%rbp),%rax",
+        "0x1009 <f+9>:\tmov    0x20(%rbp),%ebp",
+        "0x100c <f+12>:\tmov    0x18(%rbp),%rax",
+        "0x1010 <f+16>:\tret",
+        "0x1030 <f+48>:\tcall   0x2000 <g>",
+        "0x1035 <f+53>:\tjmp    0x1005 <f+5>",
+    ]
+    notes = _with_arch("x86_64", lambda: edis.struct_field_notes(
+        lines, protos.get, _layout))
+    assert notes == {2: "page->mapping", 3: "page->index"}, notes
     assert _with_arch("aarch64", lambda: edis.struct_field_notes(
         lines, protos.get, _layout)) == {}
 
