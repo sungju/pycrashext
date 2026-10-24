@@ -1393,8 +1393,8 @@ pointer shows where the chain broke (and a mistyped member gets the closest
 member names). The last member is then dumped member by member: `struct
 <type> <address>` for a structure or union (pointer or embedded), gdb
 `print` for anything else, plus what a non-struct pointer points to. A
-`char *` shows its string after the address (`0xffff95a0c1b2d3f8 "bash"`),
-in the chain and at the end.
+`char *` shows its string on the line below its address and type, in the
+chain and at the end.
 
 **Usage:** `pdata [-a|-n] [-o] [-x|-d] <type> <address> [<path>]`
 

@@ -9,7 +9,7 @@ type
 Every step is printed with its value and type, so a NULL or a bad pointer
 shows where the chain broke, and the last member is then dumped member by
 member ('struct <type> <address>' for a structure, gdb 'print' otherwise).
-A char * shows its string after the address.
+A char * shows its string on the line below its address.
 
     pdata <type> <address> [<path>]
         <type>     task_struct, 'struct task_struct' or 'union foo'
@@ -133,11 +133,14 @@ def dump(kind, base, addr, expr, o):
     print(out.rstrip())
 
 
-def print_step(label, value, type_str, depth, color=None):
+def print_step(label, value, type_str, depth, color=None, below=None):
+    """One line of the chain; 'below' goes on the next line, under the value."""
     if color is not None:
         crashcolor.set_color(color)
-    print("%s%-*s = %-24s %s" % ("  " * depth, max(28 - 2 * depth, 8), label,
-                                 value, type_str))
+    width = max(28 - 2 * depth, 8)
+    print("%s%-*s = %-24s %s" % ("  " * depth, width, label, value, type_str))
+    if below:
+        print("%s%s" % (" " * (2 * depth + width + 3), below))
     if color is not None:
         crashcolor.set_color(crashcolor.RESET)
 
@@ -193,17 +196,12 @@ def pdata(type_name, address, path, o):
         kind, base = pdatapath.type_kind(t)
         last = (i == len(steps) - 1)
         label = ("->" if i else "") + pdatapath.step_label(step)
+        string = None
         if pdatapath.is_char_pointer(t):
             addr, err = number_of(expr)
-            if err is None:
-                value = "0x%x" % addr
-                if addr:
-                    string = char_string(expr)[1]
-                    if len(string) > 60:
-                        string = string[:57] + "..."
-                    value += " " + string
-            else:
-                value = err
+            value = "0x%x" % addr if err is None else err
+            if err is None and addr:
+                string = char_string(expr)[1]
         elif kind == "ptr" or (t.endswith("*") and "(" not in t):
             addr, err = number_of(expr)
             value = "0x%x" % addr if err is None else err
@@ -217,7 +215,7 @@ def pdata(type_name, address, path, o):
                 value = err
         print_step(label, value, t, i + 1,
                    crashcolor.LIGHTRED if err else
-                   (crashcolor.LIGHTCYAN if last else None))
+                   (crashcolor.LIGHTCYAN if last else None), string)
         if err:
             return
         if o.all and not last and kind in ("ptr", "struct") and addr:
@@ -239,8 +237,10 @@ def pdata(type_name, address, path, o):
         print(expr)
         crashcolor.set_color(crashcolor.RESET)
         if pdatapath.is_char_pointer(t):
-            # The address, then the whole string it points to.
-            print(("0x%x %s" % (addr, char_string(expr)[1] if addr else "")).rstrip())
+            # The address and type, then the string it points to.
+            print("0x%x %s" % (addr, t))
+            if addr:
+                print(char_string(expr)[1])
             return
         dump(kind, base, addr, expr, o)
         # A pointer to something other than a struct: show what it points to.
