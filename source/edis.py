@@ -14,6 +14,7 @@ import os
 from os.path import expanduser
 import time
 import re
+import shlex
 
 import crashcolor
 import crashhelper
@@ -1579,31 +1580,64 @@ def check_jump_op(op_code):
     return False
 
 
-def set_jump_op_list():
+def set_jump_op_list(arch=None):
     global jump_op_set
     global exclude_set
 
-    arch = sys_info.machine
+    if arch is None:
+        arch = sys_info.machine
+    family = get_arch_family(arch)
 
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
+    exclude_set = []
+    if family == "x86":
         jump_op_set = [ "j" ]
-    elif (arch.startswith("ppc")):
+    elif family == "ppc":
         jump_op_set = [ "b" ]
-        exclude_set = [ "bl", "bctrl" ]
-    elif (arch.startswith("arm")):
-        jump_op_set = [ "b" ]
-        exclude_set = [ "bl", "bic", "bics", "blx" ]
-    elif (arch.startswith("s390") or arch in ("s390x")):
+        exclude_set = [ "bl", "bla", "bctrl" ]
+    elif family == "arm":
+        # cbz/cbnz/tbz/tbnz branch too. Everything else starting with 'b'
+        # that is not a branch (bit operations) or is a call is excluded.
+        jump_op_set = [ "b", "cbz", "cbnz", "tbz", "tbnz" ]
+        exclude_set = [ "bl", "blr", "blx", "blraa", "blrab",
+                        "bic", "bics", "bfi", "bfc", "bfm", "bfxil",
+                        "bif", "bit", "bsl" ]
+    elif family == "s390x":
         jump_op_set = [ "j", "brc", "brct" ]
         exclude_set = [ "brasl", "bras" ]
-    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+    elif family == "riscv":
         jump_op_set = [ "j", "b" ]
         exclude_set = [ "jal", "jalr" ]
     else:
         jump_op_set = [ "j" ]
 
 
+_RE_HEX_ADDR = re.compile(r'^0x[0-9a-fA-F]+$')
+
+def get_branch_target(words):
+    """
+    Return the target address of a branch line split into words, or "".
+
+    The target is the last bare hex address among the operands, which covers
+    'jne 0x...', 'bne cr7,0x...', 'cbz x0, 0x...' and 'tbz w0, #3, 0x...'.
+    Indirect branches ('jmp *0x10(%rax)', 'br x1') have none.
+    """
+    target = ""
+    for word in words[3:]:
+        if word.startswith("<"):
+            break
+        for part in word.split(","):
+            if _RE_HEX_ADDR.match(part):
+                target = part
+    return target
+
+
+# Set by draw_branches() when a function has more jumps than MAX_JMP_LINES.
+jump_graph_truncated = False
+
 def draw_branches(disasm_str, jump_op_list):
+    global jump_graph_truncated
+
+    jump_graph_truncated = False
     result = ""
     asm_addr_dict = {}
     loc = 0
@@ -1632,14 +1666,10 @@ def draw_branches(disasm_str, jump_op_list):
 
             if is_jump_op:
                 if jmp_found >= MAX_JMP_LINES:
+                    jump_graph_truncated = True
                     break
 
-                # Consider a situation that implies the jumping address
-                jmpaddr = ""
-                if len(words) > 3:
-                    jmp_op_words = words[3].split(",")
-                    jmpaddr = jmp_op_words[len(jmp_op_words) - 1]
-
+                jmpaddr = get_branch_target(words)
                 if jmpaddr != "" and jmpaddr in asm_addr_dict:
                     target_idx = asm_addr_dict[jmpaddr]
                 else:
@@ -3497,6 +3527,30 @@ def x86_stack_reg_op(words, result_str):
 # averaging 15-25 lines each. Improved readability and maintainability.
 
 
+def normalize_address(addr_str):
+    """'0xFFFF8...', 'ffff8...' and '0x0ffff8...' all become 'ffff8...'.
+    Anything that is not hex (a symbol) is returned unchanged."""
+    s = addr_str.strip().lower()
+    if s.startswith("0x"):
+        s = s[2:]
+    if s == "" or any(c not in "0123456789abcdef" for c in s):
+        return addr_str
+    return s.lstrip("0") or "0"
+
+
+def bt_frame_matches(words, funcname, disaddr_str):
+    """
+    True when a split 'bt' frame line ('#3 [sp] func at addr') is the frame
+    edis was asked about. 'bt' prints addresses without '0x', so compare
+    them normalized: 'edis -r 0xffffffff8f7b9c5d' must match too.
+    """
+    if len(words) < 5 or words[2] != funcname:
+        return False
+    if disaddr_str == funcname:
+        return True
+    return normalize_address(words[4]) == normalize_address(disaddr_str)
+
+
 def set_stack_data(disasm_str, disaddr_str):
     global funcname
     global stackaddr_list
@@ -3565,7 +3619,7 @@ def set_stack_data(disasm_str, disaddr_str):
                     add_stack_debug("set_stack_data: caller_sp=0x%x" % int(words[1][1:-1], 16))
                 break
 
-            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+            if bt_frame_matches(words, funcname, disaddr_str):
                 # Mark that we found the target frame - extract SP from NEXT frame (caller)
                 stackfound = 1
                 if stack_debug_enabled:
@@ -3596,7 +3650,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackfound = 0
                 continue
 
-            if words[0].startswith("#") and words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+            if words[0].startswith("#") and bt_frame_matches(words, funcname, disaddr_str):
                 # For AArch64, bt frame address is often x29. Convert to runtime SP.
                 frame_addr = int(words[1][1:-1], 16)
                 runtime_sp = estimate_aarch64_runtime_sp(frame_addr, disasm_str)
@@ -3612,13 +3666,13 @@ def set_stack_data(disasm_str, disaddr_str):
         stackfound = 0
         for one_line in bt_str.splitlines():
             words = one_line.split()
-            if not words[0].startswith("#"):
+            if not words or not words[0].startswith("#"):
                 continue
             if stackfound == 1:
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+            if bt_frame_matches(words, funcname, disaddr_str):
                 stackfound = 1
 
     elif (arch.startswith("s390") or arch in ("s390x")):
@@ -3641,7 +3695,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+            if bt_frame_matches(words, funcname, disaddr_str):
                 stackfound = 1
 
     elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
@@ -3667,7 +3721,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 stackaddr_list.append(int(words[1][1:-1], 16))
                 stackfound = 0
 
-            if words[2] == funcname and (words[4] == disaddr_str or disaddr_str == funcname):
+            if bt_frame_matches(words, funcname, disaddr_str):
                 stackfound = 1
 
 
@@ -3678,7 +3732,9 @@ def set_asm_colors():
     arch = sys_info.machine
     if (arch in ("x86_64", "i386", "i686", "athlon")):
         asm_color_dict = {
-            "callq" : crashcolor.LIGHTRED | crashcolor.BOLD,
+            # Prefix match: covers 'callq' and the plain 'call' newer
+            # binutils prints.
+            "call" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "j" : crashcolor.BLUE | crashcolor.BOLD,
             "mov" : crashcolor.GREEN,
             "push" : crashcolor.RED | crashcolor.UNDERLINE,
@@ -3976,7 +4032,8 @@ def disasm(ins_addr, o, args, cmd_path_list):
     if (o.noaction or not disasm_str.startswith("/")):
         result_str = disasm_str
     else:
-        python_list = { "python", "python3", "python2" }
+        # Ordered: a set would pick an arbitrary one, possibly python2.
+        python_list = ( "python3", "python", "python2" )
         for python_cmd in python_list:
             if (is_command_exist(python_cmd)):
                 kerver, relver = get_kernel_version()
@@ -3989,9 +4046,12 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     ver_line = disasm_str.splitlines()[0]
 
                 disasm_str = ver_line + "\n" + disasm_str
-                result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
-                                                    (disasm_str, python_cmd, \
-                                                     disasm_path, cmd_options))
+                # Feed the text on stdin from a file: an "echo '...'" breaks
+                # on a quote in it and on the shell's command line limit.
+                result_str = crashhelper.run_gdb_command_with_file(
+                    "!%s %s %s" % (python_cmd, shlex.quote(disasm_path),
+                                   cmd_options),
+                    disasm_str + "\n")
                 break
 
     if (o.fullsource):
@@ -4200,6 +4260,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
 
     crashcolor.set_color(crashcolor.RESET)
+    if o.graph and jump_graph_truncated:
+        crashcolor.set_color(crashcolor.LIGHTYELLOW)
+        print("NOTE: jump graph shows only the first %d jumps" %
+              (MAX_JMP_LINES - 1))
+        crashcolor.set_color(crashcolor.RESET)
 
 
 class LineType(object):
@@ -4255,25 +4320,66 @@ def show_callgraph_func(func_name, depth, first, options):
 call_op_set = []
 call_exclude_set = []
 
-def set_call_op_list():
+def set_call_op_list(arch=None):
     global call_op_set
     global call_exclude_set
 
-    arch = sys_info.machine
+    if arch is None:
+        arch = sys_info.machine
+    family = get_arch_family(arch)
 
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
+    if family == "x86":
         call_op_set = [ "call", "callq" ]
-    elif (arch.startswith("ppc")):
-        call_op_set = [ "bl", "ctrl" ]
-    elif (arch.startswith("arm") or (arch in ("aarch64"))):
-        call_op_set = [ "bl", "bic", "bics", "blx" ]
-    elif (arch.startswith("s390") or arch in ("s390x")):
-        call_op_set = [ "brasl", "bras" ]
-    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
-        call_op_set = [ "jal", "jalr" ]
+    elif family == "ppc":
+        call_op_set = [ "bl", "bla", "bctrl" ]
+    elif family == "arm":
+        call_op_set = [ "bl", "blr", "blx" ]
+    elif family == "s390x":
+        call_op_set = [ "brasl", "bras", "basr" ]
+    elif family == "riscv":
+        call_op_set = [ "jal", "jalr", "call" ]
     else:
-        call_op_set = ["callq" ]
+        call_op_set = [ "call", "callq" ]
 
+
+def get_call_list(disasm_str):
+    """
+    Return the callees of a 'dis' output, in order.
+
+    Direct calls give the symbol ('<func>') or the bare address. Calls
+    through a register or memory ('call *%rax', 'blr x1') can't be followed
+    and are returned with a leading '*' so they are shown but not walked.
+    """
+    call_list = []
+    for line in disasm_str.splitlines():
+        if line == "":
+            break
+        words = line.split()
+        if len(words) <= 3 or words[2] not in call_op_set:
+            continue
+        if len(words) > 4:
+            if words[4].startswith("<"):
+                call_list.append(words[4][1:-1])
+                continue
+            if words[4].startswith("#") and len(words) > 5:
+                # 'call *0x...(%rip)  # 0x...': read the pointer.
+                try:
+                    call_list.append("0x%x" % readULong(int(words[5], 16)))
+                except Exception:
+                    call_list.append("*" + words[3])
+                continue
+        if _RE_HEX_ADDR.match(words[3]):
+            call_list.append(words[3])
+        else:
+            call_list.append(words[3] if words[3].startswith("*")
+                             else "*" + words[3])
+    return call_list
+
+
+# 'dis' output parsed into callees, per function, for one 'edis -c' run.
+callgraph_cache = {}
+# Functions on the chain from the root to the function being expanded.
+callgraph_path = []
 
 def show_callgraph(func_name, depth, options):
     global branch_bar
@@ -4283,29 +4389,29 @@ def show_callgraph(func_name, depth, options):
         print("...", end="")
         return
 
+    if func_name.startswith("*"):  # Indirect call: target unknown
+        return
+
+    if func_name in callgraph_path:
+        crashcolor.set_color(crashcolor.LIGHTYELLOW)
+        print("(recursive)", end="")
+        crashcolor.set_color(crashcolor.RESET)
+        return
+
     depth = depth + 1
     while (len(branch_bar) <= depth):
         branch_bar.append(LineType.LINE_SPACE)
 
     first = True
-    disasm_str = exec_crash_command("dis %s" % (func_name))
-    disasm_list = disasm_str.splitlines()
-    call_list = []
-    for line in disasm_list:
-        if line == "":
-            break
-        words = line.split()
-        if len(words) <= 2:
-            continue
-        if words[2] in call_op_set:
-            if len(words) > 4:
-                if words[4].startswith("<"):
-                    call_list.append(words[4][1:-1])
-                elif words[4].startswith("#") and len(words) > 5:
-                    call_list.append("0x%x" % readULong(int(words[5], 16)))
-            elif len(words) == 4:
-                call_list.append(words[3])
+    if func_name not in callgraph_cache:
+        try:
+            disasm_str = exec_crash_command("dis %s" % (func_name))
+        except Exception:
+            disasm_str = ""
+        callgraph_cache[func_name] = get_call_list(disasm_str)
+    call_list = callgraph_cache[func_name]
 
+    callgraph_path.append(func_name)
     len_call_list = len(call_list)
     for idx, func_name in enumerate(call_list):
         if (idx == len_call_list - 1):
@@ -4325,6 +4431,7 @@ def show_callgraph(func_name, depth, options):
         if (idx != len_call_list - 1):
             if (printed > 0):
                 print()
+    callgraph_path.pop()
 
 
 def edis():
@@ -4423,7 +4530,13 @@ def edis():
     (o, args) = op.parse_args()
 
     if o.callgraph == True:
+        if len(args) == 0:
+            print("ERROR> edis -c needs a function name\n",
+                  "\ti.e) edis -c do_page_fault")
+            return
         set_call_op_list()
+        callgraph_cache.clear()
+        del callgraph_path[:]
         show_callgraph_func(args[0], 0, True, o)
         show_callgraph(args[0], 0, o)
         sys.exit(0)
