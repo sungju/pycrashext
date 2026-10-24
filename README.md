@@ -63,7 +63,7 @@ Every command accepts `-h` to show its available options, except `git`, which ta
 | **cginfo** | cgroup information (v1/v2/hybrid) |
 | **cpuinfo** | CPU information, core topology, effective frequency analysis |
 | **devinfo** | Storage status, block/char devices, block requests, swiotlb, paravirtual I/O rings |
-| **edis** | Enhanced disassembly with source lines and callgraph (needs remoteapi) |
+| **edis** | Enhanced disassembly with source lines, call arguments, struct fields and callgraph (source from remoteapi or local files) |
 | **evidence** | Run a vmcore analysis's commands in one session and write their output into one evidence file |
 | **fsinfo** | Filesystem information (freeze status, dumpe2fs-style, page cache and dentry/inode cache breakdown) |
 | **git** | Run `git log`/`git show` on remote kernel source repos, and `git find` to check whether an upstream patch is backported into this kernel — falling back to git.kernel.org and GitHub when the local mirrors miss, with every match labelled `local` or `web` (needs remoteapi) |

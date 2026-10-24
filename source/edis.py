@@ -3054,6 +3054,582 @@ def jump_sources(lines, limit=4):
     return notes
 
 
+# ============================================================================
+# Operand helpers shared by the annotations below
+# ============================================================================
+
+def _x86_register_names():
+    names = {}
+    for r in ("a", "b", "c", "d"):
+        for alias in ("r%sx" % r, "e%sx" % r, "%sx" % r, "%sl" % r, "%sh" % r):
+            names[alias] = "r%sx" % r
+    for r in ("si", "di", "bp", "sp"):
+        for alias in ("r" + r, "e" + r, r, r + "l"):
+            names[alias] = "r" + r
+    for n in range(8, 16):
+        for suffix in ("", "d", "w", "b"):
+            names["r%d%s" % (n, suffix)] = "r%d" % n
+    return names
+
+_X86_REGISTERS = _x86_register_names()
+
+# Registers that carry the first arguments of a call, per architecture family.
+ARG_REGS = {
+    "x86": ["rdi", "rsi", "rdx", "rcx", "r8", "r9"],
+    "arm": ["x%d" % n for n in range(8)],
+    "ppc": ["r%d" % n for n in range(3, 11)],
+    "s390x": ["r%d" % n for n in range(2, 7)],
+    "riscv": ["a%d" % n for n in range(8)],
+}
+
+# x86_64 registers a call may change (the rest survive it).
+_X86_CALL_CLOBBERED = ("rax", "rcx", "rdx", "rsi", "rdi",
+                       "r8", "r9", "r10", "r11")
+
+
+def canonical_register(name, family):
+    """'%edi' -> 'rdi' and 'w1' -> 'x1': the full register a name is part of.
+    None when `name` is not a register."""
+    reg = name.strip().lstrip("*").lstrip("%").lower()
+    if family == "x86":
+        return _X86_REGISTERS.get(reg)
+    if family == "arm" and re.match(r'^w\d+$', reg):
+        return "x" + reg[1:]
+    if re.match(r'^[a-z]+\d*$', reg):
+        return reg
+    return None
+
+
+def split_operands(text):
+    """Split 'a,b' operands on the commas outside () and [], so
+    '0x8(%rax,%rbx,8),%rcx' and '[sp, #16]' stay whole."""
+    ops = []
+    depth = 0
+    cur = ""
+    for c in text:
+        if c in "([":
+            depth = depth + 1
+        elif c in ")]":
+            depth = depth - 1
+        if c == "," and depth == 0:
+            ops.append(cur.strip())
+            cur = ""
+        else:
+            cur = cur + c
+    if cur.strip() != "":
+        ops.append(cur.strip())
+    return ops
+
+
+def instruction_operands(words):
+    """The operands of a split 'dis' line, without the '<sym>' or '# ...'
+    comment crash adds after them."""
+    parts = []
+    for word in words[3:]:
+        if word == "#" or word.startswith("<") or word.startswith(";"):
+            break
+        parts.append(word)
+    return split_operands(" ".join(parts))
+
+
+_NO_DEST_PREFIX = {
+    "x86": ("cmp", "test", "bt", "j", "call", "ret", "push", "nop", "ud"),
+    "arm": ("st", "cmp", "cmn", "tst", "b.", "cb", "tb", "ret", "prfm"),
+    "ppc": ("st", "cmp", "b", "tw", "td", "mt"),
+    "s390x": ("st", "c", "b", "j", "tm"),
+    "riscv": ("b", "j", "ret"),
+}
+_ARM_BRANCHES = ("b", "bl", "blr", "br", "blx")
+_RISCV_STORES = ("sd", "sw", "sh", "sb")
+
+
+def dest_register(words, family):
+    """The register a split 'dis' line writes, or None (stores, compares,
+    branches, memory destinations)."""
+    if len(words) < 4:
+        return None
+    op = words[2]
+    if op.startswith(_NO_DEST_PREFIX.get(family, ())):
+        return None
+    if family == "arm" and op in _ARM_BRANCHES:
+        return None
+    if family == "riscv" and op in _RISCV_STORES:
+        return None
+    ops = instruction_operands(words)
+    if not ops:
+        return None
+    dest = ops[-1] if family == "x86" else ops[0]
+    if "(" in dest or "[" in dest:
+        return None
+    return canonical_register(dest, family)
+
+
+def parse_prototype(text):
+    """Parameter types from crash 'whatis <func>' output, such as
+    'int foo(struct page *, unsigned int);'. [] for '(void)', None when the
+    output is not a function prototype."""
+    for line in text.splitlines():
+        start = line.find("(")
+        if start < 0:
+            continue
+        depth = 0
+        for end in range(start, len(line)):
+            if line[end] == "(":
+                depth = depth + 1
+            elif line[end] == ")":
+                depth = depth - 1
+                if depth == 0:
+                    break
+        else:
+            return None
+        inner = line[start + 1:end].strip()
+        if inner in ("", "void"):
+            return []
+        return split_operands(inner)
+    return None
+
+
+_prototype_cache = {}
+
+def get_prototype(func):
+    if func not in _prototype_cache:
+        try:
+            _prototype_cache[func] = parse_prototype(
+                exec_crash_command("whatis %s" % func))
+        except Exception:
+            _prototype_cache[func] = None
+    return _prototype_cache[func]
+
+
+def _asm_rows(lines):
+    rows = []
+    for row, line in enumerate(lines):
+        idx = asm_start(line)
+        if idx >= 0:
+            words = line[idx:].split()
+            if len(words) >= 3:
+                rows.append((row, words))
+    return rows
+
+
+# ============================================================================
+# -a: name the registers that carry a call's arguments
+# ============================================================================
+
+def call_arg_notes(lines, get_proto=None, lookback=16):
+    """
+    {row: "arg1 of foo (struct page *)"} for the instructions that set up
+    the argument registers of the calls in `lines`. Walks back from each
+    call to the previous call or jump target, taking the last write to each
+    register. With a prototype only its parameters are named.
+    """
+    family = get_arch_family(sys_info.machine)
+    regs = ARG_REGS.get(family)
+    if regs is None or (family == "x86" and sys_info.machine != "x86_64"):
+        return {}
+    set_call_op_list()
+    targets = set(jump_sources(lines).keys())
+    asm = _asm_rows(lines)
+
+    notes = {}
+    for pos, (row, words) in enumerate(asm):
+        if words[2] not in call_op_set:
+            continue
+        callee = None
+        if len(words) > 4 and words[4].startswith("<"):
+            callee = words[4][1:-1].split("+")[0]
+        params = get_proto(callee) if (callee and get_proto) else None
+        count = min(len(params), len(regs)) if params is not None else len(regs)
+        seen = set()
+        for prow, pwords in reversed(asm[max(0, pos - lookback):pos]):
+            if pwords[2] in call_op_set:
+                break
+            dest = dest_register(pwords, family)
+            if dest in regs[:count] and dest not in seen:
+                seen.add(dest)
+                i = regs.index(dest)
+                label = "arg%d of %s" % (i + 1, callee or "indirect call")
+                if params is not None:
+                    label = label + " (%s)" % params[i]
+                notes.setdefault(prow, label)
+            if prow in targets:     # Reached from elsewhere too: stop here
+                break
+    return notes
+
+
+# ============================================================================
+# -T: name the struct field a memory access reads or writes (x86_64)
+# ============================================================================
+
+def parse_struct_offsets(text):
+    """
+    crash 'struct -o <name>' output -> (members, size). members is a list
+    of (offset, name, type) in order; type is 'function pointer' or ends
+    with '[]' for those. size is None when no 'SIZE:' line is found.
+    """
+    members = []
+    size = None
+    for line in text.splitlines():
+        m = re.match(r'^\s*SIZE:\s*(0x[0-9a-fA-F]+|\d+)', line)
+        if m:
+            size = int(m.group(1), 0)
+            continue
+        m = re.match(r'^\s*\[(0x[0-9a-fA-F]+|\d+)\]\s+(.*)$', line)
+        if m is None:
+            continue
+        offset = int(m.group(1), 0)
+        decl = m.group(2).strip().rstrip(";").strip()
+        fp = re.search(r'\(\s*\*\s*(\w+)\s*\)', decl)
+        if fp:
+            members.append((offset, fp.group(1), "function pointer"))
+            continue
+        decl = decl.split(":")[0].strip()       # bitfield width
+        is_array = decl.endswith("]")
+        decl = re.sub(r'(\s*\[[^\]]*\])+$', '', decl).strip()
+        mm = re.search(r'(\w+)$', decl)
+        if mm is None:
+            continue
+        ftype = decl[:mm.start()].strip()
+        if is_array:
+            ftype = ftype + "[]"
+        members.append((offset, mm.group(1), ftype))
+    return members, size
+
+
+_struct_cache = {}
+
+def struct_layout(kind, name):
+    key = (kind, name)
+    if key not in _struct_cache:
+        try:
+            _struct_cache[key] = parse_struct_offsets(
+                exec_crash_command("%s -o %s" % (kind, name)))
+        except Exception:
+            _struct_cache[key] = ([], None)
+    return _struct_cache[key]
+
+
+def pointer_target(ftype):
+    """('struct', 'page') for 'struct page *', else None."""
+    m = re.match(r'^(?:const\s+)?(struct|union)\s+(\w+)\s*\*$', ftype or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def embedded_type(ftype):
+    """('struct', 'list_head') for an embedded 'struct list_head', else None."""
+    m = re.match(r'^(?:const\s+)?(struct|union)\s+(\w+)$', ftype or "")
+    return (m.group(1), m.group(2)) if m else None
+
+
+def resolve_field(kind, name, offset, layout=None, depth=0):
+    """
+    'mapping', 'lru.prev' or 'flags+0x4' for `offset` bytes into the
+    struct, with the field's type (None when it falls inside a field).
+    None when the layout is unknown or the offset is outside the struct.
+    """
+    layout = layout or struct_layout
+    members, size = layout(kind, name)
+    if not members or offset < 0 or (size is not None and offset >= size):
+        return None
+    best = None
+    for member in members:
+        if member[0] <= offset and (best is None or member[0] > best[0]):
+            best = member
+    if best is None:
+        return None
+    moff, mname, mtype = best
+    rel = offset - moff
+    if rel == 0:
+        return (mname, mtype)
+    inner = embedded_type(mtype)
+    if inner and depth < 3:
+        sub = resolve_field(inner[0], inner[1], rel, layout, depth + 1)
+        if sub:
+            return (mname + "." + sub[0], sub[1])
+    return ("%s+0x%x" % (mname, rel), None)
+
+
+_RE_X86_MEM = re.compile(r'^(-?0x[0-9a-fA-F]+|-?\d+)?\(%(\w+)\)$')
+
+def struct_field_notes(lines, get_proto=None, layout=None):
+    """
+    {row: "page->mapping"} for x86_64 memory accesses through a register
+    known to point to a struct. Pointer types start from the function's
+    prototype and follow 'mov' of a struct pointer field, 'lea' of an
+    embedded struct and register copies. Calls drop the registers they
+    clobber; a jump target drops everything, as another path may arrive
+    with other values.
+    """
+    if sys_info.machine != "x86_64":
+        return {}
+    layout = layout or struct_layout
+    asm = _asm_rows(lines)
+    if not asm:
+        return {}
+    set_call_op_list()
+    targets = set(jump_sources(lines).keys())
+
+    state = {}
+    first = asm[0][1][1].rstrip(":")
+    if get_proto and first.startswith("<") and "+" not in first:
+        params = get_proto(first[1:-1]) or []
+        for reg, ptype in zip(ARG_REGS["x86"], params):
+            t = pointer_target(ptype)
+            if t:
+                state[reg] = t
+
+    notes = {}
+    for row, words in asm:
+        if row in targets and row != asm[0][0]:
+            state = {}
+        op = words[2]
+        ops = instruction_operands(words)
+        field = None
+        for operand in ops:
+            m = _RE_X86_MEM.match(operand)
+            if m is None:
+                continue
+            base = canonical_register(m.group(2), "x86")
+            if base not in state:
+                continue
+            offset = int(m.group(1), 0) if m.group(1) else 0
+            field = resolve_field(state[base][0], state[base][1], offset, layout)
+            if field:
+                notes[row] = "%s%s->%s" % ("&" if op.startswith("lea") else "",
+                                           state[base][1], field[0])
+            break
+
+        if op in call_op_set:
+            for reg in _X86_CALL_CLOBBERED:
+                state.pop(reg, None)
+            continue
+        dest = dest_register(words, "x86")
+        if dest is None:
+            continue
+        new = None
+        full_width = ops and ops[-1].lstrip("%") == dest
+        if full_width and op in ("mov", "movq") and len(ops) == 2:
+            if ops[0].startswith("%"):
+                src = canonical_register(ops[0], "x86")
+                if ops[0].lstrip("%") == src:
+                    new = state.get(src)
+            elif field:
+                new = pointer_target(field[1])
+        elif full_width and op.startswith("lea") and field:
+            new = embedded_type(field[1])
+        if new:
+            state[dest] = new
+        else:
+            state.pop(dest, None)
+    return notes
+
+
+# ============================================================================
+# -F: find call paths from a function to another
+# ============================================================================
+
+def find_call_paths(root, target, max_depth, get_calls, limit=50):
+    """
+    Call chains from `root` that reach `target` within `max_depth` calls,
+    as lists of names. Indirect calls are skipped and no function appears
+    twice in a chain.
+    """
+    paths = []
+
+    def walk(name, path):
+        if len(path) - 1 >= max_depth or len(paths) >= limit:
+            return
+        for callee in get_calls(name):
+            if callee.startswith("*"):
+                continue
+            base = callee.split("+")[0]
+            if base == target:
+                if len(paths) < limit:
+                    paths.append(path + [base])
+                continue
+            if base in path:
+                continue
+            walk(base, path + [base])
+
+    walk(root, [root])
+    return paths
+
+
+# ============================================================================
+# Source lines without the remoteapi server
+# ============================================================================
+
+def is_statement_end(line):
+    s = re.sub(r"/\*.*?\*/", "", line)
+    s = re.sub(r"//.*$", "", s).strip()
+    return s.endswith((";", ":", "{", "}")) or s.startswith("#")
+
+
+def statement_range(file_lines, idx, back=5, forward=8):
+    """First and last 0-based line of the C statement around line idx."""
+    start = idx
+    while start > 0 and idx - start < back:
+        prev = file_lines[start - 1]
+        if prev.strip() == "" or is_statement_end(prev):
+            break
+        start = start - 1
+    end = idx
+    while not is_statement_end(file_lines[end]) and end + 1 < len(file_lines) \
+          and end - idx < forward:
+        end = end + 1
+    return start, end
+
+
+def local_source_path(path):
+    """The readable local file for a 'dis -l' source path: the path itself
+    (kernel-debuginfo-common installs it) or the same file under
+    $EDIS_SOURCE_DIR, a kernel source tree. None when neither exists."""
+    if os.path.isfile(path):
+        return path
+    src_dir = os.environ.get("EDIS_SOURCE_DIR", "")
+    m = re.search(r'/linux-[^/]+/(.+)$', path)
+    if src_dir and m:
+        candidate = os.path.join(src_dir, m.group(1))
+        if os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+_source_file_cache = {}
+
+def read_source_file(path):
+    if path not in _source_file_cache:
+        local = local_source_path(path)
+        try:
+            with open(local) as f:
+                _source_file_cache[path] = f.read().splitlines()
+        except Exception:
+            _source_file_cache[path] = None
+    return _source_file_cache[path]
+
+
+def split_source_header(line):
+    """('/path/file.c', 123) for a 'dis -l' header line, else None."""
+    if not is_source_path_header(line):
+        return None
+    path, _, number = line.strip().rpartition(":")
+    try:
+        return path.strip(), int(number)
+    except ValueError:
+        return None
+
+
+def add_local_source(disasm_str, read_lines=None):
+    """
+    'dis -l' output with the source statement printed under each header,
+    in the server's '%8d <code>' format. Returns (text, found); found is
+    False when no source file could be read, and the text is then the
+    output with the headers dropped, as plain 'dis' shows it.
+    """
+    read_lines = read_lines or read_source_file
+    out = []
+    plain = []
+    found = False
+    last = None
+    for line in disasm_str.splitlines():
+        out.append(line)
+        header = split_source_header(line)
+        if header is None:
+            plain.append(line)
+            continue
+        file_lines = read_lines(header[0])
+        if not file_lines or not (0 < header[1] <= len(file_lines)):
+            continue
+        found = True
+        if header == last:
+            continue
+        last = header
+        start, end = statement_range(file_lines, header[1] - 1)
+        for i in range(start, end + 1):
+            out.append("%8d %s" % (i + 1, file_lines[i]))
+    if not found:
+        return "\n".join(plain) + "\n", False
+    return "\n".join(out) + "\n", True
+
+
+def local_function_source(disasm_str, read_lines=None):
+    """
+    The whole function's source for 'edis -f' without the server: the
+    lines from the first to the last one 'dis -l' maps to in the file of
+    the first header. None when that file can't be read.
+    """
+    read_lines = read_lines or read_source_file
+    path = None
+    numbers = []
+    for line in disasm_str.splitlines():
+        header = split_source_header(line)
+        if header is None:
+            continue
+        if path is None:
+            path = header[0]
+        if header[0] == path:
+            numbers.append(header[1])
+    if path is None:
+        return None
+    file_lines = read_lines(path)
+    if not file_lines:
+        return None
+    start = max(1, min(numbers))
+    end = min(len(file_lines), max(numbers))
+    # Widen to the whole definition in kernel style: back to the '{' in
+    # column 0 and the signature above it, forward to the '}' in column 0.
+    for n in range(start, max(0, start - 60), -1):
+        if file_lines[n - 1].startswith("{"):
+            start = n
+            while start > 1 and file_lines[start - 2].strip() != "" and \
+                  not is_statement_end(file_lines[start - 2]):
+                start = start - 1
+            break
+    for n in range(end, min(len(file_lines), end + 200) + 1):
+        if file_lines[n - 1].startswith("}"):
+            end = n
+            break
+    out = ["%s: %d" % (path, start)]
+    for n in range(start, end + 1):
+        out.append("%8d %s" % (n, file_lines[n - 1]))
+    return "\n".join(out) + "\n"
+
+
+# ============================================================================
+# --save / --diff: compare a function across kernels
+# ============================================================================
+
+_RE_ADDR_SYM = re.compile(r'0x[0-9a-fA-F]{9,}\s+(<[^>]+>)')
+_RE_LONG_ADDR = re.compile(r'0x[0-9a-fA-F]{12,}')
+
+def normalize_disasm(text):
+    """
+    'dis' output as '<f+N> op operands' lines with kernel addresses
+    removed, so the same function from two kernels can be diffed: an
+    address with a symbol becomes the symbol, any other becomes ADDR.
+    """
+    result = []
+    for line in text.splitlines():
+        idx = asm_start(line)
+        if idx < 0:
+            continue
+        words = line[idx:].split(None, 2)
+        if len(words) < 3:
+            continue
+        body = _RE_ADDR_SYM.sub(r'\1', words[2].strip())
+        body = _RE_LONG_ADDR.sub("ADDR", body)
+        body = re.sub(r'\s+', ' ', body)
+        result.append("%s %s" % (words[1].rstrip(":"), body))
+    return result
+
+
+def diff_disasm(saved_lines, current_lines, saved_name, current_name):
+    import difflib
+    return list(difflib.unified_diff(saved_lines, current_lines,
+                                     fromfile=saved_name, tofile=current_name,
+                                     lineterm=""))
+
+
 TARGET_MARKER = "  <=="
 
 def parse_target(ins_addr):
@@ -3092,6 +3668,49 @@ def is_target_line(words, target):
     except ValueError:
         return False
     return name == target[1] and offset == target[2]
+
+
+def save_or_diff(disasm_str, ins_addr, o):
+    """'edis --save FILE func' writes the function's normalized disassembly;
+    'edis --diff FILE func', run on another kernel, shows what changed."""
+    current = normalize_disasm(disasm_str)
+    kernel_ver, release_ver = get_kernel_version()
+    label = "%s %s" % (ins_addr, release_ver)
+    if o.save:
+        try:
+            with open(o.save, "w") as f:
+                f.write("# edis %s\n" % label)
+                for line in current:
+                    f.write(line + "\n")
+        except Exception as e:
+            print("Cannot write %s: %s" % (o.save, e))
+            return
+        print("Saved %d instructions of %s to %s" % (len(current), label, o.save))
+        return
+
+    try:
+        with open(o.diff) as f:
+            saved = f.read().splitlines()
+    except Exception as e:
+        print("Cannot read %s: %s" % (o.diff, e))
+        return
+    saved_label = o.diff
+    if saved and saved[0].startswith("# edis "):
+        saved_label = saved[0][len("# edis "):]
+        saved = saved[1:]
+    diff = diff_disasm(saved, current, saved_label, label)
+    if not diff:
+        print("No difference between %s and %s" % (saved_label, label))
+        return
+    for line in diff:
+        if line.startswith("+") and not line.startswith("+++"):
+            crashcolor.set_color(crashcolor.LIGHTGREEN)
+        elif line.startswith("-") and not line.startswith("---"):
+            crashcolor.set_color(crashcolor.LIGHTRED)
+        elif line.startswith("@@"):
+            crashcolor.set_color(crashcolor.LIGHTCYAN)
+        print(line)
+        crashcolor.set_color(crashcolor.RESET)
 
 
 def disasm(ins_addr, o, args, cmd_path_list):
@@ -3166,9 +3785,34 @@ def disasm(ins_addr, o, args, cmd_path_list):
         return
 
 
+    if o.save or o.diff:
+        save_or_diff(disasm_str, ins_addr, o)
+        return
+
     result_str = ""
+    server = os.environ.get("CRASHEXT_SERVER", "")
     if (o.noaction or not disasm_str.startswith("/")):
         result_str = disasm_str
+    elif server == "":
+        # No server: read the source from this machine if it is here.
+        if o.fullsource:
+            full = local_function_source(disasm_str)
+            if full is None:
+                # No source here: show the disassembly, as before
+                # local source reading existed.
+                print("Source is not readable here (set CRASHEXT_SERVER,"
+                      " or EDIS_SOURCE_DIR to a kernel source tree)")
+                print(add_local_source(disasm_str)[0], end="")
+                return
+            for line in full.splitlines():
+                print(highlight_source_code(
+                    line, 0, highlight_syntax=not is_source_path_header(line)))
+            crashcolor.set_color(crashcolor.RESET)
+            return
+        result_str, found = add_local_source(disasm_str)
+        if o.sourceonly and found:
+            result_str = "\n".join(l for l in result_str.splitlines()
+                                   if asm_start(l) < 0) + "\n"
     else:
         # Ordered: a set would pick an arbitrary one, possibly python2.
         python_list = ( "python3", "python", "python2" )
@@ -3228,6 +3872,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
     skipped = False
     # The graph already draws where jumps come from.
     jump_notes = {} if o.graph else jump_sources(result_lines)
+    arg_notes = call_arg_notes(result_lines, get_prototype) if o.args else {}
+    field_notes = struct_field_notes(result_lines, get_prototype) \
+                  if o.fields else {}
 
     for row, one_line in enumerate(result_lines):
         idx = asm_start(one_line)
@@ -3340,6 +3987,10 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
                 line = ("%s%s" % (words[-1], find_symbol(words[-1]))).join(line.rsplit(words[-1], 1))
             notes = []
+            if row in field_notes:
+                notes.append(field_notes[row])
+            if row in arg_notes:
+                notes.append(arg_notes[row])
             if o.explain and is_disasm_line:
                 explain = get_operand_explanation(one_line[asm_start(one_line):])
                 if explain != "":
@@ -3556,10 +4207,6 @@ def show_callgraph(func_name, depth, options):
     global branch_bar
     global call_op_set
 
-    if depth >= options.max_depth:
-        print("...", end="")
-        return
-
     if func_name.startswith("*"):  # Indirect call: target unknown
         return
 
@@ -3569,18 +4216,16 @@ def show_callgraph(func_name, depth, options):
         crashcolor.set_color(crashcolor.RESET)
         return
 
+    if depth >= options.max_depth:
+        print("...", end="")
+        return
+
     depth = depth + 1
     while (len(branch_bar) <= depth):
         branch_bar.append(LineType.LINE_SPACE)
 
     first = True
-    if func_name not in callgraph_cache:
-        try:
-            disasm_str = exec_crash_command("dis %s" % (func_name))
-        except Exception:
-            disasm_str = ""
-        callgraph_cache[func_name] = get_call_list(disasm_str)
-    call_list = callgraph_cache[func_name]
+    call_list = callees_of(func_name)
 
     callgraph_path.append(func_name)
     len_call_list = len(call_list)
@@ -3603,6 +4248,32 @@ def show_callgraph(func_name, depth, options):
             if (printed > 0):
                 print()
     callgraph_path.pop()
+
+
+def callees_of(func_name):
+    """Callees of a function, from its 'dis' output, cached for the run."""
+    if func_name not in callgraph_cache:
+        try:
+            disasm_str = exec_crash_command("dis %s" % (func_name))
+        except Exception:
+            disasm_str = ""
+        callgraph_cache[func_name] = get_call_list(disasm_str)
+    return callgraph_cache[func_name]
+
+
+def show_call_paths(root, target, max_depth):
+    paths = find_call_paths(root, target, max_depth, callees_of)
+    if not paths:
+        print("No call path from %s to %s within %d calls (raise it with -m)" %
+              (root, target, max_depth))
+        return
+    for path in paths:
+        print(" -> ".join(path[:-1]) + " -> ", end="")
+        crashcolor.set_color(crashcolor.LIGHTRED | crashcolor.BOLD)
+        print(path[-1])
+        crashcolor.set_color(crashcolor.RESET)
+    if len(paths) >= 50:
+        print("(first 50 paths shown)")
 
 
 def edis():
@@ -3650,6 +4321,42 @@ def edis():
                   default=False,
                   help="Explain each instruction in plain English")
 
+    op.add_option("-a", "--args",
+                  action="store_true",
+                  dest="args",
+                  default=False,
+                  help="Name the registers that carry each call's arguments")
+
+    op.add_option("-T", "--fields",
+                  action="store_true",
+                  dest="fields",
+                  default=False,
+                  help="Name the struct field each memory access uses" \
+                    + " (x86_64)")
+
+    op.add_option("-F", "--find",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="find",
+                  help="With -c, show only the call paths that reach" \
+                    + " this function")
+
+    op.add_option("--save",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="save",
+                  help="Save the function's disassembly, without" \
+                    + " addresses, to FILE")
+
+    op.add_option("--diff",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="diff",
+                  help="Compare the function with one saved by --save")
+
     op.add_option("-g", "--graph",
                   action="store_true",
                   dest="graph",
@@ -3683,21 +4390,13 @@ def edis():
                   help="Show stack calculation debug lines after each disassembly line")
 
 
-    try:
-        encode_url = os.environ['CRASHEXT_SERVER'] + '/api/disasm'
-    except:
-        encode_url = ""
-
-    if encode_url != None and encode_url != "":
-        noaction_default=False
-    else:
-        noaction_default=True
-
+    # Without CRASHEXT_SERVER, source lines are read from this machine when
+    # the files are here (see add_local_source), so -n is off by default.
     op.add_option("-n", "--noaction",
                   action="store_true",
                   dest="noaction",
-                  default=noaction_default,
-                  help="Only colorising the output and not connection to server")
+                  default=False,
+                  help="Plain disassembly: no source lines, no server")
 
     op.add_option("-s", "--sourceonly",
                   action="store_true",
@@ -3730,6 +4429,9 @@ def edis():
         set_call_op_list()
         callgraph_cache.clear()
         del callgraph_path[:]
+        if o.find:
+            show_call_paths(args[0], o.find, o.max_depth)
+            return
         show_callgraph_func(args[0], 0, True, o)
         show_callgraph(args[0], 0, o)
         sys.exit(0)

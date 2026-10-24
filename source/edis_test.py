@@ -8,6 +8,7 @@ Run directly: python3 source/edis_test.py
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
+import optparse
 import subprocess
 import sys
 import types
@@ -37,7 +38,9 @@ _api.sys_info = _SysInfo()
 _api.exec_crash_command = _exec_crash_command
 _api.exec_gdb_command = _exec_gdb_command
 _api.readULong = lambda addr: 0
-_api.__all__ = ["sys_info", "exec_crash_command", "exec_gdb_command", "readULong"]
+_api.OptionParser = optparse.OptionParser
+_api.__all__ = ["sys_info", "exec_crash_command", "exec_gdb_command", "readULong",
+                "OptionParser"]
 sys.modules["pykdump"] = types.ModuleType("pykdump")
 sys.modules["pykdump.API"] = _api
 _linuxdump = types.ModuleType("LinuxDump")
@@ -322,6 +325,281 @@ def check_plain_source_when_piped():
         sys.stdout = saved
         edis._source_highlighter_ready = False
     assert out == "   10   int x = 0;", repr(out)
+
+
+def check_operands():
+    c = edis.canonical_register
+    assert c("%edi", "x86") == "rdi" and c("%r8d", "x86") == "r8"
+    assert c("%al", "x86") == "rax" and c("0x8(%rax)", "x86") is None
+    assert c("w1", "arm") == "x1" and c("x19", "arm") == "x19"
+
+    assert edis.split_operands("0x8(%rax,%rbx,8),%rcx") == ["0x8(%rax,%rbx,8)", "%rcx"]
+    assert edis.split_operands("x0, [sp, #16]") == ["x0", "[sp, #16]"]
+
+    d = edis.dest_register
+    assert d("0x1 <f+1>: mov 0x58(%rdi),%rax".split(), "x86") == "rax"
+    assert d("0x1 <f+1>: xor %esi,%esi".split(), "x86") == "rsi"
+    assert d("0x1 <f+1>: mov %rax,0x8(%rbx)".split(), "x86") is None
+    assert d("0x1 <f+1>: cmp $0x1,%rdi".split(), "x86") is None
+    assert d("0x1 <f+1>: pop %rbx".split(), "x86") == "rbx"
+    assert d("0x1 <f+1>: ldr w0, [x19, #8]".split(), "arm") == "x0"
+    assert d("0x1 <f+1>: str x0, [sp, #16]".split(), "arm") is None
+    assert d("0x1 <f+1>: bic x0, x0, #0x1".split(), "arm") == "x0"
+
+
+def check_parse_prototype():
+    p = edis.parse_prototype
+    assert p("int foo(struct page *, unsigned int);") == ["struct page *", "unsigned int"]
+    assert p("void schedule(void);") == []
+    assert p("int bar(int (*)(void *, int), void *);") == ["int (*)(void *, int)", "void *"]
+    assert p("whatis: invalid argument: nosuch") is None
+
+
+def _with_arch(arch, fn):
+    saved = edis.sys_info.machine
+    edis.sys_info.machine = arch
+    try:
+        return fn()
+    finally:
+        edis.sys_info.machine = saved
+
+
+def check_call_arg_notes():
+    lines = [
+        "0x1000 <f>:\tmov    %rbx,%rdi",
+        "0x1003 <f+3>:\tmov    $0x1,%esi",
+        "0x1008 <f+8>:\tmov    $0x2,%edx",
+        "0x100d <f+13>:\tcall   0x2000 <foo>",
+        "0x1012 <f+18>:\tmov    %rax,%rdi",
+        "0x1015 <f+21>:\tcall   *%r11",
+    ]
+    protos = {"foo": ["struct page *", "int"]}
+    notes = _with_arch("x86_64", lambda: edis.call_arg_notes(lines, protos.get))
+    # foo takes 2 arguments: %edx is not one of them.
+    assert notes == {0: "arg1 of foo (struct page *)", 1: "arg2 of foo (int)",
+                     4: "arg1 of indirect call"}, notes
+
+    # Without a prototype every argument register written is named, and
+    # the walk stops at a jump target.
+    lines = [
+        "0x1000 <f>:\tmov    $0x5,%ecx",
+        "0x1005 <f+5>:\tje     0x100a <f+10>",
+        "0x100a <f+10>:\tmov    $0x1,%edi",
+        "0x100f <f+15>:\tcall   0x2000 <bar>",
+    ]
+    notes = _with_arch("x86_64", lambda: edis.call_arg_notes(lines, lambda n: None))
+    assert notes == {2: "arg1 of bar"}, notes
+
+    lines = ["0x10 <f>:\tmov\tx0, x19", "0x14 <f+4>:\tbl\t0x80 <baz>"]
+    notes = _with_arch("aarch64", lambda: edis.call_arg_notes(lines, lambda n: None))
+    assert notes == {0: "arg1 of baz"}, notes
+
+
+_STRUCT_PAGE = """struct page {
+   [0x0] unsigned long flags;
+         union {
+             struct {
+   [0x8]         struct list_head lru;
+  [0x18]         struct address_space *mapping;
+  [0x20]         unsigned long index;
+             };
+         };
+  [0x28] unsigned int refcnt : 24;
+  [0x30] void (*free)(struct page *);
+  [0x38] char name[8];
+}
+SIZE: 64"""
+
+_STRUCT_LIST_HEAD = """struct list_head {
+   [0] struct list_head *next;
+   [8] struct list_head *prev;
+}
+SIZE: 16"""
+
+_STRUCT_AS = """struct address_space {
+   [0x0] struct inode *host;
+  [0x10] unsigned long nrpages;
+}
+SIZE: 24"""
+
+def _layout(kind, name):
+    text = {"page": _STRUCT_PAGE, "list_head": _STRUCT_LIST_HEAD,
+            "address_space": _STRUCT_AS}.get(name, "")
+    return edis.parse_struct_offsets(text)
+
+
+def check_struct_offsets():
+    members, size = edis.parse_struct_offsets(_STRUCT_PAGE)
+    assert size == 64
+    assert members == [
+        (0x0, "flags", "unsigned long"),
+        (0x8, "lru", "struct list_head"),
+        (0x18, "mapping", "struct address_space *"),
+        (0x20, "index", "unsigned long"),
+        (0x28, "refcnt", "unsigned int"),
+        (0x30, "free", "function pointer"),
+        (0x38, "name", "char[]"),
+    ], members
+    assert edis.parse_struct_offsets(_STRUCT_LIST_HEAD)[0][1] == \
+        (8, "prev", "struct list_head *")
+
+    r = edis.resolve_field
+    assert r("struct", "page", 0x18, _layout) == ("mapping", "struct address_space *")
+    assert r("struct", "page", 0x10, _layout) == ("lru.prev", "struct list_head *")
+    assert r("struct", "page", 0x4, _layout) == ("flags+0x4", None)
+    assert r("struct", "page", 0x3a, _layout) == ("name+0x2", None)
+    assert r("struct", "page", 0x40, _layout) is None      # past SIZE
+    assert r("struct", "nosuch", 0, _layout) is None
+
+
+def check_struct_field_notes():
+    lines = [
+        "0x1000 <f>:\tpush   %rbx",
+        "0x1001 <f+1>:\tmov    %rdi,%rbx",
+        "0x1004 <f+4>:\tmov    0x18(%rbx),%rax",
+        "0x1008 <f+8>:\tmov    0x10(%rax),%rdx",
+        "0x100c <f+12>:\tmov    (%rax),%rcx",
+        "0x100f <f+15>:\tlea    0x8(%rbx),%rsi",
+        "0x1013 <f+19>:\tmov    0x8(%rsi),%rdi",
+        "0x1017 <f+23>:\tcall   0x2000 <g>",
+        "0x101c <f+28>:\tmov    0x20(%rbx),%rax",
+        "0x1020 <f+32>:\tmov    0x8(%rcx),%rax",
+        "0x1024 <f+36>:\tmov    %eax,0x28(%rbx)",
+    ]
+    protos = {"f": ["struct page *"]}
+    notes = _with_arch("x86_64", lambda: edis.struct_field_notes(
+        lines, protos.get, _layout))
+    assert notes == {
+        2: "page->mapping",
+        3: "address_space->nrpages",
+        4: "address_space->host",
+        5: "&page->lru",
+        6: "list_head->prev",
+        8: "page->index",        # %rbx survives the call
+        10: "page->refcnt",
+    }, notes                     # %rcx did not: no note on row 9
+
+    # A jump target forgets what was known.
+    lines = [
+        "0x1000 <f>:\tje     0x1004 <f+4>",
+        "0x1002 <f+2>:\tnop",
+        "0x1004 <f+4>:\tmov    0x18(%rdi),%rax",
+    ]
+    notes = _with_arch("x86_64", lambda: edis.struct_field_notes(
+        lines, protos.get, _layout))
+    assert notes == {}, notes
+    assert _with_arch("aarch64", lambda: edis.struct_field_notes(
+        lines, protos.get, _layout)) == {}
+
+
+def check_find_call_paths():
+    graph = {"a": ["b", "c", "*%rax"], "b": ["d", "a"], "c": ["d+16"], "d": ["e"]}
+    get = lambda n: graph.get(n, [])
+    assert edis.find_call_paths("a", "d", 2, get) == [["a", "b", "d"], ["a", "c", "d"]]
+    assert edis.find_call_paths("a", "e", 2, get) == []
+    assert edis.find_call_paths("a", "e", 3, get) == [["a", "b", "d", "e"],
+                                                      ["a", "c", "d", "e"]]
+    assert len(edis.find_call_paths("a", "d", 5, get, limit=1)) == 1
+
+
+_SRC = {
+    "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c": [
+        "int f(struct page *page)",
+        "{",
+        "\tint x = foo(page,",
+        "\t\t    1);",
+        "\treturn x;",
+        "}",
+    ],
+}
+
+
+def check_local_source():
+    dis = "\n".join([
+        "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c: 3",
+        "0x1000 <f>:\tcall   0x2000 <foo>",
+        "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c: 5",
+        "0x1005 <f+5>:\tret",
+    ]) + "\n"
+    text, found = edis.add_local_source(dis, _SRC.get)
+    assert found
+    assert text.splitlines() == [
+        "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c: 3",
+        "       3 \tint x = foo(page,",
+        "       4 \t\t    1);",
+        "0x1000 <f>:\tcall   0x2000 <foo>",
+        "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c: 5",
+        "       5 \treturn x;",
+        "0x1005 <f+5>:\tret",
+    ], text
+
+    # No file here: plain 'dis' output, headers dropped.
+    text, found = edis.add_local_source(dis, lambda p: None)
+    assert not found
+    assert text.splitlines() == ["0x1000 <f>:\tcall   0x2000 <foo>",
+                                 "0x1005 <f+5>:\tret"]
+
+    # The whole definition: signature, braces, body.
+    full = edis.local_function_source(dis, _SRC.get).splitlines()
+    assert full[0].endswith("f.c: 1"), full
+    assert full[1] == "       1 int f(struct page *page)", full
+    assert full[-1] == "       6 }", full
+    assert edis.local_function_source(dis, lambda p: None) is None
+
+    assert edis.statement_range(_SRC[list(_SRC)[0]], 3) == (2, 3)
+
+
+def check_save_and_diff():
+    old = "\n".join([
+        "0xffffffff81000000 <f>:\tpush   %rbp",
+        "0xffffffff81000001 <f+1>:\tcall   0xffffffff81100000 <g>",
+        "0xffffffff81000006 <f+6>:\tmov    0xffffffff82345678,%rax",
+    ])
+    new = "\n".join([
+        "/usr/src/debug/kernel-5.14/linux-5.14/mm/f.c: 3",
+        "0xffffffff9a000000 <f>:\tpush   %rbp",
+        "0xffffffff9a000001 <f+1>:\tcall   0xffffffff9a100000 <g>",
+        "0xffffffff9a000006 <f+6>:\tmov    0xffffffff9b345678,%rbx",
+    ])
+    a = edis.normalize_disasm(old)
+    b = edis.normalize_disasm(new)
+    assert a == ["<f> push %rbp", "<f+1> call <g>", "<f+6> mov ADDR,%rax"], a
+    diff = edis.diff_disasm(a, b, "old", "new")
+    assert "-<f+6> mov ADDR,%rax" in diff and "+<f+6> mov ADDR,%rbx" in diff
+    assert edis.diff_disasm(a, a, "old", "new") == []
+
+    import os
+    import tempfile
+
+    class _O(object):
+        pass
+
+    path = os.path.join(tempfile.mkdtemp(), "f.edis")
+    o = _O()
+    o.save, o.diff = path, ""
+    out = []
+    saved_stdout = sys.stdout
+
+    class _Capture(object):
+        def write(self, s):
+            out.append(s)
+
+        def flush(self):
+            pass
+
+        def isatty(self):
+            return False
+
+    sys.stdout = _Capture()
+    try:
+        edis.save_or_diff(old, "f", o)
+        o.save, o.diff = "", path
+        edis.save_or_diff(new, "f", o)
+    finally:
+        sys.stdout = saved_stdout
+    text = "".join(out)
+    assert "Saved 3 instructions" in text, text
+    assert "+<f+6> mov ADDR,%rbx" in text, text
 
 
 def check_call_color():

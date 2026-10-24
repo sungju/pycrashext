@@ -908,6 +908,24 @@ function, so stack values stay right, and prints `...` where lines are left
 out. Source lines are syntax-highlighted only on a terminal; piped or saved
 output is plain text.
 
+Source lines come from the remoteapi server when `CRASHEXT_SERVER` is set.
+Without it, edis reads them from this machine: the `/usr/src/debug/...` path
+`dis -l` names (installed by kernel-debuginfo-common), or the same file under
+`EDIS_SOURCE_DIR`, a kernel source tree checked out at the matching version.
+When neither is readable the output is plain disassembly, as before.
+
+`-a` names the registers that carry each call's arguments (`; arg1 of foo
+(struct page *)`), using the callee's prototype from `whatis` when it has one.
+`-T` (x86_64) names the struct field each memory access uses (`;
+page->mapping`). Pointer types start from the function's own prototype and
+follow loads of struct pointer fields, `lea` of embedded structs and register
+copies; a call forgets the registers it clobbers and a jump target forgets
+everything, since another path can arrive there.
+
+`--save FILE func` writes the function's disassembly with addresses replaced
+by symbols (or `ADDR`); `--diff FILE func` in a session on another kernel
+prints a unified diff against it.
+
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
 | `-r` | `--reverse` | | Display all instructions from the start of the function |
@@ -916,15 +934,20 @@ output is plain text.
 | `-p` | `--task` | `<pid\|task>` | Read stack values from this task's backtrace instead of the current context's |
 | `-C` | `--context` | `N` | With an address or `func+offset`, show only N instructions each side of it |
 | `-e` | `--explain` | | Explain each instruction in plain English |
+| `-a` | `--args` | | Name the registers that carry each call's arguments |
+| `-T` | `--fields` | | Name the struct field each memory access uses (x86_64) |
 | `-g` | `--graph` | | Display jump graph on the left |
 | `-f` | `--full` | | Display full function code |
 | `-b` | `--symbol` | | Translate symbols if possible |
 | `-j` | `--jump` | `<ops>` | Show graph for specified jump operations only |
 | `-D` | `--debug` | | Show stack calculation debug lines |
-| `-n` | `--noaction` | | Only colorize output, do not connect to server |
+| `-n` | `--noaction` | | Plain disassembly: no source lines, no server |
 | `-s` | `--sourceonly` | | Display source lines only |
 | `-c` | `--callgraph` | | Show call graph for a function |
 | `-m` | `--max_depth` | `N` | Maximum depth of graph for callgraph |
+| `-F` | `--find` | `<func>` | With `-c`, show only the call paths that reach this function |
+| | `--save` | `<file>` | Save the function's disassembly, without addresses, to a file |
+| | `--diff` | `<file>` | Compare the function with one saved by `--save` |
 
 #### Examples
 
@@ -937,10 +960,14 @@ edis -r schedule+0x12          # Same, by symbol and offset
 edis -C 8 0xffffffff81234567   # 8 instructions each side of the address
 edis -r -p 1234 0xffffffff81234567  # Stack values from pid 1234's backtrace
 edis -e schedule               # Plain-English note on each instruction
+edis -a -T do_page_fault       # Call arguments and struct fields
 edis mm/swap_state.c:333       # Source line (needs remoteapi)
 edis -b schedule               # Disassemble with symbol translation
 edis -c do_page_fault          # Show call graph
 edis -c do_page_fault -m 3     # Call graph with max depth 3
+edis -c -F mutex_lock -m 4 do_sys_open  # Call paths that reach mutex_lock
+edis --save f.edis schedule    # Save schedule() on one kernel...
+edis --diff f.edis schedule    # ...and compare on another
 edis -s schedule               # Source lines only
 ```
 
