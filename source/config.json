@@ -199,10 +199,10 @@
 			"help"    : "Runs, in this session, what a vmcore analysis would: a base set (sys, caseinfo, sysinfo, bt, logscan, log, mod -t, kmem -i, ps -S, autocheck), then the branch the crash calls for (panic/oops, OOM, hang/lockup/stall, sysrq, death of init) with follow-ups, and writes every output under its Source line to ~/cases/<case>/ (~/cases/vmcores/<task>/ with no case number) vmcore-<task>-evidence.md for an AI or an engineer to write the report from\n\n -o FILE          write the file there\n -x \"cmd; cmd\"    also run these commands\n -f FILE          more commands, one per line\n -a               only run the -x/-f commands, appended to the file\n -t TASK          task ID when the dump path does not hold it\n --stdout         print instead of writing a file\n -q               do not print each command as it runs"
 		},
 		{
-			"command" : "follow",
+			"command" : "pdata",
 			"desc"    : "Walk a chain of structure members",
 			"options" : "-h   - list available options",
-			"help"    : "Follows members from a structure address without writing casts, prints every step with its value and type, then dumps the last member\n\n follow <type> <address> <path>   e.g. follow task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry\n   path: '.' or '->' between members, name[N], name:type (cast), name:type@member (container_of)\n -a   also dump every structure on the way\n -n   only the chain, no dump of the last member\n -o   member offsets in the dumps\n -x   hex dumps, -d decimal dumps"
+			"help"    : "Follows members from a structure address without writing casts, prints every step with its value and type, then dumps the last member\n\n pdata <type> <address> <path>   e.g. pdata task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry\n   path: '.' or '->' between members, name[N], name:type (cast), name:type@member (container_of)\n -a   also dump every structure on the way\n -n   only the chain, no dump of the last member\n -o   member offsets in the dumps\n -x   hex dumps, -d decimal dumps"
 		},
 		{
 			"command" : "kvercmp",

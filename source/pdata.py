@@ -1,21 +1,22 @@
 """
-'follow' command: walk a chain of structure members without writing casts.
+'pdata' command: walk a chain of structure members without writing casts.
 
 Instead of
     px ((struct file *)((struct task_struct *)0xffff95a0529a8000)->mm->exe_file)->f_path.dentry
 type
-    follow task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry
+    pdata task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry
 
 Every step is printed with its value and type, so a NULL or a bad pointer
 shows where the chain broke, and the last member is then dumped member by
 member ('struct <type> <address>' for a structure, gdb 'print' otherwise).
+A char * shows its string after the address.
 
-    follow <type> <address> [<path>]
+    pdata <type> <address> [<path>]
         <type>     task_struct, 'struct task_struct' or 'union foo'
         <address>  hex (0x optional) or any gdb expression ('&init_task')
         <path>     members separated by '.' or '->', with name[N],
                    name:type (cast) and name:type@member (container_of);
-                   see followpath.py
+                   see pdatapath.py
 
     -a   also dump every structure on the way
     -n   do not dump the last member, only the chain
@@ -31,10 +32,10 @@ import difflib
 import re
 
 import crashcolor
-import followpath
+import pdatapath
 
 
-USAGE = "follow [-a|-n] [-o] [-x|-d] <type> <address> [<path>]"
+USAGE = "pdata [-a|-n] [-o] [-x|-d] <type> <address> [<path>]"
 
 
 def gdb(cmd):
@@ -45,14 +46,14 @@ def gdb(cmd):
         return "", str(e).strip() or "gdb failed: %s" % cmd
     if out is None:
         out = ""
-    return out, followpath.gdb_error(out)
+    return out, pdatapath.gdb_error(out)
 
 
 def whatis(expr):
     out, err = gdb("whatis %s" % expr)
     if err:
         return None, err
-    t = followpath.parse_whatis(out)
+    t = pdatapath.parse_whatis(out)
     if t is None:
         return None, "cannot read the type of %s" % expr
     return t, None
@@ -62,7 +63,7 @@ def number_of(expr):
     out, err = gdb("p/x (unsigned long)(%s)" % expr)
     if err:
         return None, err
-    n = followpath.parse_number(followpath.parse_print(out))
+    n = pdatapath.parse_number(pdatapath.parse_print(out))
     if n is None:
         return None, "cannot read the value of %s" % expr
     return n, None
@@ -73,13 +74,22 @@ def short_value(expr, hex_out):
     out, err = gdb("p%s %s" % ("/x" if hex_out else "", expr))
     if err:
         return None, err
-    v = followpath.parse_print(out)
+    v = pdatapath.parse_print(out)
     if v is None:
         return None, "cannot read %s" % expr
     v = " ".join(v.split())
     if len(v) > 70:
         v = v[:67] + "..."
     return v, None
+
+
+def char_string(expr):
+    """(address, string) of a char * member, the string as gdb quotes it."""
+    try:
+        out = exec_gdb_command("p %s" % expr)
+    except Exception as e:
+        return None, "<%s>" % str(e).strip()
+    return pdatapath.split_string(pdatapath.parse_print(out or ""))
 
 
 def member_names(base):
@@ -139,19 +149,19 @@ def start_address(text):
     return text
 
 
-def follow(type_name, address, path, o):
+def pdata(type_name, address, path, o):
     try:
-        steps = followpath.parse_path(path) if path else []
-    except followpath.PathError as e:
+        steps = pdatapath.parse_path(path) if path else []
+    except pdatapath.PathError as e:
         print(e)
         return
 
-    expr = followpath.start_expr(type_name, start_address(address))
+    expr = pdatapath.start_expr(type_name, start_address(address))
     t, err = whatis(expr)
     if err:
         print("%s: %s" % (type_name, err))
         return
-    kind, base = followpath.type_kind(t)
+    kind, base = pdatapath.type_kind(t)
     addr, err = number_of(expr)
     if err:
         print("%s: %s" % (address, err))
@@ -164,15 +174,15 @@ def follow(type_name, address, path, o):
         if kind == "ptr" and addr == 0:
             crashcolor.set_color(crashcolor.LIGHTRED)
             print("NULL pointer before '%s', cannot follow further" %
-                  followpath.step_label(step))
+                  pdatapath.step_label(step))
             crashcolor.set_color(crashcolor.RESET)
             return
         prev_base = base
-        expr = followpath.step_expr(expr, t.endswith("*"), step)
+        expr = pdatapath.step_expr(expr, t.endswith("*"), step)
         t, err = whatis(expr)
         if err:
             crashcolor.set_color(crashcolor.LIGHTRED)
-            print("%s%s: %s" % ("  " * (i + 1), followpath.step_label(step), err))
+            print("%s%s: %s" % ("  " * (i + 1), pdatapath.step_label(step), err))
             crashcolor.set_color(crashcolor.RESET)
             close = difflib.get_close_matches(step["member"],
                                               member_names(prev_base), n=5)
@@ -180,10 +190,21 @@ def follow(type_name, address, path, o):
                 print("  members of %s like '%s': %s" %
                       (prev_base, step["member"], ", ".join(close)))
             return
-        kind, base = followpath.type_kind(t)
+        kind, base = pdatapath.type_kind(t)
         last = (i == len(steps) - 1)
-        label = ("->" if i else "") + followpath.step_label(step)
-        if kind == "ptr" or (t.endswith("*") and "(" not in t):
+        label = ("->" if i else "") + pdatapath.step_label(step)
+        if pdatapath.is_char_pointer(t):
+            addr, err = number_of(expr)
+            if err is None:
+                value = "0x%x" % addr
+                if addr:
+                    string = char_string(expr)[1]
+                    if len(string) > 60:
+                        string = string[:57] + "..."
+                    value += " " + string
+            else:
+                value = err
+        elif kind == "ptr" or (t.endswith("*") and "(" not in t):
             addr, err = number_of(expr)
             value = "0x%x" % addr if err is None else err
         elif kind == "struct":
@@ -217,15 +238,18 @@ def follow(type_name, address, path, o):
         crashcolor.set_color(crashcolor.LIGHTYELLOW)
         print(expr)
         crashcolor.set_color(crashcolor.RESET)
+        if pdatapath.is_char_pointer(t):
+            # The address, then the whole string it points to.
+            print(("0x%x %s" % (addr, char_string(expr)[1] if addr else "")).rstrip())
+            return
         dump(kind, base, addr, expr, o)
         # A pointer to something other than a struct: show what it points to.
-        if t.endswith("*") and "(" not in t and addr and \
-           not re.match(r"^(const\s+)?(unsigned\s+|signed\s+)?char\s*\*$", t):
+        if t.endswith("*") and "(" not in t and addr:
             out, err = gdb("p%s *(%s)" % ("/x" if o.hex_out else "", expr))
             print(err if err else "*%s" % out.strip())
 
 
-def follow_cmd():
+def pdata_cmd():
     op = OptionParser(usage=USAGE)
     op.add_option("-a", "--all", dest="all", default=0, action="store_true",
                   help="Also dump every structure on the way")
@@ -245,12 +269,12 @@ def follow_cmd():
         args = [args[0] + " " + args[1]] + args[2:]
     if len(args) < 2:
         print("usage: %s" % USAGE)
-        print("  e.g. follow task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry")
-        print("       follow task_struct ffff95a0529a8000 mm->exe_file->f_path.dentry->d_name.name")
-        print("       follow -n task_struct 0xffff95a0529a8000 tasks.next:task_struct@tasks->comm")
+        print("  e.g. pdata task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry")
+        print("       pdata task_struct ffff95a0529a8000 mm->exe_file->f_path.dentry->d_name.name")
+        print("       pdata -n task_struct 0xffff95a0529a8000 tasks.next:task_struct@tasks->comm")
         return
-    follow(args[0], args[1], " ".join(args[2:]), o)
+    pdata(args[0], args[1], " ".join(args[2:]), o)
 
 
 if ( __name__ == '__main__'):
-    follow_cmd()
+    pdata_cmd()

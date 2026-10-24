@@ -1,6 +1,6 @@
 """
-Member path parsing for the 'follow' command, kept free of crash so it can
-be checked on its own (python3 followpath_test.py).
+Member path parsing for the 'pdata' command, kept free of crash so it can
+be checked on its own (python3 pdatapath_test.py).
 
 A path is the members to walk from a structure, separated by '.' or '->'
 (either works for pointers and embedded structures alike):
@@ -163,6 +163,33 @@ def type_kind(type_str):
        not any(c in t for c in "*[("):
         return ("struct", t)
     return ("other", t)
+
+
+CHAR_PTR_RE = re.compile(r"^(const\s+)?(unsigned\s+|signed\s+)?char\s*(const\s*)?\*$")
+
+
+def is_char_pointer(type_str):
+    """True for char *, const char *, unsigned char * and the like."""
+    return bool(CHAR_PTR_RE.match(type_str.strip()))
+
+
+STRING_RE = re.compile(r"^(0x[0-9a-fA-F]+|0)(?:\s+<(?!error:)[^>]*>)?\s*(.*)$", re.S)
+
+
+def split_string(value):
+    """(address, string) from gdb's print of a char *.
+
+    '0xffff... "bash"' gives ('0xffff...', '"bash"'); a symbol gdb names
+    ('0x... <linux_banner> "Linux ..."') is dropped, and an unreadable
+    string stays as gdb's '<error: ...>'. NULL gives ('0x0', '').
+    """
+    if value is None:
+        return (None, "")
+    m = STRING_RE.match(value.strip())
+    if not m:
+        return (None, value.strip())
+    addr, rest = m.groups()
+    return ("0x0" if addr == "0" else addr, rest.strip())
 
 
 VALUE_RE = re.compile(r"^\$\d+\s*=\s*(.*)$", re.S)

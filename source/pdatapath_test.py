@@ -1,14 +1,15 @@
 """
-Checks for the 'follow' command's path parsing.
+Checks for the 'pdata' command's path parsing.
 
-Run directly: python3 source/followpath_test.py
+Run directly: python3 source/pdatapath_test.py
 
 Written by Sungju Kwon <sungju.kwon@gmail.com>
 """
 
-from followpath import (PathError, parse_path, split_path, start_expr,
+from pdatapath import (PathError, parse_path, split_path, start_expr,
                         step_expr, parse_whatis, type_kind, parse_print,
-                        parse_number, gdb_error, normalize_type)
+                        parse_number, gdb_error, normalize_type,
+                        is_char_pointer, split_string)
 
 
 def check_split():
@@ -74,6 +75,22 @@ def check_gdb_output():
     assert parse_number('0xffff "bash"') == 0xffff
     assert gdb_error("There is no member named foo.") == "There is no member named foo."
     assert gdb_error("$1 = 0x0") is None
+
+
+def check_char_pointers():
+    for t in ["char *", "const char *", "unsigned char *",
+              "const unsigned char *", "signed char *", "char const *"]:
+        assert is_char_pointer(t), t
+    for t in ["char **", "char [16]", "struct char_dev *", "int *"]:
+        assert not is_char_pointer(t), t
+    assert split_string('0xffff95a0c1b2d3f8 "bash"') == \
+        ("0xffff95a0c1b2d3f8", '"bash"')
+    assert split_string('0xffffffff81e00100 <linux_banner> "Linux version"') == \
+        ("0xffffffff81e00100", '"Linux version"')
+    assert split_string("0x0") == ("0x0", "")
+    assert split_string("0") == ("0x0", "")
+    assert split_string("0xdead <error: Cannot access memory at address 0xdead>") == \
+        ("0xdead", "<error: Cannot access memory at address 0xdead>")
 
 
 if (__name__ == '__main__'):
