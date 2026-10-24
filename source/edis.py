@@ -4164,24 +4164,60 @@ def set_call_op_list(arch=None):
         call_op_set = [ "call", "callq" ]
 
 
+# Calls that are not part of a function's logic: tracing and return hooks.
+_CALL_NOISE = ("__fentry__", "mcount", "_mcount", "__x86_return_thunk",
+               "__sanitizer_cov_trace_pc")
+# Thunks that make an indirect call through the register in their name.
+_INDIRECT_THUNKS = ("__x86_indirect_thunk_", "__x86_indirect_call_thunk_")
+
+# Start address of each callee seen by get_call_list(), so it can be
+# disassembled by address: 'dis <name>' fails for a name that more than
+# one function has ("duplicate text symbols found").
+callee_address = {}
+
+
 def get_call_list(disasm_str):
     """
     Return the callees of a 'dis' output, in order.
 
-    Direct calls give the symbol ('<func>') or the bare address. Calls
-    through a register or memory ('call *%rax', 'blr x1') can't be followed
-    and are returned with a leading '*' so they are shown but not walked.
+    Direct calls give the symbol ('<func>') or the bare address. A jump to
+    the start of another function is a tail call and counts as a call.
+    Calls through a register or memory ('call *%rax', 'blr x1', a retpoline
+    thunk) can't be followed and are returned with a leading '*' so they
+    are shown but not walked.
     """
+    set_jump_op_list()
     call_list = []
+    this_func = None
     for line in disasm_str.splitlines():
         if line == "":
             break
         words = line.split()
-        if len(words) <= 3 or words[2] not in call_op_set:
+        if len(words) <= 3:
             continue
+        if this_func is None and words[1].startswith("<"):
+            this_func = words[1].rstrip(":")[1:-1].split("+")[0]
+        is_call = words[2] in call_op_set
+        if not is_call:
+            # Tail call: 'jmp 0x... <other_func>' to another function's start.
+            if not check_jump_op(words[2]) or len(words) <= 4 or \
+               not words[4].startswith("<"):
+                continue
+            name = words[4][1:-1]
+            if "+" in name or name == this_func:
+                continue
         if len(words) > 4:
             if words[4].startswith("<"):
-                call_list.append(words[4][1:-1])
+                name = words[4][1:-1]
+                if name in _CALL_NOISE:
+                    continue
+                if name.startswith(_INDIRECT_THUNKS):
+                    call_list.append("*%" + name.split("_")[-1])
+                    continue
+                target = get_branch_target(words)
+                if target != "" and "+" not in name:
+                    callee_address[name] = target
+                call_list.append(name)
                 continue
             if words[4].startswith("#") and len(words) > 5:
                 # 'call *0x...(%rip)  # 0x...': read the pointer.
@@ -4253,10 +4289,20 @@ def show_callgraph(func_name, depth, options):
 def callees_of(func_name):
     """Callees of a function, from its 'dis' output, cached for the run."""
     if func_name not in callgraph_cache:
-        try:
-            disasm_str = exec_crash_command("dis %s" % (func_name))
-        except Exception:
-            disasm_str = ""
+        disasm_str = ""
+        addr = callee_address.get(func_name)
+        if addr:
+            # 'dis -f <start>' is the whole function, even when another
+            # function has the same name.
+            try:
+                disasm_str = exec_crash_command("dis -f %s" % addr)
+            except Exception:
+                disasm_str = ""
+        if asm_start(disasm_str) != 0:
+            try:
+                disasm_str = exec_crash_command("dis %s" % (func_name))
+            except Exception:
+                disasm_str = ""
         callgraph_cache[func_name] = get_call_list(disasm_str)
     return callgraph_cache[func_name]
 
@@ -4428,6 +4474,7 @@ def edis():
             return
         set_call_op_list()
         callgraph_cache.clear()
+        callee_address.clear()
         del callgraph_path[:]
         if o.find:
             show_call_paths(args[0], o.find, o.max_depth)

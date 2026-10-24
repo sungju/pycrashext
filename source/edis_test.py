@@ -177,6 +177,49 @@ def check_call_list():
     assert "bctrl" in edis.call_op_set and "ctrl" not in edis.call_op_set
 
 
+def check_call_list_tail_calls_and_thunks():
+    _set_arch("x86_64")
+    edis.set_call_op_list("x86_64")
+    edis.callee_address.clear()
+    text = _dis([
+        "0xffffffff81000000 <f>:\tcall\t0xffffffff81e00000 <__fentry__>",
+        "0xffffffff81000005 <f+5>:\tcall\t0xffffffff81c00000 <__x86_indirect_thunk_rax>",
+        "0xffffffff8100000a <f+10>:\tje\t0xffffffff81000020 <f+32>",
+        "0xffffffff8100000c <f+12>:\tcall\t0xffffffff81100000 <foo>",
+        "0xffffffff81000011 <f+17>:\tjmp\t0xffffffff81200000 <bar>",
+        "0xffffffff81000016 <f+22>:\tjmp\t0xffffffff81300010 <baz+16>",
+        "0xffffffff8100001b <f+27>:\tjne\t0xffffffff81000000 <f>",
+        "0xffffffff81000020 <f+32>:\tjmp\t0xffffffff81e00010 <__x86_return_thunk>",
+    ])
+    # __fentry__ and the return thunk are noise, the retpoline thunk is an
+    # indirect call, 'jmp <bar>' is a tail call; jumps inside a function
+    # (or to itself, or into the middle of another) are not calls.
+    assert edis.get_call_list(text) == ["*%rax", "foo", "bar"], edis.get_call_list(text)
+    assert edis.callee_address == {"foo": "0xffffffff81100000",
+                                   "bar": "0xffffffff81200000"}
+
+
+def check_callees_by_address():
+    # A name shared by two functions makes 'dis <name>' fail, so callees
+    # are disassembled from the address the call used.
+    _set_arch("x86_64")
+    edis.set_call_op_list("x86_64")
+    edis.callgraph_cache.clear()
+    edis.callee_address.clear()
+    _dis_output.clear()
+    _dis_output["dis root"] = _dis(["0x1000 <root>:\tcall\t0x2000 <dput>"])
+    _dis_output["dis -f 0x2000"] = _dis(["0x2000 <dput>:\tcall\t0x3000 <iput>"])
+    _dis_output["dis dput"] = "dis: dput: duplicate text symbols found:\n"
+    _dis_output["dis iput"] = _dis(["0x3000 <iput>:\tret"])
+    assert edis.callees_of("root") == ["dput"]
+    assert edis.callees_of("dput") == ["iput"]
+    assert edis.find_call_paths("root", "iput", 3, edis.callees_of) == \
+        [["root", "dput", "iput"]]
+    _dis_output.clear()
+    edis.callgraph_cache.clear()
+    edis.callee_address.clear()
+
+
 class _Opts(object):
     max_depth = 5
 
