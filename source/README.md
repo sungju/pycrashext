@@ -64,6 +64,7 @@ Every command accepts '-h' to show the available options, except 'git', which ta
 | devinfo | Storage status (SCSI hosts and devices, FC ports, stuck I/O), block and character devices, block requests, swiotlb, paravirtual I/O rings |
 | edis | Enhanced disassembly with source lines (needs remoteapi) |
 | evidence | Run a vmcore analysis's commands in one session and write their output into one evidence file |
+| follow | Walk a chain of structure members (follow task_struct <addr> mm.exe_file.f_path.dentry) without writing casts, showing every step and dumping the last member |
 | fsinfo | Filesystem information, incl. page cache breakdown per superblock |
 | git | Run 'git log/show' on remote kernel source repositories, and 'git find' to check whether an upstream patch is backported into this kernel (needs remoteapi) |
 | hangcheck | Show hung (D-state) tasks with details |

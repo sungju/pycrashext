@@ -59,6 +59,7 @@ All commands are invoked inside the crash utility as `epython <command>.py [opti
   - [screen](#screen)
   - [caseinfo](#caseinfo)
   - [git](#git)
+  - [follow](#follow)
   - [kvercmp](#kvercmp)
   - [logscan](#logscan)
   - [preempt](#preempt)
@@ -1430,6 +1431,58 @@ taint=... thirdparty=...`, is for scripts.
 **Usage:** `sysinfo [-v]` (`-v` adds every DMI field, the whole boot command
 line, every interface and tainted module). The rules are `source/sysenv.py`,
 checked by `python3 source/sysenv_test.py`.
+
+---
+
+### follow
+
+Walks a chain of structure members from an address, so that
+
+```
+crash> px ((struct file *)((struct task_struct *)0xffff95a0529a8000)->mm->exe_file)->f_path.dentry
+```
+
+becomes
+
+```
+crash> follow task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry
+```
+
+Every step is printed with its value and type, so a NULL or an unreadable
+pointer shows where the chain broke (and a mistyped member gets the closest
+member names). The last member is then dumped member by member: `struct
+<type> <address>` for a structure or union (pointer or embedded), gdb
+`print` for anything else, plus what a non-struct pointer points to.
+
+**Usage:** `follow [-a|-n] [-o] [-x|-d] <type> <address> [<path>]`
+
+- `<type>`: `task_struct`, `struct task_struct` or `union foo`
+- `<address>`: hex, with or without `0x`, or any gdb expression (`&init_task`)
+- `<path>`: members separated by `.` or `->` (either works for pointers and
+  embedded structures), with
+  - `name[N]`: an array element
+  - `name:type`: cast the value to `struct type *` (for `void *` or
+    `unsigned long` members); a type with a space or `*` is used as given
+  - `name:type@member`: `container_of()`, the value being the address of
+    `member` inside `struct type`; the member may be nested
+    (`@se.group_node`), so continue the path after it with `->`
+
+| Option | Description |
+|---|---|
+| `-a` | Also dump every structure on the way |
+| `-n` | Only the chain, no dump of the last member |
+| `-o` | Member offsets in the dumps (`struct -o`) |
+| `-x` / `-d` | Hexadecimal / decimal dumps |
+
+#### Examples
+
+```
+follow task_struct 0xffff95a0529a8000 mm.exe_file.f_path.dentry
+follow task_struct ffff95a0529a8000 mm->exe_file->f_path.dentry->d_name.name
+follow -n task_struct 0xffff95a0529a8000 files.fdt.fd[3].private_data:socket.sk
+follow -n task_struct 0xffff95a0529a8000 tasks.next:task_struct@tasks->comm
+follow -a file 0xffff95a04b6e1200 f_inode.i_sb.s_type
+```
 
 ---
 
