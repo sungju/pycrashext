@@ -2537,7 +2537,7 @@ def bt_frame_matches(words, funcname, disaddr_str):
     return normalize_address(words[4]) == normalize_address(disaddr_str)
 
 
-def set_stack_data(disasm_str, disaddr_str):
+def set_stack_data(disasm_str, disaddr_str, task=""):
     global funcname
     global stackaddr_list
     global stack_op_dict
@@ -2558,7 +2558,8 @@ def set_stack_data(disasm_str, disaddr_str):
     register_aliases = {}
 
     try:
-        bt_str = exec_crash_command("bt")
+        # 'bt' of the current context unless a pid or task was given.
+        bt_str = exec_crash_command(("bt %s" % task).strip())
     except:
         if stack_debug_enabled:
             add_stack_debug("set_stack_data: bt command failed")
@@ -2857,6 +2858,11 @@ def get_source_highlighter():
         return _source_highlighter
 
     _source_highlighter_ready = True
+    # Piped or saved output ('edis ... | grep', evidence files) gets plain
+    # text, like the rest of edis output through crashcolor.
+    if not sys.stdout.isatty():
+        _source_highlighter = None
+        return None
     try:
         from pygments import highlight
         from pygments.lexers import CLexer
@@ -2950,6 +2956,104 @@ def highlight_source_code(text, width=0, highlight_syntax=True):
     return bg_ansi + body + (" " * pad) + "\x1b[0m"
 
 
+_GRAPH_CHARS = frozenset(" +|-=*>")
+
+def asm_start(one_line):
+    """
+    Index where the instruction starts in an output line ('0x...' after an
+    optional jump-graph prefix), or -1 for a source or header line. A source
+    line containing '0x' ('   333   if (x & 0x10)') is not an instruction:
+    its prefix holds a line number, not just graph characters.
+    """
+    idx = one_line.find("0x")
+    if idx < 0:
+        return -1
+    if any(c not in _GRAPH_CHARS for c in one_line[:idx]):
+        return -1
+    return idx
+
+
+def join_around_target(before, after):
+    """
+    Join 'dis -r <addr>' (function start up to addr) and 'dis -f <addr>'
+    (addr to function end) into the whole function. Both contain the
+    instruction at addr, so 'after' is used from the line following it.
+    """
+    lines = after.splitlines()
+    for i, line in enumerate(lines):
+        if line.startswith("0x"):
+            rest = lines[i + 1:]
+            if not rest:
+                return before
+            return before.rstrip("\n") + "\n" + "\n".join(rest) + "\n"
+    return before
+
+
+def context_rows(lines, target, count):
+    """
+    Rows of `lines` to print for 'edis -C count': `count` instructions each
+    side of the target, the source lines between them, and the source block
+    the first one belongs to. None when the target is not found, meaning
+    print everything.
+    """
+    asm_rows = [row for row, line in enumerate(lines) if asm_start(line) >= 0]
+    target_pos = None
+    for pos, row in enumerate(asm_rows):
+        line = lines[row]
+        if is_target_line(line[asm_start(line):].split(), target):
+            target_pos = pos
+            break
+    if target_pos is None:
+        return None
+
+    kept = asm_rows[max(0, target_pos - count):target_pos + count + 1]
+    shown = set(kept)
+    for i, row in enumerate(kept):
+        r = row - 1
+        if i == 0:
+            # Walk back over skipped instructions to the source block
+            # that the first shown instruction belongs to.
+            while r >= 0 and asm_start(lines[r]) >= 0:
+                r = r - 1
+        while r >= 0 and asm_start(lines[r]) < 0:
+            shown.add(r)
+            r = r - 1
+    return shown
+
+
+def jump_sources(lines, limit=4):
+    """
+    For each instruction row that jumps land on, a note naming where they
+    come from: {row: "from f+4, f+30"}, listing up to `limit` of them.
+    crash prints '<f+N>' offsets in decimal and so does this.
+    """
+    set_jump_op_list()
+    rows = {}
+    origins = {}
+    for row, line in enumerate(lines):
+        idx = asm_start(line)
+        if idx < 0:
+            continue
+        words = line[idx:].split()
+        if len(words) < 2:
+            continue
+        rows[words[0]] = row
+        if len(words) > 2 and check_jump_op(words[2]):
+            target = get_branch_target(words)
+            if target != "":
+                origins.setdefault(target, []).append(words[1].rstrip(":").strip("<>"))
+
+    notes = {}
+    for target, names in origins.items():
+        if target not in rows:
+            continue
+        note = "from " + ", ".join(names[:limit])
+        if len(names) > limit:
+            note = note + ", +%d more" % (len(names) - limit)
+        notes[rows[target]] = note
+    return notes
+
+
 TARGET_MARKER = "  <=="
 
 def parse_target(ins_addr):
@@ -3025,6 +3129,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
     if ins_addr.startswith("/"):
         ins_addr = ins_addr[1:] # get rid of the first slash
+    target = parse_target(ins_addr)
 
     if ":" in ins_addr or \
        (not ins_addr.startswith(".") and "." in ins_addr): # It's for ppc
@@ -3046,6 +3151,13 @@ def disasm(ins_addr, o, args, cmd_path_list):
         kernel_ver, release_ver = get_kernel_version()
         disasm_str = "/usr/src/debug/kernel-%s/linux-%s/%s" % \
                     (kernel_ver, release_ver, ins_addr)
+    elif o.context > 0 and target is not None and not o.fullsource:
+        # Whole function, so stack tracking sees the prologue; only the
+        # window around the address is printed.
+        base = "" if o.noaction else "-l"
+        before = exec_crash_command("dis %s -r %s" % (base, ins_addr))
+        after = exec_crash_command("dis %s -f %s" % (base, ins_addr))
+        disasm_str = join_around_target(before, after)
     else:
         command_str = "dis %s %s" % (options, ins_addr)
         disasm_str = exec_crash_command(command_str)
@@ -3088,8 +3200,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
         result_str = draw_branches(result_str, o.jump_op_list)
 
     stack_debug_enabled = o.debug
-    set_stack_data(disasm_str, ins_addr) # To retreive stack data
-    target = parse_target(ins_addr)
+    set_stack_data(disasm_str, ins_addr, o.task) # To retreive stack data
     if o.stackaddr != "":
         stackaddr_list = [int(o.stackaddr, 16)]
 
@@ -3110,8 +3221,27 @@ def disasm(ins_addr, o, args, cmd_path_list):
     if term_width <= 0:
         term_width = 80
 
-    for one_line in result_str.splitlines():
-        idx = one_line.find("0x")
+    result_lines = result_str.splitlines()
+    shown = None
+    if o.context > 0 and target is not None:
+        shown = context_rows(result_lines, target, o.context)
+    skipped = False
+    # The graph already draws where jumps come from.
+    jump_notes = {} if o.graph else jump_sources(result_lines)
+
+    for row, one_line in enumerate(result_lines):
+        idx = asm_start(one_line)
+        if shown is not None and row not in shown:
+            if idx >= 0:
+                interpret_one_line(one_line[idx:]) # Keep stack tracking going
+            skipped = True
+            continue
+        if skipped:
+            crashcolor.set_color(crashcolor.DARKGRAY)
+            print("  ...")
+            crashcolor.set_color(crashcolor.RESET)
+            skipped = False
+
         if idx >= 0:
             line = one_line[idx:]
             graph = one_line[:idx]
@@ -3135,8 +3265,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
             if m is not None:
                 line = m.group("line_number")
             if line == None:
-                prog = re.compile(r"/[a-zA-Z]")
-                line = prog.match(one_line)
+                m = re.search(r"/[a-zA-Z]", one_line)
+                if m is not None:
+                    line = one_line[m.start():]
 
             if line == None:
                 line = one_line
@@ -3208,6 +3339,15 @@ def disasm(ins_addr, o, args, cmd_path_list):
         if len(words) > 2:
             if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
                 line = ("%s%s" % (words[-1], find_symbol(words[-1]))).join(line.rsplit(words[-1], 1))
+            notes = []
+            if o.explain and is_disasm_line:
+                explain = get_operand_explanation(one_line[asm_start(one_line):])
+                if explain != "":
+                    notes.append(explain)
+            if row in jump_notes:
+                notes.append(jump_notes[row])
+            if notes:
+                line = line + "  ; " + "; ".join(notes)
             if is_target:
                 line = line + TARGET_MARKER
             color_str = get_colored_asm(words[2].strip())
@@ -3292,7 +3432,9 @@ def disasm(ins_addr, o, args, cmd_path_list):
                 print("    [D] %s" % dbg)
             crashcolor.set_color(crashcolor.RESET)
 
-
+    if skipped:
+        crashcolor.set_color(crashcolor.DARKGRAY)
+        print("  ...")
     crashcolor.set_color(crashcolor.RESET)
 
 
@@ -3485,6 +3627,28 @@ def edis():
                   default="",
                   dest="stackaddr",
                   help="Set stack address for disasm operation")
+
+    op.add_option("-p", "--task",
+                  action="store",
+                  type="string",
+                  default="",
+                  dest="task",
+                  help="Read stack values from this pid or task's backtrace" \
+                    + " instead of the current context's")
+
+    op.add_option("-C", "--context",
+                  action="store",
+                  type="int",
+                  default=0,
+                  dest="context",
+                  help="With an address or func+offset, show only N" \
+                    + " instructions before and after it")
+
+    op.add_option("-e", "--explain",
+                  action="store_true",
+                  dest="explain",
+                  default=False,
+                  help="Explain each instruction in plain English")
 
     op.add_option("-g", "--graph",
                   action="store_true",

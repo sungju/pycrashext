@@ -902,11 +902,20 @@ so the graph stays narrow. A jump leaves its line with `+--*`, arrives with
 indirect calls (`*%rax`, `*x1`) without following them, and shows
 `(recursive)` instead of walking into a function already on the path.
 
+Without `-g`, an instruction that jumps land on ends with a note naming where
+they come from, such as `; from f+4, f+30`. `-C` still reads the whole
+function, so stack values stay right, and prints `...` where lines are left
+out. Source lines are syntax-highlighted only on a terminal; piped or saved
+output is plain text.
+
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
 | `-r` | `--reverse` | | Display all instructions from the start of the function |
 | `-l` | `--list` | | Compatibility flag for `dis -l` |
 | `-S` | `--stack` | `<addr>` | Set stack address for disasm operation |
+| `-p` | `--task` | `<pid\|task>` | Read stack values from this task's backtrace instead of the current context's |
+| `-C` | `--context` | `N` | With an address or `func+offset`, show only N instructions each side of it |
+| `-e` | `--explain` | | Explain each instruction in plain English |
 | `-g` | `--graph` | | Display jump graph on the left |
 | `-f` | `--full` | | Display full function code |
 | `-b` | `--symbol` | | Translate symbols if possible |
@@ -925,6 +934,9 @@ edis -g schedule               # Disassemble with jump graph
 edis -f schedule               # Full function disassembly
 edis -r 0xffffffff81234567     # From function start to address
 edis -r schedule+0x12          # Same, by symbol and offset
+edis -C 8 0xffffffff81234567   # 8 instructions each side of the address
+edis -r -p 1234 0xffffffff81234567  # Stack values from pid 1234's backtrace
+edis -e schedule               # Plain-English note on each instruction
 edis mm/swap_state.c:333       # Source line (needs remoteapi)
 edis -b schedule               # Disassemble with symbol translation
 edis -c do_page_fault          # Show call graph

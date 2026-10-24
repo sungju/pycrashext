@@ -252,6 +252,78 @@ def check_target_line():
     assert not t(line, None)
 
 
+_FUNC = [
+    "/usr/src/debug/kernel-5.14.0/linux-5.14.0/kernel/f.c: 10",
+    "0xffffffff81000000 <f>:\tpush   %rbp",
+    "0xffffffff81000001 <f+1>:\ttest   %rdi,%rdi",
+    "0xffffffff81000004 <f+4>:\tje     0xffffffff8100000a <f+10>",
+    "/usr/src/debug/kernel-5.14.0/linux-5.14.0/kernel/f.c: 12",
+    "0xffffffff81000006 <f+6>:\tcall   0xffffffff81100000 <g>",
+    "0xffffffff8100000a <f+10>:\tmov    0x58(%rdi),%rax",
+    "0xffffffff8100000e <f+14>:\tjne    0xffffffff8100000a <f+10>",
+    "0xffffffff81000010 <f+16>:\tret",
+]
+
+
+def check_asm_start():
+    a = edis.asm_start
+    assert a("0xffffffff81000000 <f>:\tpush   %rbp") == 0
+    assert a("+-*0xffffffff81000000 <f>:\tpush   %rbp") == 3
+    assert a("    333   if (flags & 0x10)") == -1
+    assert a("|| 333   x = 0x10;") == -1
+    assert a("/usr/src/debug/f.c: 12") == -1
+
+
+def check_join_around_target():
+    before = "\n".join(_FUNC[:7]) + "\n"           # start .. f+10
+    after = "\n".join(_FUNC[6:]) + "\n"            # f+10 .. end
+    assert edis.join_around_target(before, after) == "\n".join(_FUNC) + "\n"
+    # Target is the last instruction, or 'dis -f' failed: keep 'before'.
+    assert edis.join_around_target(before, _FUNC[6] + "\n") == before
+    assert edis.join_around_target(before, "dis: invalid option") == before
+
+
+def check_context_rows():
+    target = edis.parse_target("f+0xa")
+    shown = edis.context_rows(_FUNC, target, 1)
+    # f+6 and f+14 around f+10, and the f.c:12 header f+6 belongs to.
+    assert shown == {4, 5, 6, 7}, sorted(shown)
+
+    # f+16 is the first shown instruction; its source header (row 4) is
+    # found by walking back over the skipped ones.
+    shown = edis.context_rows(_FUNC, edis.parse_target("f+16"), 0)
+    assert shown == {4, 8}, sorted(shown)
+
+    assert edis.context_rows(_FUNC, edis.parse_target("f+99"), 1) is None
+
+
+def check_jump_sources():
+    _set_arch("x86_64")
+    assert edis.jump_sources(_FUNC) == {6: "from f+4, f+14"}
+
+    lines = ["0x10 <f>:\tret"]
+    for i in range(6):
+        lines.append("0x%x <f+%d>:\tjmp\t0x10 <f>" % (0x20 + i, i + 1))
+    assert edis.jump_sources(lines) == \
+        {0: "from f+1, f+2, f+3, f+4, +2 more"}
+
+
+def check_plain_source_when_piped():
+    class _Pipe(object):
+        def isatty(self):
+            return False
+
+    saved = sys.stdout
+    sys.stdout = _Pipe()
+    edis._source_highlighter_ready = False
+    try:
+        out = edis.highlight_source_code("   10   int x = 0;", 80)
+    finally:
+        sys.stdout = saved
+        edis._source_highlighter_ready = False
+    assert out == "   10   int x = 0;", repr(out)
+
+
 def check_call_color():
     _set_arch("x86_64")
     edis.set_asm_colors()
