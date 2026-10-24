@@ -20,12 +20,6 @@ import crashcolor
 import crashhelper
 
 
-JUMP_ORIGIN = 0x10000
-JUMP_TARGET = 0x20000
-JUMP_CORNER = 0x30000
-
-MAX_JMP_LINES = 200
-
 # Register name constants (normalized keys for register_dict)
 REG_STACK_POINTER = "%rsp"   # Stack pointer (all architectures)
 REG_FRAME_POINTER = "%rbp"   # Frame pointer (all architectures)
@@ -1540,23 +1534,23 @@ def get_stack_handler(arch):
             result = handler.handle_instruction(words, result_str)
     """
     # x86 family
-    if arch in ("x86_64", "i386", "i686", "athlon"):
+    if get_arch_family(arch) == "x86":
         return X86StackHandler()
 
     # ARM family
-    elif arch.startswith("arm") or arch in ("aarch64",):
+    elif get_arch_family(arch) == "arm":
         return ArmStackHandler()
 
     # PowerPC family
-    elif arch.startswith("ppc"):
+    elif get_arch_family(arch) == "ppc":
         return PpcStackHandler()
 
     # s390x (IBM Z)
-    elif arch.startswith("s390") or arch in ("s390x",):
+    elif get_arch_family(arch) == "s390x":
         return S390xStackHandler()
 
     # RISC-V family
-    elif arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
+    elif get_arch_family(arch) == "riscv":
         return RiscVStackHandler()
 
     # Unsupported architecture
@@ -1631,96 +1625,98 @@ def get_branch_target(words):
     return target
 
 
-# Set by draw_branches() when a function has more jumps than MAX_JMP_LINES.
-jump_graph_truncated = False
+def assign_jump_lanes(jumps):
+    """
+    Give each jump a lane so jumps whose line ranges don't overlap share one.
+
+    jumps: list of (start_row, end_row). Shorter jumps are placed first and
+    get the lanes nearest the code, like 'objdump --visualize-jumps', so
+    nested jumps read inside-out.
+    Returns (lane per jump in input order, number of lanes); lane 0 is the
+    one next to the code.
+    """
+    order = sorted(range(len(jumps)),
+                   key=lambda i: (jumps[i][1] - jumps[i][0], jumps[i][0]))
+    lanes = []          # lanes[n] = list of (start, end) placed in lane n
+    result = [0] * len(jumps)
+    for i in order:
+        start, end = jumps[i]
+        for n, spans in enumerate(lanes):
+            if all(end < s or start > e for s, e in spans):
+                spans.append((start, end))
+                result[i] = n
+                break
+        else:
+            lanes.append([(start, end)])
+            result[i] = len(lanes) - 1
+    return result, len(lanes)
+
 
 def draw_branches(disasm_str, jump_op_list):
-    global jump_graph_truncated
-
-    jump_graph_truncated = False
-    result = ""
+    """
+    Prefix each line with a jump graph. A jump leaves its line with '+--*'
+    and arrives with '+==>'; '|' carries it between. A jump out of the
+    function runs to the last line with no arrow.
+    """
+    lines = disasm_str.splitlines()
+    total_num = len(lines)
     asm_addr_dict = {}
-    loc = 0
-    for line in disasm_str.splitlines():
+    for loc, line in enumerate(lines):
         if line.startswith("0x"):
-            words = line.split()
-            asm_addr_dict[words[0]] = loc
-        loc = loc + 1
+            asm_addr_dict[line.split()[0]] = loc
 
-    total_num = loc
-    jmp_dict = [[0 for x in range(MAX_JMP_LINES)] for y in range(total_num)]
-    has_jmp_dict = [0 for x in range(total_num)]
-    loc = 0
-    jmp_found = 1
     set_jump_op_list()
-    for line in disasm_str.splitlines():
-        if line.startswith("0x"):
-            words = line.split()
-            is_jump_op = False
-            if jump_op_list == "":
-                if check_jump_op(words[2]):
-                    is_jump_op = True
-            else:
-                if words[2] in jump_op_list:
-                    is_jump_op = True
+    jumps = []          # (origin_row, target_row or None)
+    for loc, line in enumerate(lines):
+        if not line.startswith("0x"):
+            continue
+        words = line.split()
+        if len(words) < 3:
+            continue
+        if jump_op_list == "":
+            is_jump_op = check_jump_op(words[2])
+        else:
+            is_jump_op = words[2] in jump_op_list
+        if is_jump_op:
+            jumps.append((loc, asm_addr_dict.get(get_branch_target(words))))
 
-            if is_jump_op:
-                if jmp_found >= MAX_JMP_LINES:
-                    jump_graph_truncated = True
-                    break
+    spans = []
+    for origin, target in jumps:
+        end = target if target is not None else total_num - 1
+        spans.append((min(origin, end), max(origin, end)))
+    lane_of, num_lanes = assign_jump_lanes(spans)
 
-                jmpaddr = get_branch_target(words)
-                if jmpaddr != "" and jmpaddr in asm_addr_dict:
-                    target_idx = asm_addr_dict[jmpaddr]
-                else:
-                    target_idx = total_num
-
-                current_idx = loc
-                start = min(current_idx, target_idx)
-                end = max(current_idx, target_idx)
-                if end > total_num:
-                    end = total_num
-
-                for i in range(start, end):
-                    jmp_dict[i][jmp_found - 1] = jmp_dict[i][jmp_found - 1] + 1
-                    has_jmp_dict[i] = has_jmp_dict[i] + 1
-                jmp_dict[current_idx][jmp_found] = JUMP_ORIGIN # current
-                jmp_dict[current_idx][jmp_found - 1] = JUMP_CORNER # current
-                if target_idx < total_num:
-                    jmp_dict[target_idx][jmp_found] = JUMP_TARGET # target
-                    jmp_dict[target_idx][jmp_found - 1] = JUMP_CORNER # target
-
-                jmp_found = jmp_found + 1
-        loc = loc + 1
+    # cells[row][column]: column 0 is the leftmost (outermost lane).
+    cells = [[" "] * num_lanes for _ in range(total_num)]
+    horizontal = [None] * total_num   # (column, char) of the line leaving a lane
+    for (origin, target), (start, end), lane in zip(jumps, spans, lane_of):
+        col = num_lanes - 1 - lane
+        for row in range(start, end + 1):
+            if cells[row][col] == " ":
+                cells[row][col] = "|"
+        ends = [(origin, "-")]
+        if target is not None:
+            ends.append((target, "="))
+        for row, char in ends:
+            cells[row][col] = "+"
+            # Arrivals win over departures on a line that is both, and the
+            # outermost lane's line is drawn so it crosses the inner ones.
+            prev = horizontal[row]
+            if prev is None or (char == "=" and prev[1] == "-") or \
+               (char == prev[1] and col < prev[0]):
+                horizontal[row] = (col, char)
 
     result = ""
-    loc = 0
-    for line in disasm_str.splitlines():
-        jmp_str = " "
-        line_str = ""
-        for i in range(0, jmp_found):
-            if (jmp_dict[loc][i] & JUMP_ORIGIN) == JUMP_ORIGIN:
-                jmp_str = "-"
-            if (jmp_dict[loc][i] & JUMP_TARGET) == JUMP_TARGET:
-                jmp_str = "="
-            if (jmp_dict[loc][i] & JUMP_CORNER) == JUMP_CORNER:
-                jmp_str = "+"
-            if jmp_dict[loc][i] > 0 and jmp_str == " ":
-                jmp_str = "|"
-
-            if i == jmp_found - 1:
-                if jmp_str == "-":
-                    jmp_str = "*"
-                if jmp_str == "=":
-                    jmp_str = ">"
-
-            line_str = line_str + jmp_str
-            if jmp_str != "-" and jmp_str != "=" and \
-               jmp_str != ">" and jmp_str != '*':
-                jmp_str = " "
-
-        result = result + line_str + line + "\n"
-        loc = loc + 1
+    for row, line in enumerate(lines):
+        row_cells = cells[row]
+        marker = " "
+        if horizontal[row] is not None:
+            col, char = horizontal[row]
+            for c in range(col + 1, num_lanes):
+                if row_cells[c] != "+":
+                    row_cells[c] = char
+            marker = ">" if char == "=" else "*"
+        result = result + "".join(row_cells) + marker + line + "\n"
 
     return result
 
@@ -1779,23 +1775,6 @@ register_dict = {}  # Fixed: was [], should be dict
 register_aliases = {}  # Tracks registers that hold SP snapshots (e.g., mov %rsp,%r13)
 stack_debug_enabled = False
 stack_debug_lines = []
-
-
-def reset_stack_state():
-    """Reset all stack analysis state - call before analyzing new function"""
-    global stackaddr_list, funcname, stack_op_dict, cur_count
-    global stack_unit, stack_offset, register_dict, register_aliases
-    global stack_debug_lines
-
-    stackaddr_list = []
-    funcname = ""
-    stack_op_dict = {}
-    cur_count = 0
-    stack_unit = 0
-    stack_offset = 0
-    register_dict = {}
-    register_aliases = {}
-    stack_debug_lines = []
 
 
 def reset_stack_debug():
@@ -1904,117 +1883,6 @@ def get_instruction_data_size(opcode, arch=None, default_size=None):
     return default_size
 
 
-def extract_arm_mem_operand(words):
-    """
-    Extract ARM memory operand information from disassembly words.
-
-    Handles various ARM addressing modes:
-    - [sp, #offset] - offset addressing
-    - [sp,#offset]! - pre-indexed with writeback
-    - [sp],#offset - post-indexed
-    - [x29, #offset] - frame pointer relative
-
-    Args:
-        words: List of disassembly tokens
-
-    Returns:
-        dict with keys:
-        - 'base_reg': Base register name ('sp', 'x29', etc.) or None
-        - 'offset': Offset value (int)
-        - 'writeback': True if writeback mode (pre or post index)
-        - 'post_index': True if post-index, False if pre-index
-        - 'found': True if valid memory operand found
-    """
-    result = {
-        'base_reg': None,
-        'offset': 0,
-        'writeback': False,
-        'post_index': False,
-        'found': False
-    }
-
-    if len(words) < 4:
-        return result
-
-    # Look for [reg pattern in last 2 words
-    stack_word = ""
-    second_word = ""
-
-    # Check last word for [reg
-    last_word = words[-1]
-    if len(words) >= 2:
-        second_last = words[-2]
-    else:
-        second_last = ""
-
-    # Pattern 1: [sp, #offset] - two separate words
-    if "[" in second_last and "]" in last_word:
-        stack_word = second_last
-        second_word = last_word
-    # Pattern 2: [sp,#offset] - single word
-    elif "[" in last_word and "]" in last_word:
-        stack_word = last_word
-        second_word = ""
-    else:
-        return result
-
-    # Extract base register
-    if "[sp" in stack_word:
-        result['base_reg'] = "sp"
-    elif "[x29" in stack_word or "[fp" in stack_word:
-        result['base_reg'] = "x29"
-    else:
-        # Try to extract any register name
-        import re
-        match = re.search(r'\[([a-z0-9]+)', stack_word)
-        if match:
-            result['base_reg'] = match.group(1)
-        else:
-            return result
-
-    result['found'] = True
-
-    # Check for post-index: [sp],#offset
-    if stack_word.endswith("]") and second_word.startswith("#"):
-        result['post_index'] = True
-        result['writeback'] = True
-        result['offset'] = parse_offset(second_word)
-        return result
-
-    # Check for pre-index writeback: [sp,#offset]!
-    if stack_word.endswith("]!") or (second_word and second_word.endswith("]!")):
-        result['writeback'] = True
-        result['post_index'] = False
-
-    # Extract offset from stack_word or second_word
-    combined = stack_word + second_word
-    offset_start = combined.find("#")
-    if offset_start >= 0:
-        offset_end = combined.find("]")
-        if offset_end > offset_start:
-            offset_str = combined[offset_start:offset_end]
-            result['offset'] = parse_offset(offset_str)
-    else:
-        # No explicit offset, might be [sp] with offset 0
-        result['offset'] = 0
-
-    return result
-
-
-def add_caution(result_str, msg):
-    """
-    Add a caution message to result string.
-
-    Args:
-        result_str: Current result string
-        msg: Caution message
-
-    Returns:
-        str: result_str with caution appended
-    """
-    return result_str + "  ;CAUTION: " + msg
-
-
 def add_stack_debug(msg):
     if stack_debug_enabled:
         stack_debug_lines.append(msg)
@@ -2035,7 +1903,7 @@ def get_operand_explanation(one_line):
 
     ops = [o.strip() for o in operands.split(",")] if operands else []
 
-    if arch in ("x86_64", "i386", "i686", "athlon"):
+    if get_arch_family(arch) == "x86":
         if opcode.startswith("mov") and len(ops) == 2:
             # Provide detailed explanation for mov variants
             src = ops[0]
@@ -2087,7 +1955,7 @@ def get_operand_explanation(one_line):
             return "stack/frame memory access via %s" % ("rsp/rbp")
         return ""
 
-    if arch.startswith("arm") or arch in ("aarch64"):
+    if get_arch_family(arch) == "arm":
         if opcode == "stp" and operands:
             return "store register pair to memory%s" % (" with writeback" if operands.find("]!") >= 0 else "")
         if opcode == "ldp" and operands:
@@ -2106,7 +1974,7 @@ def get_operand_explanation(one_line):
             return "return from function"
         return ""
 
-    if arch.startswith("ppc"):
+    if get_arch_family(arch) == "ppc":
         if opcode in ("stdu", "stwu") and operands.find("(r1)") >= 0:
             return "store with update: write value and update stack pointer r1"
         if opcode in ("std", "stw", "stb", "sth"):
@@ -2121,7 +1989,7 @@ def get_operand_explanation(one_line):
             return "branch/jump control flow"
         return ""
 
-    if arch.startswith("s390") or arch in ("s390x"):
+    if get_arch_family(arch) == "s390x":
         if opcode in ("stg", "stmg", "st", "sty"):
             return "store register(s) to memory"
         if opcode in ("lg", "lmg", "l", "ly"):
@@ -2134,7 +2002,7 @@ def get_operand_explanation(one_line):
             return "jump/branch control flow"
         return ""
 
-    if arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
+    if get_arch_family(arch) == "riscv":
         if opcode in ("sd", "sw", "sh", "sb"):
             return "store register to memory"
         if opcode in ("ld", "lw", "lh", "lhu", "lb", "lbu"):
@@ -2228,7 +2096,7 @@ def interpret_one_line(one_line):
                 internal_count = internal_count + 1
 
             cur_count = cur_count + 1
-            if stack_debug_enabled and "%rsp" in register_dict and arch in ("x86_64", "i386", "i686", "athlon"):
+            if stack_debug_enabled and "%rsp" in register_dict and get_arch_family(arch) == "x86":
                 vsp = []
                 for a in register_dict["%rsp"]:
                     vsp.append(a - stack_offset - (cur_count * stack_unit))
@@ -2252,217 +2120,6 @@ def interpret_one_line(one_line):
         fp_state = ",".join("0x%x" % a for a in register_dict.get("%rbp", [])) if "%rbp" in register_dict else "NONE"
         sp_state = ",".join("0x%x" % a for a in register_dict.get("%rsp", [])) if "%rsp" in register_dict else "NONE"
         add_stack_debug("RET at %s: rbp=%s rsp=%s cur_count=%d" % (words[0], fp_state, sp_state, cur_count))
-
-    return result_str
-
-
-def s390x_stack_reg_op(words, result_str):
-    """
-    DEPRECATED: Legacy s390x stack register operations handler.
-
-    This function has been replaced by S390xStackHandler class.
-    Kept for reference during migration period.
-
-    See S390xStackHandler for the new implementation.
-    """
-
-    # Ensure we have stack pointer initialized
-    if "%rsp" not in register_dict:
-        return result_str
-
-    # Handle stack pointer adjustment: aghi r15, -160 or lay r15, -160(r15)
-    if words[2] == "aghi" and len(words) >= 4 and words[3].startswith("r15,"):
-        # Extract offset: r15,-160 -> -160
-        offset_str = words[3].split(",")[-1]
-        offset = parse_offset(offset_str)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + offset
-            reg_list.append(actual_addr)
-        register_dict["%rsp"] = reg_list
-        add_stack_debug("sp update: r15 += %d => %s" %
-                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    elif words[2] == "lay" and len(words) >= 4 and words[3].startswith("r15,"):
-        # lay r15, -160(r15) - load address
-        if "(r15)" in words[3]:
-            offset_str = words[3].split(",")[1].split("(")[0]
-            offset = parse_offset(offset_str)
-            reg_list = []
-            for stackaddr in register_dict["%rsp"]:
-                actual_addr = stackaddr + offset
-                reg_list.append(actual_addr)
-            register_dict["%rsp"] = reg_list
-            add_stack_debug("sp update: lay r15,%d(r15) => %s" %
-                            (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    # Handle store operations: stg r14, 112(r15) or stmg r6,r14,48(r15)
-    elif words[2] in ("stg", "stmg", "st", "sty") and len(words) > 3:
-        if "(r15)" in words[3]:
-            # Extract offset from format: 112(r15)
-            parts = words[3].split(",")
-            for part in parts:
-                if "(r15)" in part:
-                    offset_str = part.split("(")[0]
-                    offset = parse_offset(offset_str)
-
-                    # Determine data size
-                    if words[2] in ("stg", "stmg"):
-                        data_size = 8  # 64-bit
-                    else:
-                        data_size = 4  # 32-bit
-
-                    stackaddr_list = register_dict["%rsp"]
-                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
-
-                    if words[2] == "stmg":
-                        result_str = result_str + " ..."  # Multiple registers
-                    break
-
-    # Handle load operations: lg r14, 112(r15) or lmg r6,r14,48(r15)
-    elif words[2] in ("lg", "lmg", "l", "ly") and len(words) > 3:
-        if "(r15)" in words[3]:
-            # Extract offset from format: 112(r15)
-            parts = words[3].split(",")
-            for part in parts:
-                if "(r15)" in part:
-                    offset_str = part.split("(")[0]
-                    offset = parse_offset(offset_str)
-
-                    # Determine data size
-                    if words[2] in ("lg", "lmg"):
-                        data_size = 8  # 64-bit
-                    else:
-                        data_size = 4  # 32-bit
-
-                    stackaddr_list = register_dict["%rsp"]
-                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
-
-                    if words[2] == "lmg":
-                        result_str = result_str + " ..."  # Multiple registers
-                    break
-
-    # Handle frame pointer operations with r11 or r13
-    elif len(words) > 3 and ("(r11)" in words[3] or "(r13)" in words[3]):
-        # Similar to r15, but using frame pointer
-        reg_name = "r11" if "(r11)" in words[3] else "r13"
-        parts = words[3].split(",")
-        for part in parts:
-            if "(" + reg_name + ")" in part:
-                offset_str = part.split("(")[0]
-                offset = parse_offset(offset_str)
-
-                # Use frame pointer if available
-                if "%rbp" in register_dict:
-                    result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
-                break
-
-    return result_str
-
-
-def riscv_stack_reg_op(words, result_str):
-    """
-    DEPRECATED: Legacy RISC-V stack register operations handler.
-
-    This function has been replaced by RiscVStackHandler class.
-    Kept for reference during migration period.
-
-    See RiscVStackHandler for the new implementation.
-    """
-
-    # Ensure we have stack pointer initialized
-    if "%rsp" not in register_dict:
-        return result_str
-
-    # Handle stack pointer adjustment: addi sp, sp, -32
-    if words[2] == "addi" and len(words) >= 4 and words[3].startswith("sp,sp,"):
-        # Extract offset: sp,sp,-32 -> -32
-        offset_str = words[3].split(",")[-1]
-        offset = parse_offset(offset_str)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + offset
-            reg_list.append(actual_addr)
-        register_dict["%rsp"] = reg_list
-        add_stack_debug("sp update: sp += %d => %s" %
-                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    # Handle frame pointer setup: mv s0, sp or addi s0, sp, 0
-    elif (words[2] == "mv" and len(words) >= 4 and
-          (words[3] == "s0,sp" or words[3] == "fp,sp")):
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            reg_list.append(stackaddr)
-        register_dict["%rbp"] = reg_list
-
-    # Handle store operations: sd ra, 24(sp) or sw a0, 8(sp)
-    elif words[2] in ("sd", "sw", "sh", "sb") and len(words) > 3:
-        if "(sp)" in words[3]:
-            # Extract offset from format: 24(sp)
-            parts = words[3].split(",")
-            for part in parts:
-                if "(sp)" in part:
-                    offset_str = part.split("(")[0]
-                    offset = parse_offset(offset_str)
-
-                    # Determine data size
-                    if words[2] == "sd":
-                        data_size = 8  # 64-bit
-                    elif words[2] == "sw":
-                        data_size = 4  # 32-bit
-                    elif words[2] == "sh":
-                        data_size = 2  # 16-bit
-                    else:  # sb
-                        data_size = 1  # 8-bit
-
-                    stackaddr_list = register_dict["%rsp"]
-                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
-                    break
-
-    # Handle load operations: ld ra, 24(sp) or lw a0, 8(sp)
-    elif words[2] in ("ld", "lw", "lh", "lhu", "lb", "lbu") and len(words) > 3:
-        if "(sp)" in words[3]:
-            # Extract offset from format: 24(sp)
-            parts = words[3].split(",")
-            for part in parts:
-                if "(sp)" in part:
-                    offset_str = part.split("(")[0]
-                    offset = parse_offset(offset_str)
-
-                    # Determine data size
-                    if words[2] == "ld":
-                        data_size = 8  # 64-bit
-                    elif words[2] == "lw":
-                        data_size = 4  # 32-bit
-                    elif words[2] in ("lh", "lhu"):
-                        data_size = 2  # 16-bit
-                    else:  # lb, lbu
-                        data_size = 1  # 8-bit
-
-                    stackaddr_list = register_dict["%rsp"]
-                    result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
-                    break
-
-    # Handle operations with frame pointer: ld a0, 16(s0) or ld a0, 16(fp)
-    elif len(words) > 3:
-        stack_word = ""
-        use_fp = False
-        for word in words[3:]:
-            if "(s0)" in word or "(fp)" in word or "(x8)" in word:
-                stack_word = word
-                use_fp = True
-                break
-
-        if stack_word != "" and use_fp:
-            parts = stack_word.split(",")
-            for part in parts:
-                if "(s0)" in part or "(fp)" in part or "(x8)" in part:
-                    offset_str = part.split("(")[0]
-                    offset = parse_offset(offset_str)
-
-                    if "%rbp" in register_dict:
-                        result_str = result_str + format_stack_data(register_dict["%rbp"], offset, stack_unit)
-                    break
 
     return result_str
 
@@ -2500,93 +2157,6 @@ def stack_reg_op(words, result_str):
     return result_str
 
 
-def ppc_stack_reg_op(words, result_str):
-    """
-    DEPRECATED: Legacy PPC/PPC64 stack register operations handler.
-
-    This function has been replaced by PpcStackHandler class.
-    Kept for reference during migration period.
-
-    See PpcStackHandler for the new implementation.
-    """
-
-    # Ensure we have stack pointer initialized
-    if "%rsp" not in register_dict:
-        return result_str
-
-    # Handle stack pointer adjustment: addi r1, r1, offset
-    if words[2] == "addi" and len(words) >= 4 and words[3].startswith("r1,r1,"):
-        # Extract offset: r1,r1,-128 -> -128
-        offset_str = words[3].split(",")[-1]
-        offset = parse_offset(offset_str)
-        reg_list = []
-        for stackaddr in register_dict["%rsp"]:
-            actual_addr = stackaddr + offset
-            reg_list.append(actual_addr)
-        register_dict["%rsp"] = reg_list
-        add_stack_debug("sp update: r1 += %d => %s" %
-                        (offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-    # Handle stack operations with (r1): std r17,-120(r1)
-    elif len(words) > 3 and "(r1)" in words[3]:
-        op_words = words[3].split(",")
-        for op in op_words:
-            if "(r1)" in op:
-                # Extract offset from format: -120(r1)
-                if len(op) > 4:
-                    offset_str = op[:-4]
-                    offset = parse_offset(offset_str)
-                else:
-                    offset = 0
-
-                # Determine data size based on instruction
-                data_size = stack_unit  # Default to 8 bytes (doubleword)
-                if words[2] in ("stw", "lwz", "lwzu", "stwu"):
-                    data_size = 4  # Word operations
-                elif words[2] in ("sth", "lhz", "lha"):
-                    data_size = 2  # Halfword operations
-                elif words[2] in ("stb", "lbz"):
-                    data_size = 1  # Byte operations
-
-                stackaddr_list = register_dict["%rsp"]
-                result_str = result_str + format_stack_data(stackaddr_list, offset, data_size)
-
-                # Handle instructions that update the stack pointer
-                # stdu: store doubleword with update (r1 = effective address)
-                # stwu: store word with update
-                if words[2] in ("stdu", "stwu") and op_words[0] == "r1":
-                    result_stack_addr_list = []
-                    for stackaddr in stackaddr_list:
-                        actual_addr = stackaddr + offset
-                        result_stack_addr_list.append(actual_addr)
-                    register_dict["%rsp"] = result_stack_addr_list
-                    add_stack_debug("sp update: %s updates r1 by %d => %s" %
-                                    (words[2], offset, ",".join(["0x%x" % a for a in register_dict["%rsp"]])))
-
-                break
-
-    # Handle multiple register store/load: stmw, lmw
-    elif words[2] in ("stmw", "lmw") and len(words) > 3:
-        # stmw/lmw stores/loads multiple words starting from specified register
-        # Format: stmw r27,-20(r1)
-        if "(r1)" in words[3]:
-            op_words = words[3].split(",")
-            for op in op_words:
-                if "(r1)" in op:
-                    if len(op) > 4:
-                        offset_str = op[:-4]
-                        offset = parse_offset(offset_str)
-                    else:
-                        offset = 0
-
-                    stackaddr_list = register_dict["%rsp"]
-                    result_str = result_str + format_stack_data(stackaddr_list, offset, 4)
-                    result_str = result_str + " ..."  # Multiple registers
-                    break
-
-    return result_str
-
-
 def parse_offset(offset_str):
     """
     Parse an offset string that can be in various formats.
@@ -2618,15 +2188,6 @@ def parse_offset(offset_str):
             return int(offset_str, 10)
     except ValueError:
         # Return 0 for unparseable values
-        return 0
-
-
-def get_stack_offset(stack_word):
-    """Legacy wrapper for parse_offset() to maintain compatibility"""
-    op_words = stack_word.split(",")
-    if len(op_words) > 1:
-        return parse_offset(op_words[1])
-    else:
         return 0
 
 
@@ -2867,17 +2428,6 @@ def parse_aarch64_mem_operand(operand_text):
     return None, 0, False, False
 
 
-def is_aarch64_immediate(token):
-    tok = token.strip().rstrip(",")
-    if tok == "":
-        return False
-    if tok.startswith("#"):
-        return True
-    if tok.startswith("0x") or tok.startswith("-0x"):
-        return True
-    return tok.lstrip("-").isdigit()
-
-
 def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
     """
     Estimate ENTRY SP (before prologue stack allocation) from bt frame address
@@ -2963,570 +2513,6 @@ def estimate_aarch64_runtime_sp(frame_addr, disasm_str):
     return frame_addr
 
 
-
-def _arm_handle_frame_pointer_setup(words, result_str):
-    """Handle ARM frame pointer setup: mov x29, sp / add x29, sp, #imm"""
-    opcode = words[2]
-
-    if opcode == "mov" and len(words) >= 5 and words[3].startswith("x29") and words[4].startswith("sp"):
-        # mov x29, sp - frame pointer equals current SP
-        register_dict[REG_FRAME_POINTER] = register_dict[REG_STACK_POINTER][:]
-        if stack_debug_enabled:
-            add_stack_debug("fp update: x29 <- sp, fp=%s" %
-                           (",".join("0x%x" % a for a in register_dict[REG_FRAME_POINTER])))
-        return result_str, True
-
-    elif opcode == "add" and len(words) >= 6 and words[3].startswith("x29") and words[4].startswith("sp"):
-        # add x29, sp, #offset - frame pointer is SP + offset
-        fp_offset = parse_offset(words[5].rstrip(","))
-        register_dict[REG_FRAME_POINTER] = [addr + fp_offset for addr in register_dict[REG_STACK_POINTER]]
-        if stack_debug_enabled:
-            add_stack_debug("fp update: x29 <- sp + %d, fp=%s" %
-                           (fp_offset, ",".join("0x%x" % a for a in register_dict[REG_FRAME_POINTER])))
-        return result_str, True
-
-    return result_str, False
-
-
-def _arm_handle_sp_from_fp(words, result_str):
-    """Handle ARM SP restore from FP: mov sp, x29"""
-    opcode = words[2]
-
-    if opcode == "mov" and len(words) >= 5 and words[3].startswith("sp"):
-        src_reg = words[4].rstrip(",")
-        if src_reg.startswith("x29") or src_reg.startswith("fp"):
-            if REG_FRAME_POINTER in register_dict:
-                register_dict[REG_STACK_POINTER] = register_dict[REG_FRAME_POINTER][:]
-                if stack_debug_enabled:
-                    add_stack_debug("sp update: sp <- fp, sp=%s" %
-                                   (",".join("0x%x" % a for a in register_dict[REG_STACK_POINTER])))
-                return result_str, True
-            else:
-                return add_caution(result_str, "missing frame pointer value"), True
-        elif src_reg.startswith("sp"):
-            return result_str, True  # mov sp, sp - no-op
-        else:
-            return add_caution(result_str, "skipped register sp move"), True
-
-    return result_str, False
-
-
-def _arm_handle_sp_adjustment(words, result_str):
-    """Handle ARM SP adjustment: sub/add sp, sp, #imm"""
-    opcode = words[2]
-
-    if opcode not in ("sub", "add") or len(words) < 5 or words[3] != "sp,":
-        return result_str, False
-
-    src_token = words[4].rstrip(",")
-    rhs_token = words[5].rstrip(",") if len(words) > 5 else ""
-
-    # Handle compact style: sp,sp,#0x40
-    if "," in words[4]:
-        parts = words[4].split(",")
-        src_token = parts[0]
-        if len(parts) > 1 and parts[1]:
-            rhs_token = parts[1]
-
-    sign = -1 if opcode == "sub" else 1
-
-    if src_token == "sp":
-        if is_aarch64_immediate(rhs_token):
-            delta = sign * parse_offset(rhs_token)
-            update_register_tracking(REG_STACK_POINTER, delta,
-                                    "sp update: sp <- sp %s %s" % ("+" if delta >= 0 else "-", abs(delta)))
-        else:
-            result_str = add_caution(result_str, "skipped register sp adjust")
-        return result_str, True
-
-    elif src_token in ("x29", "fp"):
-        if REG_FRAME_POINTER not in register_dict:
-            return add_caution(result_str, "missing frame pointer value"), True
-        elif is_aarch64_immediate(rhs_token):
-            delta = sign * parse_offset(rhs_token)
-            register_dict[REG_STACK_POINTER] = [addr + delta for addr in register_dict[REG_FRAME_POINTER]]
-            if stack_debug_enabled:
-                add_stack_debug("sp update: sp <- fp %s %s => %s" %
-                               ("+" if delta >= 0 else "-", abs(delta),
-                                ",".join("0x%x" % a for a in register_dict[REG_STACK_POINTER])))
-        else:
-            result_str = add_caution(result_str, "skipped register sp base adjust")
-        return result_str, True
-    else:
-        return add_caution(result_str, "unsupported sp base register"), True
-
-
-def _arm_handle_store_pair(words, result_str):
-    """Handle ARM store pair: stp x29, x30, [sp,#-64]!"""
-    if words[2] != "stp" or len(words) < 5:
-        return result_str, False
-
-    # Extract register names
-    reg1 = words[3].rstrip(",") if len(words) > 3 else None
-    reg2 = words[4].rstrip(",") if len(words) > 4 else None
-
-    # Check for [sp in the instruction
-    found_sp = False
-    stack_word = ""
-
-    if len(words) >= 6 and "[sp" in words[-2]:
-        stack_word = words[-1]
-        found_sp = True
-    elif "[sp" in words[-1]:
-        stack_word = words[-1]
-        found_sp = True
-
-    if not found_sp:
-        return result_str, False
-
-    # Determine writeback mode
-    writeback = stack_word.endswith("]!")
-
-    # Extract offset
-    if stack_word.startswith("[sp"):
-        offset_start = stack_word.find("#")
-        if offset_start > 0:
-            offset_end = stack_word.find("]")
-            offset_str = stack_word[offset_start:offset_end]
-        else:
-            offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
-    else:
-        offset_str = stack_word[1:stack_word.find("]")]
-
-    offset = parse_offset(offset_str)
-
-    # Handle pre-index writeback
-    if writeback:
-        update_register_tracking(REG_STACK_POINTER, offset)
-        offset = 0  # Access at new SP value
-
-    result_str += format_stack_data_pair(register_dict[REG_STACK_POINTER], offset, stack_unit,
-                                         reg1=reg1, reg2=reg2)
-    return result_str, True
-
-
-def _arm_handle_load_pair(words, result_str):
-    """Handle ARM load pair: ldp x29, x30, [sp],#16"""
-    if words[2] != "ldp" or len(words) < 5:
-        return result_str, False
-
-    # Extract register names
-    reg1 = words[3].rstrip(",") if len(words) > 3 else None
-    reg2 = words[4].rstrip(",") if len(words) > 4 else None
-
-    # Check for [sp in the instruction
-    found_sp = False
-    stack_word = ""
-    post_index = False
-    sp_offset = 0
-
-    # Pattern: ldp x29, x30, [sp],#16 - post-index
-    if len(words) >= 6 and "[sp" in words[-2]:
-        stack_word = words[-2]
-        stack_op = words[-1].lstrip("#").rstrip("]")
-        sp_offset = parse_offset(stack_op)
-        post_index = True
-        found_sp = True
-    # Pattern: ldp x19, x20, [sp, #16] - normal
-    elif "[sp" in words[-1]:
-        stack_word = words[-1]
-        found_sp = True
-    elif len(words) >= 6 and "[sp" in words[-2]:
-        stack_word = words[-1]
-        found_sp = True
-
-    if not found_sp:
-        return result_str, False
-
-    # Extract offset from stack_word
-    if stack_word.startswith("[sp"):
-        offset_start = stack_word.find("#")
-        if offset_start > 0:
-            offset_end = stack_word.find("]")
-            offset_str = stack_word[offset_start:offset_end]
-        else:
-            offset_str = stack_word[stack_word.find(",")+1:stack_word.find("]")]
-    else:
-        if "]" in stack_word:
-            offset_str = stack_word[1:stack_word.find("]")]
-        else:
-            offset_str = stack_word
-
-    offset = parse_offset(offset_str)
-
-    result_str += format_stack_data_pair(register_dict[REG_STACK_POINTER], offset, stack_unit,
-                                         reg1=reg1, reg2=reg2)
-
-    # Handle post-index writeback
-    if post_index:
-        update_register_tracking(REG_STACK_POINTER, sp_offset)
-
-    return result_str, True
-
-
-def _arm_handle_store_single(words, opcode, operands, result_str):
-    """Handle ARM single store: str x19, [sp,#16]"""
-    if opcode not in ("str", "stur", "strb", "strh", "strw"):
-        return result_str, False
-
-    reg_name = words[3].rstrip(",") if len(words) > 3 else None
-    mem_pos = operands.find("[sp")
-
-    if mem_pos < 0:
-        return result_str, False
-
-    mem_op = operands[mem_pos:]
-    base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
-
-    if base_reg != "sp":
-        return result_str, False
-
-    # Determine data size from instruction
-    data_size = get_instruction_data_size(opcode, default_size=stack_unit)
-
-    # Handle pre-index writeback
-    if writeback_pre:
-        update_register_tracking(REG_STACK_POINTER, offset,
-                                "sp writeback(pre): sp <- sp %+d" % offset)
-        offset = 0  # Access at new SP value
-
-    result_str += format_stack_data(register_dict[REG_STACK_POINTER], offset, data_size, reg=reg_name)
-
-    # Handle post-index writeback
-    if post_index:
-        update_register_tracking(REG_STACK_POINTER, offset,
-                                "sp writeback(post): sp <- sp %+d" % offset)
-
-    return result_str, True
-
-
-def _arm_handle_load_single(words, opcode, operands, result_str):
-    """Handle ARM single load: ldr x19, [sp,#16]"""
-    if opcode not in ("ldr", "ldur", "ldrb", "ldrh", "ldrw", "ldrsw", "ldrsh", "ldrsb"):
-        return result_str, False
-
-    reg_name = words[3].rstrip(",") if len(words) > 3 else None
-    mem_pos = operands.find("[sp")
-
-    if mem_pos < 0:
-        return result_str, False
-
-    mem_op = operands[mem_pos:]
-    base_reg, offset, writeback_pre, post_index = parse_aarch64_mem_operand(mem_op)
-
-    if base_reg != "sp":
-        return result_str, False
-
-    # Determine data size from instruction
-    data_size = get_instruction_data_size(opcode, default_size=stack_unit)
-
-    # Handle pre-index writeback
-    if writeback_pre:
-        update_register_tracking(REG_STACK_POINTER, offset,
-                                "sp writeback(pre): sp <- sp %+d" % offset)
-        offset = 0  # Access at new SP value
-
-    result_str += format_stack_data(register_dict[REG_STACK_POINTER], offset, data_size, reg=reg_name)
-
-    # Handle post-index writeback
-    if post_index:
-        update_register_tracking(REG_STACK_POINTER, offset,
-                                "sp writeback(post): sp <- sp %+d" % offset)
-
-    return result_str, True
-
-
-def _arm_handle_frame_access(words, result_str):
-    """Handle ARM frame pointer access: ldr x0, [x29,#16]"""
-    if len(words) <= 3:
-        return result_str, False
-
-    # Check for [x29] or [fp] or [sp] addressing
-    stack_word = ""
-    use_fp = False
-
-    for word in words[3:]:
-        if word.startswith("[x29") or word.startswith("[fp"):
-            stack_word = word
-            use_fp = True
-            break
-        elif word.startswith("[sp"):
-            stack_word = word
-            break
-
-    if not stack_word or "]" not in stack_word:
-        return result_str, False
-
-    # Extract offset
-    stack_word = stack_word[1:stack_word.find("]")]
-    offset = parse_offset(stack_word)
-
-    # Use frame pointer or stack pointer
-    if use_fp and REG_FRAME_POINTER in register_dict:
-        result_str += format_stack_data(register_dict[REG_FRAME_POINTER], offset, stack_unit)
-    elif REG_STACK_POINTER in register_dict:
-        result_str += format_stack_data(register_dict[REG_STACK_POINTER], offset, stack_unit)
-
-    return result_str, True
-
-
-def arm_stack_reg_op(words, result_str):
-    """
-    DEPRECATED: Legacy ARM/AArch64 stack register operations handler.
-
-    This function has been replaced by ArmStackHandler class.
-    Kept for reference during migration period.
-
-    See ArmStackHandler for the new implementation.
-    """
-    # Ensure we have stack pointer initialized
-    if REG_STACK_POINTER not in register_dict:
-        return result_str
-
-    opcode = words[2]
-    operands = "".join(words[3:]) if len(words) > 3 else ""
-
-    # Try each handler in order
-    handlers = [
-        lambda: _arm_handle_frame_pointer_setup(words, result_str),
-        lambda: _arm_handle_sp_from_fp(words, result_str),
-        lambda: _arm_handle_sp_adjustment(words, result_str),
-        lambda: _arm_handle_store_pair(words, result_str),
-        lambda: _arm_handle_load_pair(words, result_str),
-        lambda: _arm_handle_store_single(words, opcode, operands, result_str),
-        lambda: _arm_handle_load_single(words, opcode, operands, result_str),
-        lambda: _arm_handle_frame_access(words, result_str),
-    ]
-
-    for handler in handlers:
-        result_str, handled = handler()
-        if handled:
-            return result_str
-
-    return result_str
-
-
-# Keep the old implementation commented for reference during migration
-"""
-OLD arm_stack_reg_op implementation (330+ lines):
-Refactored into 8 focused helper functions averaging 30-40 lines each.
-
-Benefits:
-- Each function has single responsibility
-- Easier to test individual operations
-- Reduced complexity (McCabe < 10 per function)
-- Better code reuse with extract_arm_mem_operand() and update_register_tracking()
-"""
-
-
-# Old ARM implementation removed - see new refactored ARM handlers above
-# (_arm_handle_store_pair, _arm_handle_load_pair, etc.)
-
-
-def _x86_handle_frame_setup(words, result_str):
-    """Handle x86 frame pointer setup: mov %rsp,%rbp"""
-    if words[2] == "mov" and words[3] == "%rsp,%rbp":
-        register_dict[REG_FRAME_POINTER] = [
-            addr - stack_offset - (cur_count * stack_unit)
-            for addr in register_dict[REG_STACK_POINTER]
-        ]
-        return result_str, True
-    return result_str, False
-
-
-def _x86_handle_stack_alloc(words, result_str):
-    """Handle x86 stack allocation: sub $0x40,%rsp"""
-    if words[2] != "sub" or not words[3].endswith(",%rsp"):
-        return result_str, False
-
-    op_words = words[3].split(",")
-    if "%" in op_words[0]:  # Can't use register values
-        return add_caution(result_str, "skipped register sub"), True
-
-    value_to_sub = parse_offset(op_words[0])
-    register_dict[REG_STACK_POINTER] = [
-        addr - value_to_sub - (cur_count * stack_unit)
-        for addr in register_dict[REG_STACK_POINTER]
-    ]
-    if stack_debug_enabled:
-        add_stack_debug("sp update: rsp -= %d => %s" %
-                       (value_to_sub, ",".join("0x%x" % a for a in register_dict[REG_STACK_POINTER])))
-    return result_str, True
-
-
-def _x86_handle_stack_cleanup(words, result_str):
-    """Handle x86 stack cleanup: add $0x40,%rsp"""
-    if words[2] != "add" or not words[3].endswith(",%rsp"):
-        return result_str, False
-
-    op_words = words[3].split(",")
-    if "%" in op_words[0]:  # Can't use register values
-        return add_caution(result_str, "skipped register add"), True
-
-    value_to_add = parse_offset(op_words[0])
-    register_dict[REG_STACK_POINTER] = [
-        addr + value_to_add
-        for addr in register_dict[REG_STACK_POINTER]
-    ]
-    if stack_debug_enabled:
-        add_stack_debug("sp update: rsp += %d => %s" %
-                       (value_to_add, ",".join("0x%x" % a for a in register_dict[REG_STACK_POINTER])))
-    return result_str, True
-
-
-def _x86_handle_pop(words, result_str):
-    """Handle x86 pop instruction: pop %rbx"""
-    if words[2] not in ("pop", "popq"):
-        return result_str, False
-
-    # Update stack pointer (no value annotation displayed for pop operations)
-    update_register_tracking(REG_STACK_POINTER, stack_unit,
-                            "sp update: pop -> rsp += %d" % stack_unit)
-    return result_str, True
-
-
-def _x86_handle_enter(words, result_str):
-    """Handle x86 enter instruction: enter $0x10,$0x00"""
-    if words[2] != "enter":
-        return result_str, False
-
-    op_words = words[3].split(",")
-    frame_size = parse_offset(op_words[0]) if op_words else 0
-
-    # Simulate push %rbp
-    register_dict[REG_STACK_POINTER] = [
-        addr - stack_unit
-        for addr in register_dict[REG_STACK_POINTER]
-    ]
-    register_dict[REG_FRAME_POINTER] = register_dict[REG_STACK_POINTER][:]
-
-    # Subtract frame size
-    register_dict[REG_STACK_POINTER] = [
-        addr - frame_size
-        for addr in register_dict[REG_STACK_POINTER]
-    ]
-
-    if stack_debug_enabled:
-        add_stack_debug("sp update: enter frame_size=%d => rsp=%s rbp=%s" %
-                       (frame_size,
-                        ",".join("0x%x" % a for a in register_dict[REG_STACK_POINTER]),
-                        ",".join("0x%x" % a for a in register_dict[REG_FRAME_POINTER])))
-    return result_str, True
-
-
-def _x86_handle_leave(words, result_str):
-    """Handle x86 leave instruction: leave"""
-    if words[2] != "leave":
-        return result_str, False
-
-    # leave: mov %rbp,%rsp; pop %rbp
-    if REG_FRAME_POINTER in register_dict:
-        register_dict[REG_STACK_POINTER] = register_dict[REG_FRAME_POINTER][:]
-        update_register_tracking(REG_STACK_POINTER, stack_unit,
-                                "sp update: leave -> rsp from rbp then +%d" % stack_unit)
-    return result_str, True
-
-
-def _x86_handle_frame_access(words, result_str):
-    """Handle x86 frame pointer operations: mov %rax,-0x30(%rbp)"""
-    if len(words) <= 3 or "(%rbp)" not in words[3]:
-        return result_str, False
-
-    op_words = words[3].split(",")
-    for op in op_words:
-        if "(%rbp)" in op and REG_FRAME_POINTER in register_dict:
-            if op.startswith("*"):
-                op = op[1:]
-
-            # Extract offset
-            offset = parse_offset(op[:-6]) if len(op) > 6 else 0
-
-            if words[2] != "lea":  # lea doesn't dereference
-                result_str += format_stack_data(register_dict[REG_FRAME_POINTER],
-                                               offset + stack_unit, stack_unit)
-            else:
-                # For lea, show the address itself
-                parts = []
-                for stackaddr in register_dict[REG_FRAME_POINTER]:
-                    parts.append("0x%x" % (stackaddr + offset + stack_unit))
-                result_str += "    ; " + ", ".join(parts)
-            break
-
-    return result_str, True
-
-
-def _x86_handle_sp_access(words, result_str):
-    """Handle x86 stack pointer operations: mov %rdx,0x18(%rsp)"""
-    if len(words) <= 3 or "(%rsp)" not in words[3]:
-        return result_str, False
-
-    op_words = words[3].split(",")
-    for op in op_words:
-        if "(%rsp)" in op:
-            if op.startswith("*"):
-                op = op[1:]
-
-            # Handle indexed addressing: 0x10(%rsp,%rbx,8)
-            if "," in op:
-                # Complex addressing mode
-                base_part = op.split(",")[0]
-                offset = parse_offset(base_part[:-6]) if len(base_part) > 6 else 0
-                result_str = add_caution(result_str, "indexed addressing")
-            else:
-                # Simple offset: 0x18(%rsp) or (%rsp)
-                offset = parse_offset(op[:-6]) if len(op) > 6 else 0
-
-            if words[2] != "lea":  # lea doesn't dereference
-                result_str += format_stack_data(register_dict[REG_STACK_POINTER],
-                                               offset, stack_unit)
-            else:
-                # For lea, show the address itself
-                parts = []
-                for stackaddr in register_dict[REG_STACK_POINTER]:
-                    parts.append("0x%x" % (stackaddr + offset))
-                result_str += "    ; " + ", ".join(parts)
-            break
-
-    return result_str, True
-
-
-def x86_stack_reg_op(words, result_str):
-    """
-    DEPRECATED: Legacy x86/x86_64 stack register operations handler.
-
-    This function has been replaced by X86StackHandler class.
-    Kept for reference during migration period.
-
-    See X86StackHandler for the new implementation.
-    """
-    # Ensure we have stack pointer initialized
-    if REG_STACK_POINTER not in register_dict:
-        return result_str
-
-    # Try each handler in order
-    handlers = [
-        lambda: _x86_handle_frame_setup(words, result_str),
-        lambda: _x86_handle_stack_alloc(words, result_str),
-        lambda: _x86_handle_stack_cleanup(words, result_str),
-        lambda: _x86_handle_pop(words, result_str),
-        lambda: _x86_handle_enter(words, result_str),
-        lambda: _x86_handle_leave(words, result_str),
-        lambda: _x86_handle_frame_access(words, result_str),
-        lambda: _x86_handle_sp_access(words, result_str),
-    ]
-
-    for handler in handlers:
-        result_str, handled = handler()
-        if handled:
-            return result_str
-
-    return result_str
-
-
-# Refactored x86 handler from 163 lines to 8 focused functions
-# averaging 15-25 lines each. Improved readability and maintainability.
-
-
 def normalize_address(addr_str):
     """'0xFFFF8...', 'ffff8...' and '0x0ffff8...' all become 'ffff8...'.
     Anything that is not hex (a symbol) is returned unchanged."""
@@ -3595,7 +2581,7 @@ def set_stack_data(disasm_str, disaddr_str):
         return
 
     arch = sys_info.machine
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
+    if get_arch_family(arch) == "x86":
         stack_op_dict = {
             "push" : 0,
         }
@@ -3626,7 +2612,7 @@ def set_stack_data(disasm_str, disaddr_str):
                     add_stack_debug("set_stack_data: matched funcname='%s' at %s, will extract from caller frame" % (funcname, disaddr_str))
                 continue
 
-    elif (arch.startswith("arm") or (arch in ("aarch64"))):
+    elif get_arch_family(arch) == "arm":
         stack_op_dict = {
         }
         stack_unit = 8
@@ -3658,7 +2644,7 @@ def set_stack_data(disasm_str, disaddr_str):
                 add_stack_debug("set_stack_data: frame=0x%x estimated_entry_sp=0x%x" %
                                 (frame_addr, runtime_sp))
 
-    elif (arch.startswith("ppc")):
+    elif get_arch_family(arch) == "ppc":
         stack_op_dict = {}
         stack_unit = 8
         stack_offset = 0
@@ -3675,7 +2661,7 @@ def set_stack_data(disasm_str, disaddr_str):
             if bt_frame_matches(words, funcname, disaddr_str):
                 stackfound = 1
 
-    elif (arch.startswith("s390") or arch in ("s390x")):
+    elif get_arch_family(arch) == "s390x":
         stack_op_dict = {}
         stack_unit = 8
         stack_offset = 0
@@ -3698,9 +2684,9 @@ def set_stack_data(disasm_str, disaddr_str):
             if bt_frame_matches(words, funcname, disaddr_str):
                 stackfound = 1
 
-    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+    elif get_arch_family(arch) == "riscv":
         stack_op_dict = {}
-        if arch in ("riscv64"):
+        if arch == "riscv64":
             stack_unit = 8
         else:
             stack_unit = 4
@@ -3730,7 +2716,7 @@ def set_asm_colors():
     global arg_color_dict
 
     arch = sys_info.machine
-    if (arch in ("x86_64", "i386", "i686", "athlon")):
+    if get_arch_family(arch) == "x86":
         asm_color_dict = {
             # Prefix match: covers 'callq' and the plain 'call' newer
             # binutils prints.
@@ -3749,7 +2735,7 @@ def set_asm_colors():
             "r8" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    elif (arch.startswith("arm") or (arch in ("aarch64"))):
+    elif get_arch_family(arch) == "arm":
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
@@ -3757,7 +2743,7 @@ def set_asm_colors():
             "ldp" : crashcolor.YELLOW | crashcolor.UNDERLINE,
             "ret" : crashcolor.MAGENTA | crashcolor.BOLD,
         }
-    elif (arch.startswith("ppc")):
+    elif get_arch_family(arch) == "ppc":
         asm_color_dict = {
             "bl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "b" : crashcolor.BLUE | crashcolor.BOLD,
@@ -3772,7 +2758,7 @@ def set_asm_colors():
             "r9" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r10" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    elif (arch.startswith("s390") or arch in ("s390x")):
+    elif get_arch_family(arch) == "s390x":
         asm_color_dict = {
             "brasl" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "bras" : crashcolor.LIGHTRED | crashcolor.BOLD,
@@ -3792,7 +2778,7 @@ def set_asm_colors():
             "r5" : crashcolor.UNDERLINE | crashcolor.CYAN,
             "r6" : crashcolor.UNDERLINE | crashcolor.CYAN,
         }
-    elif (arch.startswith("riscv") or arch in ("riscv64", "riscv32")):
+    elif get_arch_family(arch) == "riscv":
         asm_color_dict = {
             "jal" : crashcolor.LIGHTRED | crashcolor.BOLD,
             "jalr" : crashcolor.LIGHTRED | crashcolor.BOLD,
@@ -3964,6 +2950,46 @@ def highlight_source_code(text, width=0, highlight_syntax=True):
     return bg_ansi + body + (" " * pad) + "\x1b[0m"
 
 
+TARGET_MARKER = "  <=="
+
+def parse_target(ins_addr):
+    """
+    What 'edis' was pointed at, to mark that instruction: ('addr', hex digits)
+    for an address, ('sym', name, offset) for 'func+0x12', or None for a bare
+    function name, which names no single instruction.
+    """
+    s = ins_addr.strip()
+    if "+" in s:
+        name, off = s.split("+", 1)
+        try:
+            return ("sym", name, int(off, 0))
+        except ValueError:
+            return None
+    if s.lower().startswith("0x") or \
+       (len(s) >= 8 and all(c in "0123456789abcdefABCDEF" for c in s)):
+        return ("addr", normalize_address(s))
+    return None
+
+
+def is_target_line(words, target):
+    """True when the split 'dis' line '0x... <func+N>: op ...' is `target`.
+    crash prints the offset in '<func+N>' in decimal."""
+    if target is None or len(words) < 2:
+        return False
+    if target[0] == "addr":
+        return normalize_address(words[0]) == target[1]
+    sym = words[1].rstrip(":")
+    if not (sym.startswith("<") and sym.endswith(">")):
+        return False
+    sym = sym[1:-1]
+    name, _, off = sym.partition("+")
+    try:
+        offset = int(off) if off else 0
+    except ValueError:
+        return False
+    return name == target[1] and offset == target[2]
+
+
 def disasm(ins_addr, o, args, cmd_path_list):
     global asm_color_dict
 
@@ -4063,6 +3089,7 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
     stack_debug_enabled = o.debug
     set_stack_data(disasm_str, ins_addr) # To retreive stack data
+    target = parse_target(ins_addr)
     if o.stackaddr != "":
         stackaddr_list = [int(o.stackaddr, 16)]
 
@@ -4177,9 +3204,12 @@ def disasm(ins_addr, o, args, cmd_path_list):
             debug_lines = []
 
         words = line.split()
+        is_target = is_disasm_line and is_target_line(words, target)
         if len(words) > 2:
             if (o.symbol and is_address(words[-1]) == True): # Translate address into symbol
                 line = ("%s%s" % (words[-1], find_symbol(words[-1]))).join(line.rsplit(words[-1], 1))
+            if is_target:
+                line = line + TARGET_MARKER
             color_str = get_colored_asm(words[2].strip())
             constsym = ""
             if len(words) > 3:
@@ -4194,7 +3224,11 @@ def disasm(ins_addr, o, args, cmd_path_list):
                     constsym = '  ;' + constsym
 
             idx = line.find(words[2], len(words[0]) + len(words[1]) + 1)
+            if is_target:
+                crashcolor.set_color(crashcolor.LIGHTRED | crashcolor.BOLD)
             print(line[:idx], end='')
+            if is_target:
+                crashcolor.set_color(crashcolor.RESET)
             if color_str != None:
                 crashcolor.set_color(color_str)
             print(line[idx:idx+len(words[2])], end='')
@@ -4260,11 +3294,6 @@ def disasm(ins_addr, o, args, cmd_path_list):
 
 
     crashcolor.set_color(crashcolor.RESET)
-    if o.graph and jump_graph_truncated:
-        crashcolor.set_color(crashcolor.LIGHTYELLOW)
-        print("NOTE: jump graph shows only the first %d jumps" %
-              (MAX_JMP_LINES - 1))
-        crashcolor.set_color(crashcolor.RESET)
 
 
 class LineType(object):
@@ -4548,205 +3577,6 @@ def edis():
     else:
         print("ERROR> edis needs an address or a symbol\n",
               "\ti.e) edis 0xffffffff81c76fca or edis hugetlb_init")
-
-
-# ============================================================================
-# TEMPLATE: Adding a New Architecture Handler
-# ============================================================================
-"""
-MIGRATION GUIDE: Adding a New Architecture to StackHandler Architecture
-
-This guide shows how to migrate an architecture from the legacy function-based
-approach to the new StackHandler class architecture.
-
-STEP 1: Create Handler Class
------------------------------
-Create a new handler class inheriting from StackHandler:
-
-    class MipsStackHandler(StackHandler):
-        '''
-        MIPS architecture stack handler.
-
-        Handles MIPS stack operations including:
-        - Stack pointer adjustments: addiu $sp, $sp, -32
-        - Frame pointer setup: move $fp, $sp
-        - Store operations: sw $ra, 28($sp)
-        - Load operations: lw $ra, 28($sp)
-        '''
-
-        def __init__(self):
-            super(MipsStackHandler, self).__init__("mips")
-
-            # MIPS specific register patterns
-            self.sp_patterns = ("$sp", "$29")
-            self.fp_patterns = ("$fp", "$30")
-
-        def handle_instruction(self, words, result_str):
-            '''Process MIPS instruction for stack operations.'''
-
-            if not self.has_stack_pointer():
-                return result_str
-
-            if len(words) < 3:
-                return result_str
-
-            opcode = words[2]
-            operands = words[3] if len(words) > 3 else ""
-
-            # Dispatch to handlers
-            if opcode in ("addiu", "addi"):
-                return self._handle_sp_adjust(words, operands, result_str)
-            elif opcode == "move":
-                return self._handle_move(words, operands, result_str)
-            elif opcode in ("sw", "sd", "sh", "sb"):
-                return self._handle_store(words, opcode, operands, result_str)
-            elif opcode in ("lw", "ld", "lh", "lb"):
-                return self._handle_load(words, opcode, operands, result_str)
-
-            return result_str
-
-
-STEP 2: Implement Handler Methods
-----------------------------------
-Break down the logic into focused handler methods:
-
-    def _handle_sp_adjust(self, words, operands, result_str):
-        '''Handle stack pointer adjustment: addiu $sp, $sp, -32'''
-        if not operands.startswith("$sp,$sp,"):
-            return result_str
-
-        offset_str = operands.split(",")[-1]
-        offset = parse_offset(offset_str)
-        self.update_sp(offset)
-        return result_str
-
-    def _handle_store(self, words, opcode, operands, result_str):
-        '''Handle store operations: sw $ra, 28($sp)'''
-        if "($sp)" not in operands:
-            return result_str
-
-        offset, found = extract_mem_offset(operands, "$sp")
-        if not found:
-            return result_str
-
-        data_size = self.get_instruction_size(opcode)
-        return result_str + self.format_sp_data(offset, data_size)
-
-
-STEP 3: Add Instruction Sizes (if needed)
-------------------------------------------
-If your architecture has specific instruction size mappings, add them to
-INSTRUCTION_SIZES dictionary:
-
-    INSTRUCTION_SIZES = {
-        # ... existing entries ...
-        "mips": {
-            "sd": 8, "ld": 8,
-            "sw": 4, "lw": 4,
-            "sh": 2, "lh": 2,
-            "sb": 1, "lb": 1,
-        },
-    }
-
-
-STEP 4: Register in Factory
-----------------------------
-Add your handler to get_stack_handler() factory function:
-
-    def get_stack_handler(arch):
-        if arch.startswith("riscv") or arch in ("riscv64", "riscv32"):
-            return RiscVStackHandler()
-        elif arch.startswith("mips") or arch in ("mips64", "mips32"):
-            return MipsStackHandler()
-        # ... more handlers ...
-        return None
-
-
-STEP 5: Test and Validate
---------------------------
-1. Test with real crash dumps from the target architecture
-2. Compare output with legacy handler (if migrating existing code)
-3. Verify all instruction types are handled correctly
-4. Check debug output with -r flag
-
-Example test command:
-    edis -r function_name
-
-
-STEP 6: Deprecate Legacy Handler
-----------------------------------
-Once validated, mark the old handler as deprecated:
-
-    def mips_stack_reg_op(words, result_str):
-        '''
-        DEPRECATED: Legacy MIPS stack register operations handler.
-        This function has been replaced by MipsStackHandler class.
-        '''
-        # ... keep old code for reference ...
-
-
-BENEFITS OF NEW ARCHITECTURE:
------------------------------
-1. Testability: Each handler method can be unit tested independently
-2. Reusability: Common operations inherit from StackHandler base class
-3. Extensibility: Adding new instruction types requires minimal changes
-4. Maintainability: Smaller, focused methods (avg 15-25 lines vs 100-300)
-5. Documentation: Clear interface and method contracts
-6. Consistency: All architectures follow same patterns
-
-REFERENCE IMPLEMENTATION:
--------------------------
-See RiscVStackHandler class for a complete working example.
-The RISC-V handler demonstrates:
-- Complete instruction dispatch pattern
-- Use of base class utilities
-- Proper offset extraction
-- Frame pointer handling
-- Debug logging integration
-
-COMMON BASE CLASS UTILITIES:
-----------------------------
-Available to all handler subclasses:
-
-    # Stack pointer operations
-    self.has_stack_pointer()           # Check if SP initialized
-    self.get_sp_addresses()            # Get SP address list
-    self.update_sp(offset, debug_msg)  # Update SP by offset
-    self.set_sp(address_list)          # Set SP to specific addresses
-
-    # Frame pointer operations
-    self.has_frame_pointer()           # Check if FP initialized
-    self.get_fp_addresses()            # Get FP address list
-    self.update_fp(offset, debug_msg)  # Update FP by offset
-    self.set_fp(address_list)          # Set FP to specific addresses
-
-    # Common patterns
-    self.copy_sp_to_fp()               # Frame setup (FP = SP)
-    self.copy_fp_to_sp()               # Frame teardown (SP = FP)
-
-    # Data formatting
-    self.format_sp_data(offset, size)  # Format data at SP+offset
-    self.format_fp_data(offset, size)  # Format data at FP+offset
-
-    # Utilities
-    self.get_instruction_size(opcode)  # Get data size for opcode
-    self.add_debug(msg)                # Add debug message
-
-ESTIMATED MIGRATION EFFORT:
----------------------------
-Based on RiscVStackHandler migration experience:
-
-- Simple architecture (RISC-V, MIPS): 2-3 days
-- Medium complexity (PPC, s390x): 3-5 days
-- Complex architecture (x86, ARM): 5-7 days
-
-Time includes: coding, testing, validation, documentation.
-
-QUESTIONS?
-----------
-Review RiscVStackHandler implementation and base class StackHandler
-for detailed examples and patterns.
-"""
 
 
 if ( __name__ == '__main__'):

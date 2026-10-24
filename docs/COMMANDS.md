@@ -892,7 +892,15 @@ traceinfo -A 0xffffffff81...    # Identify BPF code at address
 
 Enhanced disassembly with color highlighting, jump graphs, source line integration, and call graph analysis.
 
-**Usage:** `edis [options] <function|address>`
+**Usage:** `edis [options] <function|address|function+offset|file.c:line>`
+
+When given an address or `function+offset`, the matching instruction is shown
+in bold red with a `<==` marker at the end of the line (with `-r`, it is the
+last line). `-g` puts jumps whose line ranges don't overlap in the same column,
+so the graph stays narrow. A jump leaves its line with `+--*`, arrives with
+`+==>`, and a jump out of the function runs to the last line. `-c` lists
+indirect calls (`*%rax`, `*x1`) without following them, and shows
+`(recursive)` instead of walking into a function already on the path.
 
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
@@ -916,6 +924,8 @@ edis schedule                  # Disassemble schedule()
 edis -g schedule               # Disassemble with jump graph
 edis -f schedule               # Full function disassembly
 edis -r 0xffffffff81234567     # From function start to address
+edis -r schedule+0x12          # Same, by symbol and offset
+edis mm/swap_state.c:333       # Source line (needs remoteapi)
 edis -b schedule               # Disassemble with symbol translation
 edis -c do_page_fault          # Show call graph
 edis -c do_page_fault -m 3     # Call graph with max depth 3

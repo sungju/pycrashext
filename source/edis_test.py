@@ -109,7 +109,6 @@ def check_draw_branches_aarch64():
         "0xffff80001000000c <f+12>:\tret",
     ])
     lines = edis.draw_branches(text, "").splitlines()
-    assert not edis.jump_graph_truncated
     graph = [l[:l.find("0x")] for l in lines]
     assert graph[0].endswith("*"), graph     # jump origin
     assert "|" in graph[1] and "|" in graph[2], graph
@@ -117,16 +116,37 @@ def check_draw_branches_aarch64():
     _set_arch("x86_64")
 
 
-def check_draw_branches_truncated():
+def check_jump_lanes():
+    # Two jumps that don't overlap share a lane; one around them gets
+    # the next lane out.
+    lanes, count = edis.assign_jump_lanes([(0, 2), (3, 5), (0, 9)])
+    assert count == 2 and lanes == [0, 0, 1], (lanes, count)
+
+    # Touching ranges (one jump lands where the next leaves) can't share.
+    lanes, count = edis.assign_jump_lanes([(0, 3), (3, 6)])
+    assert count == 2, (lanes, count)
+
+    assert edis.assign_jump_lanes([]) == ([], 0)
+
+
+def check_draw_branches_compact():
+    # 50 short jumps in a row used to take 50 columns.
     _set_arch("x86_64")
-    count = edis.MAX_JMP_LINES + 5
     lines = []
-    for i in range(count):
-        lines.append("0x%x <f+%d>:\tjmp\t0x%x <f>" % (0x1000 + i, i, 0x1000))
-    edis.draw_branches(_dis(lines), "")
-    assert edis.jump_graph_truncated
-    edis.draw_branches(_dis(lines[:3]), "")
-    assert not edis.jump_graph_truncated
+    for i in range(0, 100, 2):
+        lines.append("0x%x <f+%d>:\tjmp\t0x%x <f+%d>" % (0x1000 + i, i, 0x1001 + i, i + 1))
+        lines.append("0x%x <f+%d>:\tnop" % (0x1001 + i, i + 1))
+    out = edis.draw_branches(_dis(lines), "").splitlines()
+    assert out[0] == "+*" + lines[0], out[0]
+    assert out[1] == "+>" + lines[1], out[1]
+    assert all(len(l) - len(src) == 2 for l, src in zip(out, lines))
+
+    # A jump out of the function runs to the last line without an arrow.
+    out = edis.draw_branches(_dis([
+        "0x1000 <f>:\tjmp\t0x9000 <g>",
+        "0x1001 <f+1>:\tret",
+    ]), "").splitlines()
+    assert out[0].startswith("+*") and out[1].startswith("| "), out
 
 
 def check_call_list():
@@ -209,6 +229,27 @@ def check_address_match():
     assert not m(frame, "__schedule", "0xffffffff8f7b9c60")
     assert not m(frame, "schedule", "0xffffffff8f7b9c5d")
     assert not m("#1 [ffff] __schedule".split(), "__schedule", "__schedule")
+
+
+def check_target_line():
+    pt = edis.parse_target
+    assert pt("schedule") is None
+    assert pt("0xFFFFFFFF8F7B9C5D") == ("addr", "ffffffff8f7b9c5d")
+    assert pt("ffffffff8f7b9c5d") == ("addr", "ffffffff8f7b9c5d")
+    assert pt("schedule+0x12") == ("sym", "schedule", 18)
+    assert pt("schedule+18") == ("sym", "schedule", 18)
+    assert pt("mm/swap_state.c: 333") is None
+
+    line = "0xffffffff8f7b9c5d <schedule+18>:\tmov    %rax,%rdi".split()
+    first = "0xffffffff8f7b9c4b <schedule>:\tpush   %rbp".split()
+    t = edis.is_target_line
+    assert t(line, pt("0xffffffff8f7b9c5d"))
+    assert t(line, pt("ffffffff8f7b9c5d"))
+    assert t(line, pt("schedule+0x12"))
+    assert not t(line, pt("schedule+0x13"))
+    assert not t(line, pt("__schedule+0x12"))
+    assert t(first, pt("schedule+0"))
+    assert not t(line, None)
 
 
 def check_call_color():
