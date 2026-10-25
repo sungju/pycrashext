@@ -17,6 +17,9 @@ import re
 from collections import defaultdict
 import shutil
 import copy
+import struct
+
+import crash
 
 import crashcolor
 import optexamples
@@ -41,14 +44,6 @@ first_ksymbol = 0
 
 stack_pools = None
 stack_handle_version = 0
-
-# Page struct conversion parameters (initialized once for performance)
-mem_map_base = None
-vmemmap_base = None
-phys_base = None
-page_struct_size = None
-using_vmemmap = False
-page_conversion_initialized = False
 
 def check_global_symbols():
     global first_ksymbol
@@ -1206,395 +1201,286 @@ def get_module_usage_bar(module_usage_list, total_size, width=80):
     return (bar, legend)
 
 
-def get_pss_for_physical(paddr):
-#    print(paddr)
-    result_lines = []
-    try:
-        result_lines = exec_crash_command("kmem -p %s" % (paddr)).splitlines()
-        if len(result_lines) != 2:
-            return 0
-    except:
-#        print("kmem error on %s" % (paddr))
-        return 0
+# --shared and -P read each process's page tables and every mapped page's
+# _mapcount, the way /proc/<pid>/smaps does.  A page with a mapcount above
+# one is shared; PSS gives each mapper page_size / mapcount.
 
-    page_addr = result_lines[1].split()[0]
-    pss = 0.0
-    try:
-        page = readSU("struct page", int(page_addr, 16))
-#        print(page)
-        if member_offset("struct page", "_refcount") >= 0:
-            pss = 4096 / page._refcount.counter
+# x86_64 page table entry bits
+_PTE_PRESENT = 0x001
+_PTE_PSE = 0x080          # huge page at PMD/PUD level
+_PTE_PROTNONE = 0x100     # present for the kernel, not for the CPU (NUMA hinting)
+_PTE_SPECIAL = 0x200      # zero page, VM_PFNMAP: not counted in RSS
+
+
+class PageScanner:
+    """Walks a task's page tables and reads the mapcount of every page."""
+
+    def __init__(self):
+        self.page_shift = get_page_shift()
+        self.page_size = 1 << self.page_shift
+        self.walk_tables = False
+        try:
+            self.walk_tables = (sys_info.machine == "x86_64" and
+                                self.page_shift == 12)
+        except:
+            pass
+
+        self.mapcount_off = member_offset("struct page", "_mapcount")
+        self.page_struct_size = getSizeOf("struct page")
+        # Where a PMD-mapped huge page keeps its mapcount
+        #   RHEL 9 and later: folio->_entire_mapcount
+        #   RHEL 8: page[1].compound_mapcount
+        #   RHEL 7: the head page's _mapcount
+        self.huge_mapcount_off = self.mapcount_off
+        try:
+            off = member_offset("struct folio", "_entire_mapcount")
+        except:
+            off = -1
+        if off >= 0:
+            self.huge_mapcount_off = off
         else:
-            pss = 4096 / page._count.counter
-#            print(pss)
-    except:
-#        print("error on %s" % (page_addr))
-        pass
+            off = member_offset("struct page", "compound_mapcount")
+            if off >= 0:
+                self.huge_mapcount_off = self.page_struct_size + off
+        self.compound_head_off = member_offset("struct page", "compound_head")
 
-    return pss
+        self.zero_pfn = self._read_symbol("zero_pfn", -1)
+        self.huge_zero_pfn = self._read_symbol("huge_zero_pfn", -1)
+        self.max_pfn = self._read_symbol("max_pfn", 0)
 
-
-def get_pss_for_task(task_addr):
-    task = readSU("struct task_struct", int(task_addr, 16))
-    if task.mm == 0:
-        return 0
-#    print(task)
-    rss = 0
-    idx = 0
-    result_lines = exec_crash_command("vm -p %s" % (task_addr)).splitlines()
-    total_lines = len(result_lines)
-    while True:
-        while idx < total_lines and not result_lines[idx].startswith("VIRTUAL"):
-            idx = idx + 1
-
-        idx = idx + 1
-        if idx >= total_lines:
-            break
-        while idx < total_lines:
-            line = result_lines[idx].split()
-            idx = idx + 1
-            if len(line) > 2 or len(line) == 0:
-                continue
-
-            if line[1] != 'PHYSICAL':
-                rss = rss + get_pss_for_physical(line[1])
-
-    if rss > 0:
-        rss = rss / float(get_page_size())
-    return rss
-
-
-def _init_page_conversion_parameters():
-    """
-    Initialize kernel parameters needed for physical-to-page-struct conversion.
-
-    This should be called ONCE at module initialization, before any page
-    conversion operations.
-
-    Handles both old (mem_map) and new (vmemmap) kernel memory models.
-    """
-    global mem_map_base, vmemmap_base, phys_base, page_struct_size
-    global using_vmemmap, page_conversion_initialized
-
-    if page_conversion_initialized:
-        return True
-
-    try:
-        # Determine page struct size
-        page_struct_size = getSizeOf("struct page")
-        if page_struct_size <= 0:
-            print("[ERROR] Cannot determine sizeof(struct page)")
-            return False
-
-        # Try to use vmemmap (newer kernels with CONFIG_SPARSEMEM_VMEMMAP)
-        try:
-            vmemmap_base = readSymbol("vmemmap_base")
-            using_vmemmap = True
-            if debug_mode:
-                print("[INFO] Using vmemmap_base for page struct conversion")
-        except:
-            # Fall back to mem_map array (older kernels or CONFIG_FLATMEM)
-            try:
-                mem_map_base = readSymbol("mem_map")
-                using_vmemmap = False
-                if debug_mode:
-                    print("[INFO] Using mem_map for page struct conversion")
-            except:
-                print("[ERROR] Cannot find vmemmap_base or mem_map")
-                return False
-
-        # Get physical memory base
-        # For x86_64, this is typically __START_KERNEL_map or phys_base
-        try:
-            phys_base = readSymbol("phys_base")
-        except:
-            # If phys_base doesn't exist, try page_offset or assume 0
-            try:
-                phys_base = readSymbol("page_offset")
-            except:
-                phys_base = 0
-
-        if debug_mode:
-            print("[INFO] Page conversion parameters initialized:")
-            print("  - Page struct size: %d bytes" % page_struct_size)
-            print("  - Using vmemmap: %s" % using_vmemmap)
-            if using_vmemmap:
-                print("  - vmemmap_base: 0x%x" % vmemmap_base)
+        if self.walk_tables:
+            if self._read_symbol("__pgtable_l5_enabled", 0):
+                self.level_shifts = (48, 39, 30, 21, 12)
             else:
-                print("  - mem_map: 0x%x" % mem_map_base)
-            print("  - phys_base: 0x%x" % phys_base)
+                self.level_shifts = (39, 30, 21, 12)
+            physical_mask = self._read_symbol("physical_mask", (1 << 52) - 1)
+            sme_me_mask = self._read_symbol("sme_me_mask", 0)
+            self.pfn_mask = physical_mask & ~sme_me_mask & ~0xfff
+        self.table_cache = {}
 
-        page_conversion_initialized = True
-        return True
-
-    except Exception as e:
-        print("[ERROR] Failed to initialize page conversion: %s" % str(e))
-        return False
-
-
-def _physical_to_page_struct(phys_addr):
-    """
-    Convert a physical address to its corresponding page struct address.
-
-    This replaces the need for calling 'vtop' command for every single page,
-    which is the main performance bottleneck in shared memory analysis.
-
-    Args:
-        phys_addr: Physical address (integer)
-
-    Returns:
-        Page struct address (integer), or 0 on error
-
-    Algorithm:
-        PFN (Page Frame Number) = phys_addr / PAGE_SIZE
-
-        For vmemmap model (newer kernels):
-            page_struct = vmemmap_base + (PFN * sizeof(struct page))
-
-        For mem_map model (older kernels):
-            page_struct = mem_map + (PFN * sizeof(struct page))
-
-    Performance:
-        - Old approach: exec_crash_command("vtop 0x12345") takes ~10-50ms
-        - New approach: Direct calculation takes ~0.001ms
-        - Speedup: 10,000x - 50,000x per page
-    """
-    global mem_map_base, vmemmap_base, phys_base, page_struct_size
-    global using_vmemmap, page_conversion_initialized
-
-    # Validate initialization
-    if not page_conversion_initialized:
-        raise RuntimeError("Page conversion not initialized. Call _init_page_conversion_parameters() first.")
-
-    # Handle zero/invalid addresses
-    if phys_addr == 0:
-        return 0
-
-    # Calculate Page Frame Number (PFN)
-    # Standard page size is 4096 bytes (4K)
-    PAGE_SIZE = 4096
-    pfn = phys_addr // PAGE_SIZE
-
-    # Calculate page struct address based on kernel memory model
-    if using_vmemmap:
-        # vmemmap model: direct mapping of pfn to page struct array
-        page_addr = vmemmap_base + (pfn * page_struct_size)
-    else:
-        # mem_map model: subtract physical base before indexing
-        adjusted_pfn = (phys_addr - phys_base) // PAGE_SIZE
-        page_addr = mem_map_base + (adjusted_pfn * page_struct_size)
-
-    return page_addr
-
-
-def _resolve_page_struct_address(vaddr):
-    vtop_result = exec_crash_command("vtop %s" % (vaddr))
-    if vtop_result == "":
-        return 0
-
-    vtop_lines = vtop_result.splitlines()
-    if len(vtop_lines) == 0:
-        return 0
-
-    for line in reversed(vtop_lines):
-        words = line.split()
-        if len(words) == 0:
-            continue
+    @staticmethod
+    def _read_symbol(name, default):
         try:
-            return int(words[0], 16)
+            return int(readSymbol(name))
         except:
-            continue
-    return 0
+            return default
 
+    def _mapcount_at(self, addr):
+        value = readU32(addr)
+        if value & 0x80000000:
+            value -= 0x100000000
+        return value + 1
 
-def _collect_page_keys_for_vma(vma_addr, task_addr):
-    global debug_mode
-    page_keys = set()
-    pages_skipped_zero_phys = 0
-    pages_skipped_zero_struct = 0
-    pages_added = 0
+    def page_mapcount(self, pfn, huge):
+        """Number of page table entries that map this page (at least 1)."""
+        try:
+            page = crash.phys_to_page(pfn << self.page_shift)
+            if huge:
+                count = self._mapcount_at(page + self.huge_mapcount_off)
+            else:
+                count = self._mapcount_at(page + self.mapcount_off)
+                # A PTE-mapped piece of a THP is also mapped by the PMDs
+                # that map the whole huge page
+                if self.compound_head_off >= 0 and \
+                   self.huge_mapcount_off != self.mapcount_off:
+                    head = readU64(page + self.compound_head_off)
+                    if head & 1:
+                        count += max(0, self._mapcount_at(
+                            (head - 1) + self.huge_mapcount_off))
+        except:
+            return 1
+        return count if count > 0 else 1
 
-    try:
-        # CRITICAL: vm -P requires task context to be set first
-        # Set the task context, then run vm -P on the specific VMA
-        exec_crash_command("set %s" % task_addr)
-        result_str = exec_crash_command("vm -P %s" % (vma_addr))
-        if result_str == "":
-            if debug_mode:
-                print("[DEBUG] vm -P returned empty for VMA %s" % vma_addr)
-            return page_keys
+    def _read_table(self, addr, physical):
+        table = self.table_cache.get(addr)
+        if table is None:
+            if physical:
+                data = crash.readmem(addr, 4096, crash.PHYSADDR)
+            else:
+                data = readmem(addr, 4096)
+            table = struct.unpack("<512Q", data)
+            self.table_cache[addr] = table
+        return table
 
-        result_lines = result_str.splitlines()
-        if len(result_lines) < 5:
-            if debug_mode:
-                print("[DEBUG] vm -P returned only %d lines for VMA %s" % (len(result_lines), vma_addr))
-            return page_keys
+    def _entry_pfn(self, entry):
+        pfn = (entry & self.pfn_mask) >> 12
+        if not entry & _PTE_PRESENT:
+            # L1TF: kernels store a PROT_NONE entry's PFN inverted
+            inverted = (~entry & self.pfn_mask) >> 12
+            if self.max_pfn == 0 or inverted < self.max_pfn:
+                pfn = inverted
+        return pfn
 
-        for i in range(4, len(result_lines)):
-            page_words = result_lines[i].split()
-            if len(page_words) < 2:
+    def _walk(self, table_addr, physical, level, start, end, out):
+        shift = self.level_shifts[level]
+        last = (level == len(self.level_shifts) - 1)
+        table = self._read_table(table_addr, physical)
+        span = 1 << shift
+        first_idx = (start >> shift) & 511
+        last_idx = ((end - 1) >> shift) & 511
+        base = start & ~((span << 9) - 1)
+        for idx in range(first_idx, last_idx + 1):
+            entry = table[idx]
+            if entry == 0:
                 continue
-
-            try:
-                physical_addr = int(page_words[1], 16)
-                if physical_addr == 0:
-                    pages_skipped_zero_phys += 1
+            vaddr = base + idx * span
+            sub_start = max(start, vaddr)
+            sub_end = min(end, vaddr + span)
+            if last:
+                if not entry & (_PTE_PRESENT | _PTE_PROTNONE):
+                    continue    # swap entry
+                if entry & _PTE_SPECIAL:
                     continue
-                vaddr = page_words[0]
-            except:
+                pfn = self._entry_pfn(entry)
+                if pfn != self.zero_pfn:
+                    out.append((pfn, 1, False))
+            elif entry & _PTE_PSE:
+                if not entry & (_PTE_PRESENT | _PTE_PROTNONE):
+                    continue
+                pfn = self._entry_pfn(entry)
+                if pfn != self.huge_zero_pfn:
+                    pages = (sub_end - sub_start) >> 12
+                    # the head page holds the mapcount
+                    out.append((pfn, pages, True))
+            elif entry & _PTE_PRESENT:
+                self._walk(entry & self.pfn_mask, True, level + 1,
+                           sub_start, sub_end, out)
+
+    def vma_pages(self, task_addr, pgd, vma_addr, start, end):
+        """[(pfn, pages, huge)] for the pages mapped in [start, end)."""
+        out = []
+        if self.walk_tables:
+            self._walk(pgd, False, 0, start, end, out)
+            return out
+        # Other architectures: let crash translate each page
+        result = exec_crash_command("vm -P %s %s" % (vma_addr, task_addr))
+        for line in result.splitlines():
+            words = line.split()
+            if len(words) != 2:
                 continue
+            try:
+                int(words[0], 16)
+                physical = int(words[1], 16)
+            except ValueError:
+                continue
+            out.append((physical >> self.page_shift, 1, False))
+        return out
 
-            # Convert to PFN immediately to save memory
-            pfn = physical_addr >> get_page_shift()
-            page_keys.add(pfn)
-            pages_added += 1
+    def scan_task(self, task_addr, all_vmas, shared_keys=None):
+        """
+        Counts the pages a task maps.  all_vmas=False looks only at the
+        mappings other processes can share: VM_SHARED and file-backed ones.
+        A page whose mapcount is above one counts as shared; with
+        shared_keys (a dict), each shared page is added to it once, so the
+        caller can count shared memory once over all tasks.
 
-        if debug_mode and (pages_added > 0 or pages_skipped_zero_phys > 0 or pages_skipped_zero_struct > 0):
-            print("[DEBUG] VMA %s: added=%d, skipped_phys=0:%d, skipped_struct=0:%d" %
-                  (vma_addr, pages_added, pages_skipped_zero_phys, pages_skipped_zero_struct))
+        Returns the pages scanned, shared and the PSS, all in pages.
+        """
+        self.table_cache = {}
+        scanned = 0
+        shared = 0
+        pss = 0.0
+        task = readSU("struct task_struct", int(task_addr, 16))
+        pgd = int(task.mm.pgd)
 
-    except KeyboardInterrupt:
-        # Propagate interrupt up
-        raise
-
-    return page_keys
-
-
-def _collect_shared_page_keys(task_addr, task_name):
-    global debug_mode
-    vma_pages = set()
-    shared_candidate_count = 0
-    vma_count = 0
-    shared_vma_count = 0
-
-    try:
-        result_str = exec_crash_command("vm %s" % task_addr)
-        if not result_str:
-            return vma_pages, shared_candidate_count
-
-        result_lines = result_str.splitlines()
-        if len(result_lines) < 4:
-            return vma_pages, shared_candidate_count
-
-        for i in range(4, len(result_lines)):
-            vma_count += 1
-            words = result_lines[i].split()
+        result = exec_crash_command("vm %s" % task_addr)
+        for line in result.splitlines():
+            words = line.split()
             if len(words) < 4:
                 continue
-
             try:
-                vma_start = int(words[1], 16)
-                vma_end = int(words[2], 16)
-                vm_flags = int(words[3], 16)
                 vma_addr = words[0]
-            except:
+                start = int(words[1], 16)
+                end = int(words[2], 16)
+                vm_flags = int(words[3], 16)
+            except ValueError:
+                continue
+            if end <= start:
+                continue
+            # hugetlbfs pages are not in RSS or PSS; VM_IO/VM_PFNMAP
+            # mappings are device memory without struct pages
+            if vm_flags & (VM_HUGETLB | VM_IO | VM_PFNMAP):
+                continue
+            filename = " ".join(words[4:])
+            if not all_vmas and not (vm_flags & VM_SHARED) and \
+               (filename == "" or filename.startswith("[")):
                 continue
 
-            if vma_end <= vma_start:
-                continue
+            for pfn, pages, huge in self.vma_pages(task_addr, pgd, vma_addr,
+                                                   start, end):
+                count = self.page_mapcount(pfn, huge)
+                scanned += pages
+                pss += float(pages) / count
+                if count > 1:
+                    shared += pages
+                    if shared_keys is not None:
+                        shared_keys[pfn] = pages
 
-            filename = ' '.join(words[4:]) if len(words) >= 5 else ""
-
-            # Only scan VMAs that can be genuinely shared between processes:
-            # 1. VMAs with VM_SHARED flag (explicitly shared mappings)
-            # 2. File-backed VMAs (shared libraries, executables)
-            # 3. SYSV shared memory segments
-            #
-            # EXCLUDE private anonymous VMAs (heap, stack, private mmap):
-            # - After fork(), child processes have COW (copy-on-write) references
-            #   to parent's anonymous pages, so they map to the same PFNs initially
-            # - These are PRIVATE pages that will become physically separate on write
-            # - Including them would incorrectly count them as "shared"
-            #
-            # Note: Threads sharing mm_struct are already deduplicated via count_rss check
-            is_potentially_shared = False
-
-            # Check 1: Explicitly shared mappings (VM_SHARED or SHM segments)
-            if vm_flags & (VM_SHARED | VM_SHM):
-                is_potentially_shared = True
-            # Check 2: File-backed VMAs (libraries, executables, mapped files)
-            # But NOT anonymous regions like [heap], [stack], [anon:...]
-            elif filename and not filename.startswith('['):
-                is_potentially_shared = True
-
-            # Dead code path removed: filename.startswith('SYSV') already caught above
-            # Dead code path removed: anonymous VMAs without VM_SHARED should NOT be scanned
-
-            if not is_potentially_shared:
-                continue
-
-            # This is the slow part - allow interruption
-            page_keys = _collect_page_keys_for_vma(vma_addr, task_addr)
-            if len(page_keys) > 0:
-                shared_vma_count += 1
-                vma_pages.update(page_keys)
-                try:
-                    shared_candidate_count = shared_candidate_count + ((vma_end - vma_start) // page_size)
-                except:
-                    shared_candidate_count = shared_candidate_count
-
-    except KeyboardInterrupt:
-        # Propagate interrupt up to the caller
-        raise
-
-    if debug_mode:
-        print("[DEBUG] Task %s: %d VMAs total, %d potentially shared, %d unique pages collected" %
-              (task_name, vma_count, shared_vma_count, len(vma_pages)))
-
-    return vma_pages, shared_candidate_count
+        return scanned, shared, pss
 
 
-def collect_shared_mappings_global(task_list):
+def collect_shared_mappings_global(task_list, all_vmas=False,
+                                   count_unique=True, cache=None):
     """
-    Collect shared pages across all tasks to identify overlaps by unique page frame.
-
-    Memory-efficient implementation using PFNs and batch processing.
+    Measures private, shared and PSS memory per process.
 
     Args:
-        task_list: List of tuples (pname, task_addr, rss_kb)
+        task_list: List of tuples (pname, task_addr, rss_kb), rss_kb from ps
+        all_vmas: scan every mapping (needed for PSS) instead of only the
+                  shareable ones (VM_SHARED and file-backed)
+        count_unique: keep each shared page frame to count shared memory
+                      once over all processes
+        cache: a dict kept between calls, so a task is scanned only once
 
     Returns:
         dict: {
-            'page_to_task_count': {page_addr: count}, # Task count per unique mapped page frame
-            'task_pages': {pname: set(page_addrs)},   # Pages per task
-            'task_rss': {pname: rss_kb},              # RSS per task from ps
-            'total_shared_kb': global shared,
-            'total_private_kb': global private,
-            'over_counted_kb': over-counted amount
+            'task_private': {pname: KB},    # RSS minus the shared part
+            'task_shared': {pname: KB},     # pages also mapped by others
+            'task_pss': {pname: KB},
+            'task_rss': {pname: KB},
+            'total_shared_kb': shared memory counted once,
+            'total_private_kb': sum of task_private,
+            'over_counted_kb': RSS sum minus what is really in use,
+            'tasks_analyzed': processes scanned,
+            'tasks_total': processes asked for,
         }
     """
-    global page_size
-    global debug_mode
+    scanner = PageScanner()
+    page_kb = scanner.page_size // 1024
 
-    # Initialize page conversion parameters (ONCE)
-    global page_conversion_initialized
-    if not page_conversion_initialized:
-        if not _init_page_conversion_parameters():
-            crashcolor.set_color(crashcolor.YELLOW)
-            print("WARNING: Cannot initialize optimized page conversion")
-            print("Falling back to vtop (this will be VERY slow)")
-            crashcolor.set_color(crashcolor.RESET)
-            # Continue anyway, will use fallback
+    task_private = {}
+    task_shared = {}
+    task_pss = {}
+    task_rss = {}
+    shared_keys = {} if count_unique else None
+    seen_mm = set()  # threads share an mm: scan each address space once
 
-    # Use PFNs (Page Frame Numbers) instead of full addresses to save memory
-    # PFN = page_addr >> 12, converting back: page_addr = PFN << 12
-    # This saves ~50% memory since we only store the page frame number
-    pfn_to_task_count = {} # Track each unique PFN and how many tasks reference it
-    task_pfns = {}         # Track PFNs per task
-    task_rss = {}          # Track RSS per task
-    seen_mm_for_rss = {}   # Track unique mm_struct addresses per pname to avoid thread double-counting
-    scanned_vma_bytes = 0
+    unique_tasks = []
+    for pname, task_addr, rss_kb in task_list:
+        try:
+            mm = int(readSU("struct task_struct", int(task_addr, 16)).mm)
+        except:
+            continue
+        if mm == 0 or mm in seen_mm:
+            continue
+        seen_mm.add(mm)
+        unique_tasks.append((pname, task_addr, rss_kb))
 
-    total_tasks = len(task_list)
+    total_tasks = len(unique_tasks)
     tasks_analyzed = 0
 
-    sys.stdout.write("Analyzing shared mappings:\n")
+    if not scanner.walk_tables:
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("Not x86_64: using 'vm -P' for each mapping, which is slow")
+        crashcolor.set_color(crashcolor.RESET)
+    sys.stdout.write("Analyzing %s mappings:\n" %
+                     ("all" if all_vmas else "shared"))
     sys.stdout.flush()
 
     try:
-        for idx, (pname, task_addr, rss_kb) in enumerate(task_list):
+        for idx, (pname, task_addr, rss_kb) in enumerate(unique_tasks):
             try:
-                _pid = readSU("task_struct", int(task_addr, 16)).pid
+                _pid = readSU("struct task_struct", int(task_addr, 16)).pid
                 _task_label = "%.12s (PID %d)" % (pname, _pid)
             except:
                 _task_label = "%.12s" % pname
@@ -1603,75 +1489,52 @@ def collect_shared_mappings_global(task_list):
             sys.stdout.write("\r" + _progress_msg)
             sys.stdout.flush()
 
-            # Deduplicate threads by mm_struct: only accumulate RSS once per unique
-            # mm_struct address. Threads share mm_struct, so counting all would
-            # inflate task_rss and corrupt the unscanned-page fallback calculation.
-            # This must run BEFORE the try block so the exception handler can use it.
-            count_rss = True
-            try:
-                task_struct = readSU("task_struct", int(task_addr, 16))
-                mm_addr = task_struct.mm
-                if mm_addr == 0:
-                    count_rss = False  # Kernel thread
-                elif mm_addr in seen_mm_for_rss.get(pname, set()):
-                    count_rss = False
-                else:
-                    seen_mm_for_rss.setdefault(pname, set()).add(mm_addr)
-            except:
-                pass  # If unreadable, count conservatively
+            if cache is not None and task_addr in cache:
+                scanned, shared, pss, task_keys = cache[task_addr]
+            else:
+                task_keys = {} if shared_keys is not None else None
+                try:
+                    scanned, shared, pss = scanner.scan_task(task_addr,
+                                                             all_vmas,
+                                                             task_keys)
+                except KeyboardInterrupt:
+                    raise
+                except Exception as e:
+                    if debug_mode:
+                        print("\nError analyzing task %s: %s" % (pname, str(e)))
+                    continue
+                if cache is not None:
+                    cache[task_addr] = (scanned, shared, pss, task_keys)
+            if shared_keys is not None:
+                shared_keys.update(task_keys)
 
-            # Skip PFN scan for duplicate mm_struct (threads share page tables)
-            if not count_rss:
-                continue
+            shared_kb = shared * page_kb
+            scanned_kb = scanned * page_kb
+            if all_vmas:
+                # Every mapping was walked: the page tables are the RSS.
+                # ps RSS can be far off where per-thread counters lag
+                # (SPLIT_RSS_COUNTING).
+                rss_kb = scanned_kb
+            else:
+                # ps RSS covers the anonymous mappings this scan skipped;
+                # take them as private
+                rss_kb = max(rss_kb, scanned_kb)
+            private_kb = rss_kb - shared_kb
+            pss_kb = pss * page_kb + (rss_kb - scanned_kb)
 
-            try:
-                page_keys, candidate_bytes = _collect_shared_page_keys(task_addr, pname)
-                scanned_vma_bytes = scanned_vma_bytes + candidate_bytes
+            task_shared[pname] = task_shared.get(pname, 0) + shared_kb
+            task_private[pname] = task_private.get(pname, 0) + private_kb
+            task_pss[pname] = task_pss.get(pname, 0) + pss_kb
+            task_rss[pname] = task_rss.get(pname, 0) + rss_kb
+            tasks_analyzed += 1
 
-                # page_keys already contains PFNs (converted in _collect_page_keys_for_vma)
-                pfn_keys = page_keys
+            if debug_mode:
+                print("\n[DEBUG] %s: rss=%d KB scanned=%d KB shared=%d KB "
+                      "pss=%.0f KB" % (pname, rss_kb, scanned_kb, shared_kb,
+                                       pss_kb))
 
-                # Debug: Show page collection for first few tasks
-                if debug_mode and idx < 3:
-                    print("\n[DEBUG] Task %d (%s):" % (idx, pname))
-                    print("  task_addr: %s, rss: %d KB" % (task_addr, rss_kb))
-                    print("  Collected %d unique pages from potentially shared VMAs" % len(pfn_keys))
-                    print("  Scanned VMA bytes: %d" % candidate_bytes)
-
-                # Accumulate PFNs and RSS for processes with same name (grouped processes)
-                if pname in task_pfns:
-                    task_pfns[pname].update(pfn_keys)  # Add to existing set
-                    if count_rss:
-                        task_rss[pname] += rss_kb      # Add to existing RSS only for unique mm
-                else:
-                    task_pfns[pname] = pfn_keys.copy() # Create new set
-                    task_rss[pname] = rss_kb if count_rss else 0
-
-                for pfn in pfn_keys:
-                    if pfn in pfn_to_task_count:
-                        pfn_to_task_count[pfn] += 1
-                    else:
-                        pfn_to_task_count[pfn] = 1
-
-                tasks_analyzed += 1
-
-                # Garbage collect every 100 tasks to prevent memory buildup
-                if (idx + 1) % 100 == 0:
-                    gc.collect()
-
-            except KeyboardInterrupt:
-                # Re-raise to outer handler
-                raise
-            except Exception as e:
-                if debug_mode:
-                    print("Error analyzing task %s: %s" % (pname, str(e)))
-                # Accumulate RSS even if page collection fails, respecting mm_struct dedup
-                if pname in task_rss:
-                    if count_rss:
-                        task_rss[pname] += rss_kb
-                else:
-                    task_pfns[pname] = set()
-                    task_rss[pname] = rss_kb if count_rss else 0
+            if (idx + 1) % 100 == 0:
+                gc.collect()
 
     except KeyboardInterrupt:
         print("\n")
@@ -1684,81 +1547,27 @@ def collect_shared_mappings_global(task_list):
     sys.stdout.write("\r" + " " * 79 + "\r")  # Clear progress line
     sys.stdout.flush()
 
-    # Debug: Show analysis summary
-    if debug_mode:
-        print("\n[DEBUG] Shared memory analysis summary:")
-        print("  Total tasks analyzed: %d" % len(task_pfns))
-        print("  Total unique pages tracked: %d" % len(pfn_to_task_count))
-
-        # Count how many pages are shared
-        shared_page_count = sum(1 for count in pfn_to_task_count.values() if count >= 2)
-        private_page_count = sum(1 for count in pfn_to_task_count.values() if count == 1)
-        print("  Pages mapped by 2+ tasks: %d" % shared_page_count)
-        print("  Pages mapped by 1 task: %d" % private_page_count)
-
-        # Show some example shared pages
-        if shared_page_count > 0:
-            print("  Sample of shared pages:")
-            count = 0
-            for pfn, task_count in pfn_to_task_count.items():
-                if task_count >= 2 and count < 5:
-                    print("    PFN 0x%x: mapped by %d tasks" % (pfn, task_count))
-                    count += 1
-
-    # Calculate global totals
-    total_shared_bytes = 0
-    total_private_bytes = 0
-    over_counted_bytes = 0
-    for _, count in pfn_to_task_count.items():
-        if count >= 2:
-            total_shared_bytes += page_size
-            if count > 1:
-                over_counted_bytes += (count - 1) * page_size
-        else:
-            total_private_bytes += page_size
-
-    # Calculate per-task private and shared
-    task_private = {}
-    task_shared = {}
-    for pname, pfn_set in task_pfns.items():
-        shared_kb = 0
-        private_kb = 0
-        for pfn in pfn_set:
-            if pfn_to_task_count.get(pfn, 1) >= 2:
-                shared_kb += page_size // 1024
-            else:
-                private_kb += page_size // 1024
-
-        # RSS might be larger than scanned pages (not all VMAs are scanned)
-        # Unscanned portion is assumed private
-        rss = task_rss.get(pname, 0)
-        scanned_total = shared_kb + private_kb
-        if rss > scanned_total:
-            private_kb += (rss - scanned_total)
-
-        task_shared[pname] = shared_kb
-        task_private[pname] = private_kb
-
-    # Keep total_private_bytes and total_shared_bytes from page-level scan (lines 1654-1660)
-    # Do NOT recalculate from per-task sums, as they include unscanned RSS portions
-    # which would inflate totals far beyond physical RAM (see bug causing 2311% overflow)
-    # Per-task values can show unscanned RSS for display, but global totals must
-    # be based on actual scanned page frames only.
-
-    # Free memory before returning
-    del pfn_to_task_count
-    del task_pfns
+    total_rss_kb = sum(task_rss.values())
+    total_private_kb = sum(task_private.values())
+    if shared_keys is not None:
+        total_shared_kb = sum(shared_keys.values()) * page_kb
+    else:
+        total_shared_kb = sum(task_shared.values())
+    del shared_keys
     gc.collect()
 
     return {
-        'page_to_task_count': {},  # Empty now, no longer needed
         'task_shared': task_shared,
         'task_private': task_private,
+        'task_pss': task_pss,
         'task_rss': task_rss,
-        'total_shared_kb': total_shared_bytes // 1024,
-        'total_private_kb': total_private_bytes // 1024,
-        'over_counted_kb': over_counted_bytes // 1024,
-        'scanned_vma_bytes': scanned_vma_bytes
+        'total_rss_kb': total_rss_kb,
+        'total_shared_kb': total_shared_kb,
+        'total_private_kb': total_private_kb,
+        'over_counted_kb': max(0, total_rss_kb - total_private_kb -
+                               total_shared_kb),
+        'tasks_analyzed': tasks_analyzed,
+        'tasks_total': total_tasks,
     }
 
 
@@ -1766,15 +1575,15 @@ def show_tasks_memusage(options):
     mem_usage_dict = {}
     pid_count_dict = {}   # tracks how many PIDs are grouped per name
     account_shared = getattr(options, 'account_shared', False)
+    use_pss = getattr(options, 'memusage_pss', False)
+    scan_pages = account_shared or use_pss
 
-    if options.memusage_pss:
-        print("Experimental stage for Pss")
-        print("It will take quite sometime to gather Pss based memory usage")
-
-    if account_shared:
+    if scan_pages:
         crashcolor.set_color(crashcolor.YELLOW)
-        print("Analyzing VM details for shared memory accounting...")
-        print("This will take some time as it analyzes page reference counts.")
+        if use_pss:
+            print("Reading every mapped page of each process for PSS...")
+        else:
+            print("Reading the shared and file-backed mappings of each process...")
         print("Press Ctrl-C to stop and show partial results.\n")
         crashcolor.set_color(crashcolor.RESET)
 
@@ -1790,8 +1599,6 @@ def show_tasks_memusage(options):
     result = exec_crash_command(crash_command)
     result_lines = result.splitlines(True)
     total_rss = 0
-    total_shared = 0
-    total_private = 0
 
     # First pass: collect all tasks with RSS
     task_list = []  # List of (pname, task_addr, rss_kb)
@@ -1811,24 +1618,16 @@ def show_tasks_memusage(options):
         else:
             pname = cmd
 
-        # Get RSS from ps output (this is the correct value)
         rss = int(result_line[7])
-        if options.memusage_pss:
-            rss = get_pss_for_task(result_line[3])
-
         task_addr = result_line[3]  # TASK address
-
-        # Store task info for potential shared memory analysis
-        if account_shared:
-            task_list.append((pname, task_addr, rss))
 
         # Deduplicate threads: only count RSS for unique mm_struct addresses.
         # Threads in the same process share mm_struct, so counting all threads
-        # would inflate total_rss by the thread count per process.
+        # would inflate the totals by the thread count per process.
         is_unique_process = True
         try:
-            task_struct = readSU("task_struct", int(task_addr, 16))
-            mm_addr = task_struct.mm
+            task_struct = readSU("struct task_struct", int(task_addr, 16))
+            mm_addr = int(task_struct.mm)  # a pointer object would not dedup
             if mm_addr == 0:
                 is_unique_process = False  # Kernel thread, no user memory
             elif mm_addr in seen_mm_structs:
@@ -1838,75 +1637,31 @@ def show_tasks_memusage(options):
         except:
             pass  # If mm_struct unreadable, count conservatively
 
-        if is_unique_process:
-            total_rss = total_rss + rss
-        if (pname in mem_usage_dict):
-            rss = mem_usage_dict[pname] + rss
-
+        if not is_unique_process:
+            continue
+        if scan_pages:
+            task_list.append((pname, task_addr, rss))
+        total_rss = total_rss + rss
         if rss != 0:
-            mem_usage_dict[pname] = rss
+            mem_usage_dict[pname] = mem_usage_dict.get(pname, 0) + rss
         if not options.all:
             pid_count_dict[pname] = pid_count_dict.get(pname, 0) + 1
 
-    # Second pass: analyze shared memory if requested
-    task_private_dict = {}  # Per-task private memory
-    task_shared_dict = {}   # Per-task shared memory
-
-    if account_shared and len(task_list) > 0:
-        crashcolor.set_color(crashcolor.YELLOW)
-        print("\nAnalyzing shared memory mappings (Ctrl-C to stop)...")
-        print("Total tasks to analyze: %d" % len(task_list))
-
-        # Show distribution of tasks by process name
-        if getattr(options, 'debug', False):
-            try:
-                from collections import Counter
-                task_names = [pname for pname, _, _ in task_list]
-                name_counts = Counter(task_names)
-                print("[DEBUG] Process distribution:")
-                for name, count in sorted(name_counts.items(), key=lambda x: x[1], reverse=True)[:10]:
-                    print("  %s: %d instances" % (name, count))
-            except Exception as e:
-                print("[DEBUG] Error showing process distribution: %s" % str(e))
-
-        crashcolor.set_color(crashcolor.RESET)
-        shared_info = collect_shared_mappings_global(task_list)
-
-        # Total shared pages (counted once) - pages mapped by 2+ tasks
-        total_shared = shared_info['total_shared_kb']
-
-        # Over-counted amount - shared pages were counted N times in RSS, but should be counted once
-        # So we over-counted them (N-1) times
-        over_counted = shared_info['over_counted_kb']
-
-        # Get per-task breakdowns
-        task_private_dict = shared_info['task_private']
-        task_shared_dict = shared_info['task_shared']
-
-        # Calculate private memory correctly:
-        # total_rss includes all memory (private + shared counted multiple times)
-        # total_shared is the unique count of shared pages
-        # over_counted is how many times shared pages were over-counted (N-1 for each)
-        # Therefore: total_private = total_rss - total_shared - over_counted
-        total_private = total_rss - total_shared - over_counted
-        actual_total_kb = total_private + total_shared
-
-        # Sanity check: ensure no negative values
-        if total_private < 0:
-            if debug_mode:
-                print("Warning: Calculated negative private memory, adjusting")
-                print("  total_rss=%d KB, over_counted=%d KB, total_shared=%d KB" %
-                      (total_rss, over_counted, total_shared))
-            total_private = 0
-            actual_total_kb = total_shared
-
-        if debug_mode:
-            print("Debug: total_rss=%d KB, total_shared=%d KB, over_counted=%d KB" %
-                  (total_rss, total_shared, over_counted))
-            print("Debug: actual_total=%d KB, total_private=%d KB" %
-                  (actual_total_kb, total_private))
-
-        print("Shared memory analysis complete.\n")
+    # Second pass: read the page tables
+    shared_info = None
+    if scan_pages and len(task_list) > 0:
+        shared_info = collect_shared_mappings_global(
+            task_list, all_vmas=use_pss, count_unique=account_shared)
+        if shared_info['tasks_analyzed'] < shared_info['tasks_total']:
+            crashcolor.set_color(crashcolor.YELLOW)
+            print("Only %d of %d processes were analyzed; the rest show RSS only.\n" %
+                  (shared_info['tasks_analyzed'], shared_info['tasks_total']))
+            crashcolor.set_color(crashcolor.RESET)
+        if use_pss:
+            # Sort and total by PSS; processes not analyzed keep their RSS
+            for pname, pss_kb in shared_info['task_pss'].items():
+                mem_usage_dict[pname] = pss_kb
+            total_rss = sum(mem_usage_dict.values())
 
     sorted_usage = sorted(mem_usage_dict.items(),
                           key=operator.itemgetter(1), reverse=True)
@@ -1917,6 +1672,12 @@ def show_tasks_memusage(options):
 
     print_count = min(len(sorted_usage) - 1, min_number)
 
+    if shared_info is not None:
+        show_scanned_memusage(options, sorted_usage, print_count,
+                              pid_count_dict, shared_info, mem_usage_dict,
+                              system_total_mem_kb)
+        return
+
     # Detect terminal width fresh right before display to catch any resizes
     # Calculate optimal column width based on terminal width and longest process name
     if options.graph:
@@ -1924,12 +1685,7 @@ def show_tasks_memusage(options):
         max_widths = get_optimal_max_widths(show_graph=True)
         max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) if print_count > 0 else 20
         pname_width = max(20, min(max_widths['process_name'], max_pname_len + 1))
-
-        if account_shared:
-            # Wider format for Private/Shared/Total breakdown
-            separator_width = pname_width + 15 + 15 + 15 + 8  # Process + Private + Shared + Total + padding
-        else:
-            separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
+        separator_width = pname_width + 24 + 15 + 6  # Process_Name + Percent + Usage + padding
     else:
         separator_width = 70
         initial_terminal_width = 80
@@ -1937,12 +1693,8 @@ def show_tasks_memusage(options):
     # Print header
     print("=" * separator_width)
     if options.graph:
-        if account_shared:
-            format_str = "%-" + str(pname_width) + "s %15s %15s %15s"
-            print(format_str % ("Process_Name", "Private", "Shared", "Total(RSS)"))
-        else:
-            format_str = "%-" + str(pname_width) + "s %-24s %15s"
-            print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
+        format_str = "%-" + str(pname_width) + "s %-24s %15s"
+        print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
     else:
         print("%24s          %-s" % (" [ RSS usage ]", "[ Process name ]"))
     print("-" * separator_width)  # Add separator line between header and data
@@ -1962,20 +1714,12 @@ def show_tasks_memusage(options):
                 initial_terminal_width = current_width
                 max_widths = get_optimal_max_widths(show_graph=True)
                 pname_width = max(20, min(max_widths['process_name'], max_pname_len + 1))
-
-                if account_shared:
-                    separator_width = pname_width + 15 + 15 + 15 + 8
-                else:
-                    separator_width = pname_width + 24 + 15 + 6
+                separator_width = pname_width + 24 + 15 + 6
 
                 # Reprint header
                 print("=" * separator_width)
-                if account_shared:
-                    format_str = "%-" + str(pname_width) + "s %15s %15s %15s"
-                    print(format_str % ("Process_Name", "Private", "Shared", "Total(RSS)"))
-                else:
-                    format_str = "%-" + str(pname_width) + "s %-24s %15s"
-                    print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
+                format_str = "%-" + str(pname_width) + "s %-24s %15s"
+                print(format_str % ("Process_Name", "Usage_Percent", "RSS_Usage"))
                 print("-" * separator_width)
 
         pname = sorted_usage[i][0]
@@ -1989,27 +1733,11 @@ def show_tasks_memusage(options):
         if options.graph:
             # Truncate process name to fit column width
             pname_display = truncate_middle(pname, pname_width)
-
-            if account_shared:
-                # Show Private, Shared, Total breakdown
-                private_kb = task_private_dict.get(pname, rss_kb)  # Default to rss if not analyzed
-                shared_kb = task_shared_dict.get(pname, 0)
-
-                format_str = "%-" + str(pname_width) + "s %15s %15s %15s"
-                print(format_str % (
-                    pname_display,
-                    get_size_str(private_kb * 1024),
-                    get_size_str(shared_kb * 1024),
-                    get_size_str(rss_kb * 1024)
-                ))
-                crashcolor.set_color(crashcolor.RESET)
-            else:
-                # Standard display with percentage bar
-                percentage = (rss_kb * 100.0 / system_total_mem_kb) if system_total_mem_kb > 0 else 0
-                bar = get_memory_bar(percentage, width=20)
-                format_str = "%-" + str(pname_width) + "s %s %15s"
-                print(format_str % (pname_display, bar, get_size_str(rss_kb * 1024)))
-                crashcolor.set_color(crashcolor.RESET)
+            percentage = (rss_kb * 100.0 / system_total_mem_kb) if system_total_mem_kb > 0 else 0
+            bar = get_memory_bar(percentage, width=20)
+            format_str = "%-" + str(pname_width) + "s %s %15s"
+            print(format_str % (pname_display, bar, get_size_str(rss_kb * 1024)))
+            crashcolor.set_color(crashcolor.RESET)
         else:
             print("%14s (%10.2f KiB)   %-s" %
                     (get_size_str(rss_kb * 1024, True),
@@ -2021,94 +1749,129 @@ def show_tasks_memusage(options):
         print("\t<...>")
     print("=" * separator_width)
 
-    # Calculate percentages for shared accounting (even if zero)
-    shared_percentage = 0.0
-    private_percentage = 0.0
-    if account_shared and system_total_mem_kb > 0:
-        shared_percentage = (total_shared * 100.0 / system_total_mem_kb)
-        private_percentage = (total_private * 100.0 / system_total_mem_kb)
+    crashcolor.set_color(crashcolor.BLUE)
+    print("Total memory usage from user-space = %s" %
+          (get_size_str(total_rss * 1024)))
 
-    # Show shared memory breakdown if --shared was used
-    if account_shared:
-        print()
-        crashcolor.set_color(crashcolor.YELLOW)
-        print("=" * 80)
-        print("MEMORY BREAKDOWN (accounting for shared pages)")
-        print("=" * 80)
-        crashcolor.set_color(crashcolor.RESET)
-
-        print("\nPer-Process Columns:")
-        print("  Private  = Memory used only by this process (heap, stack, private data)")
-        print("  Shared   = Memory shared with other processes (libraries, shared objects)")
-        print("  Total    = RSS from ps (Private + Shared, may count shared pages multiple times)")
-
-        print("\nGlobal Summary:")
-        crashcolor.set_color(crashcolor.GREEN)
-        print("  Total Private (all processes)           = %s" %
-              (get_size_str(total_private * 1024)))
-        if system_total_mem_kb > 0:
-            print("    %.2f%% of total system memory" % private_percentage)
-            if options.graph:
-                bar = get_memory_bar(private_percentage, width=TOTAL_BAR_WIDTH)
-                print("    %s" % bar)
-        crashcolor.set_color(crashcolor.RESET)
-
-        crashcolor.set_color(crashcolor.CYAN)
-        print("  Total Shared (counted once, not per-process) = %s" %
-              (get_size_str(total_shared * 1024)))
-        if system_total_mem_kb > 0:
-            print("    %.2f%% of total system memory" % shared_percentage)
-            if options.graph:
-                bar = get_memory_bar(shared_percentage, width=TOTAL_BAR_WIDTH)
-                print("    %s" % bar)
-        crashcolor.set_color(crashcolor.RESET)
-
-        # Show actual total (private + shared, no double-counting)
-        actual_total = total_private + total_shared
-        crashcolor.set_color(crashcolor.BLUE)
-        print("\n  Actual Total Memory Used (no duplicates)   = %s" %
-              (get_size_str(actual_total * 1024)))
-
-        if system_total_mem_kb > 0:
-            actual_percentage = (actual_total * 100.0 / system_total_mem_kb)
-            system_total_mem_bytes = system_total_mem_kb * 1024
-            print("    %.2f%% of total system memory (%s)" %
-                  (actual_percentage, get_size_str(system_total_mem_bytes)))
-            if options.graph:
-                bar = get_memory_bar(actual_percentage, width=TOTAL_BAR_WIDTH)
-                print("    %s" % bar)
-        crashcolor.set_color(crashcolor.RESET)
-
-        # Also show raw RSS total for comparison
-        crashcolor.set_color(crashcolor.YELLOW)
-        print("\n  Raw RSS Total (for comparison)             = %s" %
-              (get_size_str(total_rss * 1024)))
-        if system_total_mem_kb > 0:
-            rss_percentage = (total_rss * 100.0 / system_total_mem_kb)
-            over_count_kb = total_rss - actual_total
-            print("    %.2f%% of total system memory" % rss_percentage)
-            print("    Over-counted by: %s (shared pages counted multiple times)" %
-                  get_size_str(over_count_kb * 1024))
-        crashcolor.set_color(crashcolor.RESET)
-
-        print("\n" + "=" * 80)
-
-    if not account_shared:
-        crashcolor.set_color(crashcolor.BLUE)
-        print("Total memory usage from user-space = %s" %
-              (get_size_str(total_rss * 1024)))
-
-        # Show total usage percentage with bar graph
-        if system_total_mem_kb > 0:
-            total_percentage = (total_rss * 100.0 / system_total_mem_kb)
-            system_total_mem_bytes = system_total_mem_kb * 1024
-            print("\tNotes) %.2f percent from total system memory(%s)" %
-                  (total_percentage, get_size_str(system_total_mem_bytes)))
-            if options.graph:
-                bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
-                print("\t       %s" % bar)
+    # Show total usage percentage with bar graph
+    if system_total_mem_kb > 0:
+        total_percentage = (total_rss * 100.0 / system_total_mem_kb)
+        system_total_mem_bytes = system_total_mem_kb * 1024
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (total_percentage, get_size_str(system_total_mem_bytes)))
+        if options.graph:
+            bar = get_memory_bar(total_percentage, width=TOTAL_BAR_WIDTH)
+            print("\t       %s" % bar)
 
     crashcolor.set_color(crashcolor.RESET)
+
+
+def show_scanned_memusage(options, sorted_usage, print_count, pid_count_dict,
+                          shared_info, mem_usage_dict, system_total_mem_kb):
+    """Table and summary for 'meminfo -u/-P --shared' and 'meminfo -P'."""
+    account_shared = getattr(options, 'account_shared', False)
+    use_pss = getattr(options, 'memusage_pss', False)
+    task_private = shared_info['task_private']
+    task_shared = shared_info['task_shared']
+    task_pss = shared_info['task_pss']
+    task_rss = shared_info['task_rss']
+
+    columns = []
+    if account_shared:
+        columns += ["Private", "Shared"]
+    if use_pss:
+        columns.append("PSS")
+    columns.append("RSS")
+
+    max_pname_len = max(len(sorted_usage[i][0]) for i in range(0, print_count)) \
+        if print_count > 0 else 20
+    pname_width = max(20, min(get_optimal_max_widths(options.graph)['process_name'],
+                              max_pname_len + 6))
+    size_format = " ".join(["%11s"] * len(columns))
+    bar_width = 22 if options.graph else 0
+    separator_width = 12 * len(columns) + bar_width + 2 + pname_width
+
+    print("=" * separator_width)
+    header = size_format % tuple(columns)
+    if options.graph:
+        header += " %-21s" % "Usage_Percent"
+    print(header + "  Process_Name")
+    print("-" * separator_width)
+
+    for i in range(0, print_count):
+        pname = sorted_usage[i][0]
+        usage_kb = sorted_usage[i][1]
+        label = pname
+        if not options.all:
+            cnt = pid_count_dict.get(pname, 1)
+            if cnt > 1:
+                label = "%s (%d×)" % (pname, cnt)
+
+        rss_kb = task_rss.get(pname, usage_kb)
+        values = []
+        if account_shared:
+            values += [task_private.get(pname, rss_kb), task_shared.get(pname, 0)]
+        if use_pss:
+            values.append(task_pss.get(pname, rss_kb))
+        values.append(rss_kb)
+        line = size_format % tuple(get_size_str(v * 1024) for v in values)
+        if options.graph:
+            percentage = (usage_kb * 100.0 / system_total_mem_kb) \
+                if system_total_mem_kb > 0 else 0
+            line += " " + get_memory_bar(percentage, width=20)
+        print(line + "  " + truncate_middle(label, pname_width))
+        crashcolor.set_color(crashcolor.RESET)
+
+    if print_count < len(sorted_usage) - 1:
+        print("\t<...>")
+    print("=" * separator_width)
+
+    print("\nColumns:")
+    if account_shared:
+        print("  Private = RSS minus Shared")
+        if use_pss:
+            print("  Shared  = pages another process also maps (libraries, shared memory,")
+            print("            copy-on-write pages after fork)")
+        else:
+            print("  Shared  = pages of shared or file-backed mappings that another process")
+            print("            also maps (libraries, shared memory); add -P to also count")
+            print("            anonymous copy-on-write pages")
+    if use_pss:
+        print("  PSS     = each page divided by the number of processes mapping it")
+        print("  RSS     = resident pages in the page tables, a shared page counted")
+        print("            once per process")
+    else:
+        print("  RSS     = resident pages (ps), a shared page counted once per process")
+
+    def show_total(label, kb, color, with_bar):
+        crashcolor.set_color(color)
+        print("  %-42s = %s" % (label, get_size_str(kb * 1024)))
+        if system_total_mem_kb > 0:
+            percentage = kb * 100.0 / system_total_mem_kb
+            print("    %.2f%% of total system memory (%s)" %
+                  (percentage, get_size_str(system_total_mem_kb * 1024)))
+            if with_bar and options.graph:
+                print("    %s" % get_memory_bar(percentage, width=TOTAL_BAR_WIDTH))
+        crashcolor.set_color(crashcolor.RESET)
+
+    total_rss_kb = shared_info['total_rss_kb']
+    print("\nSummary (%d processes analyzed):" % shared_info['tasks_analyzed'])
+    if account_shared:
+        total_private_kb = shared_info['total_private_kb']
+        total_shared_kb = shared_info['total_shared_kb']
+        show_total("Total Private", total_private_kb, crashcolor.GREEN, True)
+        show_total("Total Shared (each page counted once)", total_shared_kb,
+                   crashcolor.CYAN, True)
+        show_total("Actual memory used (Private + Shared)",
+                   total_private_kb + total_shared_kb, crashcolor.BLUE, True)
+    if use_pss:
+        show_total("Total PSS", sum(task_pss.values()), crashcolor.BLUE,
+                   not account_shared)
+    show_total("Total RSS (shared counted per process)", total_rss_kb,
+               crashcolor.YELLOW, False)
+    if account_shared:
+        print("    Over-counted by: %s" %
+              get_size_str(shared_info['over_counted_kb'] * 1024))
 
 
 def show_slabtop(options):
@@ -5530,11 +5293,187 @@ def show_oom_process_tree(op, oom_rows, total_usage):
     crashcolor.set_color(crashcolor.RESET)
 
 
-def show_oom_memory_usage(op, oom_dict, total_usage):
+def get_live_tasks():
+    """pid -> (task address, command) of the processes in the vmcore."""
+    live = {}
+    for line in exec_crash_command("ps -G").splitlines()[1:]:
+        if line.startswith('>'):
+            line = ' ' + line[1:]
+        words = line.split()
+        if len(words) < 9:
+            continue
+        try:
+            pid = int(words[0])
+        except ValueError:
+            continue
+        live[pid] = (words[3], " ".join(words[8:]))
+    return live
+
+
+def is_oom_panic(result_lines):
+    """True when vm.panic_on_oom turned the last OOM into this panic."""
+    for line in result_lines:
+        if "Kernel panic - not syncing" in line and \
+           ("Out of memory" in line or "out of memory" in line or
+            "deadlocked on memory" in line):
+            return True
+    return False
+
+
+def get_oom_shared_info(oom_rows, live_tasks, meminfo_dict, scan_cache):
+    """
+    Splits each process of an OOM task dump into private and shared memory.
+
+    Newer kernels print rss_anon, rss_file and rss_shmem: anonymous memory is
+    taken as private, file and shmem pages as shareable.  RHEL's dump has
+    only rss, so the processes still alive in the vmcore (same PID and name)
+    are measured from their page tables, as 'meminfo -u --shared' does.
+
+    Returns None when neither works, else:
+        {'source': 'log' or 'vmcore',
+         'private': {key: bytes}, 'shared': {key: bytes},
+         'shared_sum': bytes, shared memory counted per process,
+         'unique_shared': bytes counted once, or None if unknown,
+         'matched': processes with a split, 'rows': processes in the dump}
+    """
+    private = {}
+    shared = {}
+    if oom_rows and all('rss_file' in row for row in oom_rows):
+        for row in oom_rows:
+            key = row['key']
+            private[key] = private.get(key, 0) + row.get('rss_anon', 0)
+            shared[key] = shared.get(key, 0) + row['rss_file'] + \
+                row.get('rss_shmem', 0)
+        shared_sum = sum(shared.values())
+        # File pages are counted once in Mem-Info's mapped
+        mapped = meminfo_dict.get('mapped')
+        unique_shared = min(shared_sum, mapped) if mapped is not None else None
+        return {'source': 'log', 'private': private, 'shared': shared,
+                'shared_sum': shared_sum, 'unique_shared': unique_shared,
+                'matched': len(oom_rows), 'rows': len(oom_rows)}
+
+    task_list = []
+    dump_rss = {}
+    for row in oom_rows:
+        dump_rss[row['key']] = dump_rss.get(row['key'], 0) + row['rss']
+        live = live_tasks.get(row['pid'])
+        # The dump prints comm, at most 15 characters
+        if live is None or live[1][:15] != row['name'][:15]:
+            continue
+        task_list.append((row['key'], live[0], row['rss'] // 1024))
+    if not task_list:
+        return None
+
+    info = collect_shared_mappings_global(task_list, all_vmas=False,
+                                          count_unique=True, cache=scan_cache)
+    # Private is what the dump's rss leaves after the shared pages; a
+    # process gone from the vmcore counts as private
+    for key, kb in info['task_shared'].items():
+        shared[key] = kb * 1024
+        private[key] = max(0, dump_rss[key] - shared[key])
+    return {'source': 'vmcore', 'private': private, 'shared': shared,
+            'shared_sum': sum(shared.values()),
+            'unique_shared': info['total_shared_kb'] * 1024,
+            'matched': info['tasks_analyzed'], 'rows': len(oom_rows)}
+
+
+def show_oom_shared_usage(op, oom_dict, total_usage, shared_info,
+                          system_total_mem_bytes):
+    """'meminfo -O --shared': the OOM task dump with private and shared."""
+    sorted_oom_dict = sorted(oom_dict.items(),
+                            key=operator.itemgetter(1), reverse=True)
+    min_number = getattr(op, 'oom_top', 10)
+    if (op.all):
+        min_number = len(sorted_oom_dict)
+    print_count = min(len(sorted_oom_dict), min_number)
+    show_graph = getattr(op, 'graph', False)
+
+    max_widths = get_optimal_max_widths(show_graph)
+    max_pname_len = max(len(sorted_oom_dict[i][0]) for i in range(0, print_count)) \
+        if print_count > 0 else 20
+    pname_width = max(20, min(max_widths['process_name'], max_pname_len + 2))
+    separator_width = pname_width + 12 * 3 + (22 if show_graph else 0)
+
+    private = shared_info['private']
+    shared = shared_info['shared']
+
+    print("=" * separator_width)
+    format_str = "%-" + str(pname_width) + "s %11s %11s %11s"
+    header = format_str % ("NAME", "Private", "Shared", "Usage")
+    if show_graph:
+        header += " %-21s" % "Usage_Percent"
+    print(header)
+    print("-" * separator_width)
+
+    for i in range(0, print_count):
+        key, mem_usage = sorted_oom_dict[i]
+        if key in private:
+            private_str = get_size_str(private[key])
+            shared_str = get_size_str(shared.get(key, 0))
+        else:
+            private_str = shared_str = "-"
+        line = format_str % (truncate_middle(key, pname_width), private_str,
+                             shared_str, get_size_str(mem_usage))
+        if show_graph:
+            percentage = (mem_usage * 100.0 / system_total_mem_bytes) \
+                if system_total_mem_bytes > 0 else 0
+            line += " " + get_memory_bar(percentage, width=ITEM_BAR_WIDTH)
+        print(line)
+        crashcolor.set_color(crashcolor.RESET)
+
+    if print_count < len(sorted_oom_dict):
+        print("\t<...>")
+    print("=" * separator_width)
+
+    if shared_info['source'] == 'log':
+        print("Private = rss_anon, Shared = rss_file + rss_shmem, from the OOM dump")
+    else:
+        print("Private and Shared: read from the page tables of the %d of %d "
+              "processes" % (shared_info['matched'], shared_info['rows']))
+        print("still in the vmcore ('-': none left; in a group, the gone ones"
+              " count as private)")
+        if not shared_info.get('oom_panic', False):
+            crashcolor.set_color(crashcolor.YELLOW)
+            print("The vmcore was not taken at this OOM: the split is as of "
+                  "the dump")
+            crashcolor.set_color(crashcolor.RESET)
+
+    crashcolor.set_color(crashcolor.BLUE)
+    print("Total memory usage from processes = %s" % get_size_str(total_usage, True))
+    crashcolor.set_color(crashcolor.RESET)
+    unique_shared = shared_info['unique_shared']
+    shared_sum = shared_info['shared_sum']
+    print("  Shared, counted per process     = %s" % get_size_str(shared_sum))
+    if unique_shared is None:
+        return
+    if shared_info['source'] == 'log':
+        label = "  Shared, at most (Mem-Info mapped)"
+    else:
+        label = "  Shared, each page counted once"
+    print("%-34s= %s" % (label, get_size_str(unique_shared)))
+    actual = total_usage - (shared_sum - unique_shared)
+    crashcolor.set_color(crashcolor.BLUE)
+    print("Memory used without double counting %s %s" %
+          ("~" if shared_info['source'] == 'log' else "=",
+           get_size_str(actual, True)))
+    crashcolor.set_color(crashcolor.RESET)
+    if show_graph and system_total_mem_bytes > 0:
+        percentage = actual * 100.0 / system_total_mem_bytes
+        print("\tNotes) %.2f percent from total system memory(%s)" %
+              (percentage, get_size_str(system_total_mem_bytes, True)))
+        print("\t       %s" % get_memory_bar(percentage, width=TOTAL_BAR_WIDTH))
+
+
+def show_oom_memory_usage(op, oom_dict, total_usage, shared_info=None):
     # Get system's total memory for percentage calculation
     system_meminfo = get_meminfo_dict()
     system_total_mem_kb = system_meminfo.get('MemTotal', 0)
     system_total_mem_bytes = system_total_mem_kb * 1024
+
+    if shared_info is not None:
+        show_oom_shared_usage(op, oom_dict, total_usage, shared_info,
+                              system_total_mem_bytes)
+        return
 
     sorted_oom_dict = sorted(oom_dict.items(),
                             key=operator.itemgetter(1), reverse=True)
@@ -5713,11 +5652,17 @@ def show_oom_events(op):
         rss_index = -1
         pid_index = -1
         pname_index = -1
+        split_index = {}  # rss_anon/rss_file/rss_shmem, on newer kernels
         oom_dict = {}
         oom_rows = []
         meminfo_dict = {}
         cgroup_dict = {}
         total_usage = 0
+        live_tasks = None  # pid -> (task, comm), for --shared
+        scan_cache = {}    # each live task is scanned once for all events
+        oom_panic = False
+        total_oom_events = sum(1 for line in result_lines
+                               if "invoked oom-killer:" in line)
         oom_display_counter = 0  # Counter for displayed events
         skip_message_shown = False  # Track if we've shown the skip message
         in_displayed_event = False  # Track if we're in an event that should be displayed
@@ -5846,6 +5791,8 @@ def show_oom_events(op):
                         pid_index = i
                     elif words[i] == "name":
                         pname_index = i
+                    elif words[i] in ("rss_anon", "rss_file", "rss_shmem"):
+                        split_index[words[i]] = i
 
                 continue
 
@@ -5878,7 +5825,25 @@ def show_oom_events(op):
                 if getattr(op, 'oom_tree', False):
                     show_oom_process_tree(op, oom_rows, total_usage)
                 else:
-                    show_oom_memory_usage(op, oom_dict, total_usage)
+                    shared_info = None
+                    if getattr(op, 'account_shared', False):
+                        if live_tasks is None:
+                            live_tasks = get_live_tasks()
+                            oom_panic = is_oom_panic(result_lines)
+                        shared_info = get_oom_shared_info(oom_rows, live_tasks,
+                                                          meminfo_dict,
+                                                          scan_cache)
+                        if shared_info is None:
+                            crashcolor.set_color(crashcolor.YELLOW)
+                            print("--shared: the dump has no rss_file column "
+                                  "and none of its processes are in the vmcore")
+                            crashcolor.set_color(crashcolor.RESET)
+                        else:
+                            # The vmcore shows the memory of the last OOM
+                            shared_info['oom_panic'] = oom_panic and \
+                                oom_event_counter == total_oom_events
+                    show_oom_memory_usage(op, oom_dict, total_usage,
+                                          shared_info)
                 if op.details:
                     show_oom_meminfo(op, meminfo_dict)
                 oom_invoked = False
@@ -5888,6 +5853,7 @@ def show_oom_events(op):
                 rss_index = -1
                 pid_index = -1
                 pname_index = -1
+                split_index = {}
                 oom_dict = {}
                 oom_rows = []
                 meminfo_dict = {}
@@ -5905,14 +5871,18 @@ def show_oom_events(op):
                 rss = int(words[rss_index]) * page_size
                 total_usage = total_usage + rss
                 pname = words[pname_index]
-                try:
-                    oom_rows.append({'pid': int(pid),
-                                     'name': pname,
-                                     'rss': rss})
-                except ValueError:
-                    pass
+                key = pname
                 if op.all:
-                    pname = pname + (" (%s)" % pid)
+                    key = pname + (" (%s)" % pid)
+                try:
+                    row = {'pid': int(pid), 'name': pname, 'rss': rss,
+                           'key': key}
+                    for column, index in split_index.items():
+                        row[column] = int(words[index]) * page_size
+                    oom_rows.append(row)
+                except (ValueError, IndexError):
+                    pass
+                pname = key
                 if pname in oom_dict:
                     rss = rss + oom_dict[pname]
                 oom_dict[pname] = rss
@@ -6208,14 +6178,19 @@ OPTION_EXAMPLES = {
     ],
     "--oom-ascii": ["meminfo -O --oom-tree --oom-ascii"],
     "--oom-top": ["meminfo -O --oom-top 20"],
-    "-P": ["meminfo -P", "meminfo -P --shared"],
+    "-P": ["meminfo -P", "meminfo -P --shared", "meminfo -P -a"],
     "-p": ["meminfo -p 0x2f1c0 -t u64"],
     "--pager": ["meminfo -u --progress --pager 500"],
     "--progress": ["meminfo -u --progress"],
     "--reverse": ["meminfo -s --reverse"],
     "-s": ["meminfo -s", "meminfo -s -l"],
     "-S": ["meminfo -S kmalloc-256", "meminfo -S dentry -d"],
-    "--shared": ["meminfo -O --shared", "meminfo -P --shared"],
+    "--shared": [
+        "meminfo -u --shared",
+        "meminfo -P --shared",
+        "meminfo -O --shared",
+        "meminfo -Og --shared -a",
+    ],
     "--corrupt": ["meminfo --corrupt dentry", "meminfo --corrupt dentry:3"],
     "-t": ["meminfo -p 0x2f1c0 -t u64"],
     "-u": ["meminfo -u", "meminfo -u -n"],
@@ -6314,7 +6289,8 @@ def meminfo():
                   help="Show top N memory consumers (default: 10)")
     op.add_option("-P", "--pss", dest="memusage_pss", default=0,
                   action="store_true",
-                  help="Show memory usages(pss) by tasks")
+                  help="Show memory usage by tasks as PSS, read from each "
+                       "process's page tables (slower than -u)")
     op.add_option("-p", "--percpu", dest="percpu", default="",
                   action="store", type="string",
                   help="Convert percpu address into virtual address")
@@ -6335,7 +6311,8 @@ def meminfo():
                   help="Show details of a slab")
     op.add_option("--shared", dest="account_shared", default=0,
                   action="store_true",
-                  help="Account for shared memory in OOM analysis to prevent double-counting")
+                  help="Split memory into private and shared, each shared "
+                       "page counted once (with -u, -P or -O)")
     op.add_option("--corrupt", dest="corrupt", default="",
                   action="store", type="string",
                   help="Check SLAB corruption. Format: <kmem_cache_addr|slab_name>[:<cpu_num>]")

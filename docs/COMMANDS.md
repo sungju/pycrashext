@@ -134,8 +134,30 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | Option | Long Form | Description |
 |--------|-----------|-------------|
 | `-u` | `--memusage` | Show memory usage by tasks |
-| `-P` | `--pss` | Show memory usage (PSS) by tasks |
+| `-P` | `--pss` | Show memory usage by tasks as PSS, read from each process's page tables (slower than `-u`) |
 | `-n` | `--nogroup` | Show data in individual tasks (not grouped) |
+| `--shared` | | Split memory into private and shared, each shared page counted once (with `-u`, `-P` or `-O`) |
+
+`--shared` and `-P` read each process's page tables and every mapped page's
+`_mapcount`, the way `/proc/<pid>/smaps` does; the crash task context is left
+alone. A page mapped by more than one process is shared, and the summary
+counts it once, so "Actual memory used" is what the processes really take,
+while the RSS sum counts a shared page once per process.
+
+- `-u --shared` walks only the mappings other processes can share
+  (`VM_SHARED` and file-backed), so it is the faster one; Private is RSS
+  minus Shared.
+- `-P` walks every mapping. PSS gives each process its share of a page
+  (page size / mapcount), so the PSS total equals the memory actually used.
+  RSS here is what the page tables hold, which can differ from `ps` where
+  per-thread RSS counters lag (RHEL 8).
+- `-P --shared` adds Private/Shared columns; Shared then also covers
+  copy-on-write pages shared after `fork()`.
+
+hugetlbfs and `VM_IO`/`VM_PFNMAP` mappings are skipped (they are not in RSS).
+x86_64 walks the page tables directly; other architectures use `vm -P` for
+each mapping, which is much slower. Ctrl-C stops the scan and shows what was
+read so far.
 
 #### OOM Analysis
 
@@ -148,7 +170,16 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | `--oom-tree` | | | Show the OOM task dump as a process tree |
 | `--oom-ascii` | | | Use ASCII instead of Unicode glyphs in `--oom-tree` |
 | `--process-filter` | | `<name>` | Filter OOM events by process name (comma-separated or regex) |
-| `--shared` | | | Account for shared memory in OOM analysis to prevent double-counting |
+| `--shared` | | | Split each process of the OOM task dump into private and shared memory |
+
+`-O --shared`: kernels that print `rss_anon`, `rss_file` and `rss_shmem`
+in the task dump get Private = anon and Shared = file + shmem, with
+Mem-Info's `mapped` as the upper bound of shared memory counted once.
+RHEL's dump prints only `rss`, so the processes still in the vmcore (same
+PID and name) are measured from their page tables, as `-u --shared` does;
+`-` marks a process that is gone. That is exact when `vm.panic_on_oom` made
+the dump at the last OOM; for earlier OOMs the output says the split is as
+of the dump. `--oom-tree` ignores `--shared`.
 
 #### Page & TLB Analysis
 
@@ -193,6 +224,8 @@ meminfo -s                    # Show slab usage (slabtop)
 meminfo -S kmalloc-256        # Show details of kmalloc-256 slab
 meminfo -u                    # Show per-task memory usage
 meminfo -P                    # Show per-task PSS memory usage
+meminfo -u --shared           # Private and shared memory per task, shared counted once
+meminfo -O --shared           # The same split for the processes of each OOM event
 meminfo -O                    # Analyze OOM killer events
 meminfo --oom-summary         # OOM dashboard with pattern analysis
 meminfo -O --process-filter java  # OOM events filtered by process name
