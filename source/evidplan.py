@@ -207,6 +207,9 @@ def base_steps():
         Step("logscan", "Known kernel log signatures", 120, 40),
         Step("log", "Kernel log, last lines", 0, 150),
         Step("mod -t", "Tainted modules", 40, 10),
+        Step("modinfo --third-party", "Third-party modules: debuginfo, memory, hooks, frames",
+             40, 15, "whether a third-party module holds memory, is called into, or is"
+             " on a stack, and pointers into freed module memory"),
         Step("kmem -i", "Memory at the crash", 40, 0),
         Step("ps -S", "Task states", 30, 0),
         Step("autocheck", "Known-issue rules (pycrashext)", 60, 20),
@@ -227,6 +230,15 @@ def branch_steps(cls, exc, sys_fields):
             steps.append(Step("edis -f %s" % exc["func"], "Disassembly of the faulting function", 60, 60))
         if exc.get("module"):
             steps.append(Step("modinfo --details %s" % exc["module"], "Faulting module", 60, 20))
+            steps.append(Step("modinfo --log %s" % exc["module"], "Kernel log lines of the faulting module",
+                              50, 30, "when it was loaded, its taint messages and its errors"))
+            steps.append(Step("modinfo --hooks %s" % exc["module"],
+                              "Where the kernel calls into the faulting module", 60, 20))
+        elif exc.get("rip"):
+            # No module claims the RIP: it may be BPF code, a trampoline, or
+            # freed module-area memory.
+            steps.append(Step("modinfo -b", "Module, BPF or freed code in the backtraces", 40, 20,
+                              "what code the RIP is in when no module names it"))
         addr = fault_address(sys_fields.get("PANIC", ""))
         if "corruption" in hits and addr and not near_null(addr):
             steps.append(Step("kmem %s" % addr, "Slab state of the faulting address", 40, 10))
@@ -238,6 +250,8 @@ def branch_steps(cls, exc, sys_fields):
         steps.append(Step("meminfo --oom-summary", "OOM summary", 100, 40))
         steps.append(Step("meminfo --oom-top 10", "Top memory consumers", 40, 0))
         steps.append(Step("meminfo -s", "Slab caches", 40, 0))
+        steps.append(Step("modinfo --mem all", "Memory allocated by module code", 30, 0,
+                          "vmalloc and slab memory per module, largest first"))
         if "oom_cgroup" in hits:
             steps.append(Step("cginfo -m", "Memory by cgroup", 40, 0))
     if "C" in br:

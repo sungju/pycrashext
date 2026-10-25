@@ -2762,17 +2762,35 @@ def module_build_id(module):
     return None
 
 
+_mod_output = None
+
 def module_object_file(name):
     """The file crash loaded for a module ('mod' OBJECT FILE), None when it
     loaded none."""
+    global _mod_output
     try:
-        for line in exec_crash_command("mod").splitlines():
+        if _mod_output is None:
+            _mod_output = exec_crash_command("mod")
+        for line in _mod_output.splitlines():
             words = line.split()
             if len(words) >= 5 and words[1] == name:
                 return None if words[4] == "(not" else words[4]
     except Exception:
         pass
     return None
+
+
+def debuginfo_status(module):
+    """'none', 'mismatch', 'match' or 'unchecked' for the debuginfo crash
+    uses for the module (see debuginfo_note())."""
+    notes = debuginfo_note(module)
+    if len(notes) == 1 and notes[0][0]:
+        return "none"
+    if any(warn and "another build" in text for warn, text in notes):
+        return "mismatch"
+    if "(build ID matches)" in notes[0][1]:
+        return "match"
+    return "unchecked"
 
 
 def debuginfo_note(module):
@@ -2804,6 +2822,114 @@ def debuginfo_note(module):
         notes.append((True, "Could not compare it with the loaded module, and %s is"
                             " out-of-tree: check that\nthe debuginfo is for this build." % name))
     return notes
+
+
+# ============================================================================
+# --third-party: one table for every third-party module
+# ============================================================================
+
+# Taints that say a module did not come with the kernel: out-of-tree,
+# unsigned, proprietary, RHEL partner-supported, staging, force-loaded.
+THIRD_PARTY_TAINTS = "OEPpCF"
+
+
+def is_third_party(taints, signed):
+    """True for a module that did not come with the kernel. signed is None
+    when the kernel doesn't record signatures."""
+    return any(t in THIRD_PARTY_TAINTS for t in taints) or signed is False
+
+
+def show_third_party(options):
+    if len(module_list) == 0:
+        load_module_details()
+    third = []
+    for module in module_list:
+        signed = bool(module.sig_ok) if _has_member("sig_ok") else None
+        taints = module_taints(module)
+        if is_third_party(taints, signed):
+            third.append((module, taints, signed))
+    ranges = code_ranges()
+    areas = module_areas()
+    if not third:
+        print("No third-party modules: none is out-of-tree, unsigned, proprietary,"
+              " partner-supported, staging or force-loaded")
+        # Still worth one cheap look: code in the module area that no module
+        # owns (freed BPF code, a trampoline) on an active task's stack.
+        try:
+            frames = frames_by_module(parse_backtraces(exec_crash_command("bt -a")),
+                                      ranges, areas)
+        except Exception:
+            frames = []
+        for name, mod_frames in frames:
+            if name == UNLOADED or name.startswith("("):
+                crashcolor.set_color(crashcolor.LIGHTRED)
+                print("\n%s: %d frame%s in 'bt -a' (modinfo -b for them)" % (
+                    name, len(mod_frames), "" if len(mod_frames) == 1 else "s"))
+                crashcolor.set_color(crashcolor.RESET)
+                if name == UNLOADED:
+                    print_unloaded_hint([f[5] for f in mod_frames])
+        return
+
+    try:
+        vmalloc = vmalloc_by_module(ranges, areas)
+    except Exception:
+        vmalloc = {}
+    try:
+        slabs = slab_caches_by_module(ranges, areas)
+    except Exception:
+        slabs = {}
+    hooks = []
+    for label, collect in HOOK_COLLECTORS:
+        try:
+            hooks.extend(collect())
+        except Exception:
+            pass
+    found = hooks_by_module(hooks, ranges, areas)
+    try:
+        frames = frames_by_module(parse_backtraces(exec_crash_command("bt -a")),
+                                  ranges, areas)
+    except Exception:
+        frames = []
+    in_bt = dict((name, len(f)) for name, f in frames)
+
+    print("Third-party modules: %d of %d (out-of-tree, unsigned, proprietary, partner,"
+          " staging or force-loaded)" % (len(third), len(module_list)))
+    print("%-22s %-7s %-6s %-10s %5s %10s %10s %6s %6s" % (
+        "MODULE", "TAINTS", "SIGNED", "DEBUGINFO", "REFS", "VMALLOC", "SLAB",
+        "HOOKS", "IN BT"))
+    mismatched = []
+    for module, taints, signed in third:
+        name = str(module.name)
+        vbytes = sum(size for _, size in vmalloc.get(name, []))
+        sbytes = sum((cache_usage(addr) or (0, 0, 0))[2] for addr, _ in slabs.get(name, []))
+        refs = module_refs(module)
+        status = debuginfo_status(module)
+        if status == "mismatch":
+            mismatched.append(name)
+        if in_bt.get(name):
+            crashcolor.set_color(crashcolor.LIGHTRED)
+        print("%-22s %-7s %-6s %-10s %5s %10s %10s %6d %6s" % (
+            name, taints or "-", "-" if signed is None else ("yes" if signed else "no"),
+            status, "-" if refs is None else refs, _mb(vbytes), _mb(sbytes),
+            len(found.get(name, [])), in_bt.get(name) or "-"))
+        crashcolor.set_color(crashcolor.RESET)
+
+    freed_hooks = found.get(UNLOADED, [])
+    freed_frames = dict(frames).get(UNLOADED, [])
+    if freed_hooks or freed_frames:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("\nFreed memory in the module area: %d kernel reference%s, %d backtrace"
+              " frame%s" % (len(freed_hooks), "" if len(freed_hooks) == 1 else "s",
+                            len(freed_frames), "" if len(freed_frames) == 1 else "s"))
+        crashcolor.set_color(crashcolor.RESET)
+        print_unloaded_hint([a for _, a, _ in freed_hooks] + [f[5] for f in freed_frames])
+    if mismatched:
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("\nDebuginfo of another build is loaded for: %s; its source lines and"
+              " structs are wrong" % ", ".join(mismatched))
+        crashcolor.set_color(crashcolor.RESET)
+    print("\nNext: modinfo <module> (details, debuginfo), --hooks <module>, --mem"
+          " <module>, --log <module>, --kabi <module>")
 
 
 def modinfo():
@@ -2840,6 +2966,13 @@ def modinfo():
                        " and misc devices, netfilter hooks, kprobes, ftrace"
                        " ops. References into freed memory in the module area"
                        " are listed too")
+    op.add_option("--third-party", dest="third_party", default=False,
+                  action="store_true",
+                  help="One table of the third-party modules (out-of-tree,"
+                       " unsigned, proprietary, partner, staging,"
+                       " force-loaded): taints, signature, debuginfo, refs,"
+                       " memory, kernel hooks and backtrace frames, and"
+                       " pointers into freed module-area memory")
     op.add_option("--log", dest="module_log", default=None, metavar="MODULE",
                   action="store", type="string",
                   help="Show the kernel log lines that name a module, taint"
@@ -2909,7 +3042,7 @@ def modinfo():
     if args and o.module_detail is None and o.disasm_module is None and \
        o.module_params is None and o.module_deps is None and \
        o.module_hooks is None and o.module_mem is None and \
-       o.module_log is None and o.module_kabi is None and \
+       o.module_log is None and o.module_kabi is None and not o.third_party and \
        o.batch_run is None and o.module_addr is None:
         o.module_detail = args[0]
 
@@ -2923,6 +3056,10 @@ def modinfo():
 
     if o.module_mem is not None:
         show_module_mem(o)
+        sys.exit(0)
+
+    if o.third_party:
+        show_third_party(o)
         sys.exit(0)
 
     if o.module_log is not None:

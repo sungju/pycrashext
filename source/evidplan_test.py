@@ -113,6 +113,35 @@ def check_branch_steps_follow_the_fault():
     assert not any(x.startswith("kmem ") for x in cmds)
 
 
+def check_branch_steps_module_follow_ups():
+    c = classify(parse_sys(SYS), ["BUG: unable to handle kernel NULL pointer dereference at 0000000000000008"])
+    cmds = [s.cmd for s in branch_steps(c, parse_exception(BT), parse_sys(SYS))]
+    i = cmds.index("modinfo --details mydrv")
+    assert cmds[i + 1:i + 3] == ["modinfo --log mydrv", "modinfo --hooks mydrv"], cmds
+    assert "modinfo -b" not in cmds
+
+    # A RIP no module names (freed BPF code, a trampoline): modinfo -b says
+    # what code it is in.
+    bt = ('PID: 5230   TASK: ffff9d3fc5c78000  CPU: 6    COMMAND: "cribl"\n'
+          '    [exception RIP: unknown or invalid address]\n'
+          '    RIP: ffffffffc0745ee4  RSP: ffffb2a3c3e3bc18  RFLAGS: 00010246\n')
+    cmds = [s.cmd for s in branch_steps(c, parse_exception(bt), {})]
+    assert "modinfo -b" in cmds and not any(x.startswith("modinfo --details") for x in cmds)
+
+
+def check_branch_steps_oom_memory_by_module():
+    c = classify({"PANIC": "Kernel panic - not syncing: Out of memory: system-wide panic_on_oom is enabled"},
+                 ["[1.0] Out of memory: Killed process 1234 (java)"])
+    assert "B" in c["branches"], c
+    cmds = [s.cmd for s in branch_steps(c, parse_exception(""), {})]
+    assert "modinfo --mem all" in cmds, cmds
+
+
+def check_base_steps_third_party_overview():
+    names = [s.cmd for s in base_steps()]
+    assert names.index("modinfo --third-party") == names.index("mod -t") + 1
+
+
 def check_branch_steps_hang_on_vm():
     log = ["Hypervisor detected: KVM", "watchdog: BUG: soft lockup - CPU#2 stuck for 22s!",
            "rcu: INFO: rcu_sched detected stalls on CPUs/tasks:"]

@@ -641,6 +641,8 @@ Taint letters come from the vmcore's own `taint_flags[]` table (RHEL 7: `tnts[]`
 
 `-b`, `--hooks` and `--mem` map addresses with the same rules. BPF programs and trampolines (`bpf_kallsyms`), kprobe instruction slots and ftrace trampolines are allocated in the module area too, and are shown as such. An address in the module area (`mod_tree.addr_min`..`addr_max`) that belongs to none of them is shown as **freed memory in the module area**: the code or data of an unloaded module, or of a freed BPF program or trampoline, that something still uses. The note under it says whether any module has been unloaded since boot (`last_unloaded_module`) and whether each address is still mapped.
 
+`--third-party` is the starting point for a vmcore with third-party modules: one row per module that is out-of-tree, unsigned, proprietary, RHEL partner-supported, staging or force-loaded, with its taints, signature, debuginfo status (`none`, `mismatch`, `match`, `unchecked`), refs, vmalloc and slab memory, the number of kernel references into it (`--hooks`) and its frames in `bt -a` (a module on a stack is shown in red). Below the table come references and frames in freed module-area memory and the modules whose loaded debuginfo is from another build. With no third-party modules it prints one line and checks nothing else.
+
 `--log <module>` shows the kernel log lines that name the module (as a word, so `sfc` matches `sfc 0000:3b:00.0:` and `[sfc efrm]` but not `sfc_char`). Taint, signature and error lines (`Unknown symbol`, `WARNING:`, `RIP:`, lockups, failures) come first, and repeats of the same message are folded into one line.
 
 `--kabi <module>` disassembles the module's text once and lists the exported kernel symbols its code calls, jumps to or reads, with the functions that use them. With a kABI stablelist it marks the ones not on it, which matters for supporting a third-party module. The list is looked for in `--kabi-list`, `$KABI_STABLELIST`, `/lib/modules/kabi-rhel<N><M>/kabi_stablelist_<arch>` and `kabi-current` (kernel-abi-stablelists), and `$EDIS_SOURCE_DIR/redhat/kabi/kabi-module/kabi_<arch>` (RHEL 9+ source trees). An alias crash shows instead of the listed name (`__memcpy` for `memcpy`) counts as listed, and compiler-emitted calls (`__fentry__`, return thunks, `__stack_chk_fail`) are left out.
@@ -658,6 +660,7 @@ The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which re
 | | `--bt-all` | | Like `-b`, for every task (`foreach bt`; can be slow) |
 | | `--hooks` | `<module>\|all` | Where the kernel calls into a module, and pointers into freed module-area memory |
 | | `--mem` | `<module>\|all` | Memory a module holds: its size, vmalloc areas and slab caches it allocated |
+| | `--third-party` | | One table of the third-party modules: taints, signature, debuginfo, refs, memory, hooks, frames |
 | | `--log` | `<module>` | Kernel log lines naming the module, taint and errors first |
 | | `--kabi` | `<module>` | Exported kernel symbols the module uses, and those not on the kABI stablelist |
 | | `--kabi-list` | `<path>` | kABI stablelist file or directory for `--kabi` |
@@ -691,6 +694,7 @@ modinfo --hooks sfc               # Timers, works, IRQs, notifiers... that call 
 modinfo --hooks all               # The same for every module, and freed module-area memory
 modinfo --mem onload              # Memory onload's code allocated
 modinfo --mem all                 # vmalloc and slab memory per module, largest first
+modinfo --third-party             # Every third-party module in one table: start here
 modinfo --log openafs             # When it loaded, its taint messages, its errors
 modinfo --kabi openafs            # Kernel symbols it uses outside the kABI stablelist
 modinfo --kabi onload --kabi-list /lib/modules/kabi-rhel810/kabi_stablelist_x86_64
@@ -1275,7 +1279,7 @@ insights -t            # Run with test data
 
 ### evidence
 
-Collects, in one crash session, the raw output a vmcore analysis rests on, into one Markdown file an AI (or an engineer) writes the report from, instead of an AI driving crash one command at a time. It runs a base set (`sys`, `caseinfo`, `sysinfo`, `bt`, `logscan`, the last 150 log lines, `mod -t`, `kmem -i`, `ps -S`, `autocheck`), picks the analysis branch from `sys` and the log signatures (`logsig.py`): panic/oops, OOM, hang/lockup/stall, sysrq, death of init. It then runs that branch's commands, with follow-ups from what it already saw (`edis -r <RIP>`, `sym`, `modinfo --details <module>`, `kmem <address>`, `hangcheck -g`, `lockinfo -a`, `lockup`, `rcuinfo`, `vminfo --overcommit -d` on a hung VM, ...).
+Collects, in one crash session, the raw output a vmcore analysis rests on, into one Markdown file an AI (or an engineer) writes the report from, instead of an AI driving crash one command at a time. It runs a base set (`sys`, `caseinfo`, `sysinfo`, `bt`, `logscan`, the last 150 log lines, `mod -t`, `modinfo --third-party`, `kmem -i`, `ps -S`, `autocheck`), picks the analysis branch from `sys` and the log signatures (`logsig.py`): panic/oops, OOM, hang/lockup/stall, sysrq, death of init. It then runs that branch's commands, with follow-ups from what it already saw (`edis -r <RIP>`, `sym`, `modinfo --details`/`--log`/`--hooks <module>` for a faulting module, `modinfo -b` when no module names the RIP, `modinfo --mem all` on an OOM, `kmem <address>`, `hangcheck -g`, `lockinfo -a`, `lockup`, `rcuinfo`, `vminfo --overcommit -d` on a hung VM, ...).
 
 Each output goes into the file under a `**Source:** \`/cores/tasks/<task>\` → \`<command>\`` line, exactly as printed, without colour codes. A long output keeps its first and last lines with a `<<< SKIPPED N lines >>>` line carrying the true count, so excerpts copied from it can be checked by `excerpt-markers --revive` and `/datacheck`. A short summary at the top (branches, fault, log signatures, commands that failed) is labelled as derived.
 

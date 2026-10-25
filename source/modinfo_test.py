@@ -345,6 +345,16 @@ LOG = """[    1.847807] sfc 0000:3b:00.0: Solarflare NIC detected: device 1924:0
 """
 
 
+def check_is_third_party():
+    t = modinfo.is_third_party
+    assert t("OE", False) and t("P", None) and t("p", True) and t("C", True)
+    # Unsigned is third-party even with no taint (signature not enforced).
+    assert t("", False)
+    assert not t("", True) and not t("", None)
+    # 'K' (live patch) alone is a Red Hat kpatch, not third-party.
+    assert not t("K", True)
+
+
 def check_module_log():
     lines = modinfo.module_log_lines(LOG, "sfc")
     # 'sfc_char' is another module; '[sfc efrm]' is sfc.
