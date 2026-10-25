@@ -11,6 +11,7 @@ from LinuxDump.trees import *
 
 import sys
 import crashcolor
+import optexamples
 
 
 def get_module_name(symbol):
@@ -1007,6 +1008,18 @@ def show_bpf_tree(options):
 
 
 
+OPTION_EXAMPLES = {
+    "-b": ["traceinfo -b", "traceinfo -b -d"],
+    "-d": ["traceinfo -b -d", "traceinfo -b -d 12,15"],
+    "-m": ["traceinfo -m"],
+    "-t": ["traceinfo -t"],
+    "-D": ["traceinfo -b -d -D"],
+    "--disasm": ["traceinfo -b -d --disasm"],
+    "-i": ["traceinfo -i 0xffffffff81234567"],
+    "-A": ["traceinfo -A 0xffffffffc264d000"],
+}
+
+
 def traceinfo():
     op = OptionParser()
     op.add_option("-b", "--bpf_tree", dest="bpf_tree", default=0,
@@ -1041,6 +1054,7 @@ def traceinfo():
                   action="store", type="string",
                   help="Identify BPF code at a given address (hex) — shows prog ID, type, name")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     # Parse optional BPF Program ID filter

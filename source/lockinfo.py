@@ -19,6 +19,7 @@ from pykdump.API import *
 
 from LinuxDump import percpu
 
+import optexamples
 import crashcolor
 import lockdecode
 
@@ -1282,6 +1283,20 @@ def show_all(options):
     show_blocked(options)
 
 
+OPTION_EXAMPLES = {
+    "-s": ["lockinfo -s 0xffff8881234abcd0", "lockinfo -s runqueues"],
+    "-m": ["lockinfo -m"],
+    "-x": ["lockinfo -m -x"],
+    "-M": ["lockinfo -M 0xffff8881234abcd0"],
+    "-R": ["lockinfo -R 0xffff8881234abcd0"],
+    "-w": ["lockinfo -w 0xffff8881234abcd0"],
+    "-P": ["lockinfo -P 0xffff8881234abcd0"],
+    "-i": ["lockinfo -b -i", "lockinfo -a -i"],
+    "-a": ["lockinfo -a"],
+    "-b": ["lockinfo -b"],
+}
+
+
 def lockinfo():
     op = OptionParser()
     op.add_option("-s", "--spinlock", dest="spinlock", default="",
@@ -1316,6 +1331,7 @@ def lockinfo():
                   help="Groups UN tasks by the mutex, rwsem or percpu-rwsem they wait for,"
                        " with owners, chains and deadlocks")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.mutex != "":

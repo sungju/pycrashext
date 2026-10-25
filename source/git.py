@@ -28,6 +28,10 @@ def git():
         print_help()
         return
 
+    if '-hh' in args:
+        print_option_examples(args[0] if args[0] in OPTION_EXAMPLES else None)
+        return
+
     # Determine subcommand (log or show)
     subcommand = args[0]
 
@@ -333,6 +337,104 @@ def find(args):
     send_request(server_url, data, timeout, verbose)
 
 
+# 'git -hh' / 'git <subcommand> -hh': each option with its examples.
+# git does its own option parsing, so this is kept here rather than in
+# optexamples.OPTION_EXAMPLES form.
+OPTION_EXAMPLES = {
+    'log': [
+        ('-S<string>', 'Commits that add or remove the string (pickaxe)',
+         ['git log -Sclip_push', 'git log -Sinit_new_ldt --max-count=5']),
+        ('--grep=<pattern>', 'Search commit messages for the pattern',
+         ['git log --grep="memory leak" --max-count=10']),
+        ('--max-count=<n>', 'Limit the number of commits shown (default: 1)',
+         ['git log -Sclip_push --max-count=5']),
+        ('--stat', 'Show a diffstat for each commit',
+         ['git log -Sinit_new_ldt --stat']),
+        ('--oneline', 'One line per commit',
+         ['git log --grep=nf_tables --oneline --max-count=20']),
+        ('--repos=<repos>', 'Also search these repositories',
+         ['git log -Sinit_new_ldt --repos=rhel9,upstream']),
+        ('--all', 'Include commits older than the running kernel',
+         ['git log -Sclip_push --all --max-count=5']),
+        ('--timeout=<secs>', 'Request timeout in seconds (default: 3600)',
+         ['git log --grep=xfs --max-count=50 --timeout=600']),
+        ('--verbose', 'Show verbose output',
+         ['git log -Sclip_push --verbose']),
+    ],
+    'show': [
+        ('<commit>', 'The commit to show',
+         ['git show 1a2b3c4d5e6f', 'git show HEAD~3']),
+        ('--stat', 'Show the diffstat only',
+         ['git show 1a2b3c4d5e6f --stat']),
+        ('--name-only', 'Show only the names of changed files',
+         ['git show 1a2b3c4d5e6f --name-only']),
+        ('--pretty=<format>', 'oneline, short, medium or full',
+         ['git show 1a2b3c4d5e6f --pretty=short']),
+        ('--repos=<repo>', 'Repository to look in',
+         ['git show HEAD~3 --repos=linux', 'git show 1a2b3c4d5e6f --repos=rhel9']),
+        ('--all', 'Include commits older than the running kernel',
+         ['git show 1a2b3c4d5e6f --all']),
+        ('--timeout=<secs>', 'Request timeout in seconds (default: 3600)',
+         ['git show 1a2b3c4d5e6f --timeout=60']),
+        ('--verbose', 'Show verbose output',
+         ['git show 1a2b3c4d5e6f --verbose']),
+    ],
+    'find': [
+        ('<commit-id | subject>', 'Detected by form: 7-40 hex characters is a commit ID',
+         ['git find 1a2b3c4d5e6f', 'git find net/mlx5e: Fix crash moving to switchdev mode']),
+        ('--commit=<id>', 'Force a commit ID lookup',
+         ['git find --commit=1a2b3c4d5e6f']),
+        ('--subject=<text>', 'Force a subject text search',
+         ['git find --subject="use-after-free in nf_tables"']),
+        ('--max-count=<n>, -n', 'Maximum matches to report (default: 10)',
+         ['git find --subject="use-after-free in nf_tables" --max-count=20']),
+        ('--upstream=<name>', 'Upstream repo dir name',
+         ['git find 1a2b3c4d5e6f --upstream=linux']),
+        ('--repos=<repos>', 'Extra repos to check for backports',
+         ['git find 1a2b3c4d5e6f --repos=rhel8,rhel9']),
+        ('--message-lines=<n>', 'Lines of commit message to show (default: 20)',
+         ['git find 1a2b3c4d5e6f --message-lines=5']),
+        ('--no-message', 'Show only the subject, not the message body',
+         ['git find mm/slub: fix kmalloc accounting --no-message']),
+        ('--web', 'Always query the public sources, even on a hit',
+         ['git find 1a2b3c4d5e6f --web']),
+        ('--no-web', 'Never query the public sources (local only)',
+         ['git find 1a2b3c4d5e6f --no-web']),
+        ('--web-timeout=<s>', 'Per-request web timeout in seconds (default: 20)',
+         ['git find 1a2b3c4d5e6f --web --web-timeout=60']),
+        ('--no-backport', 'Skip the backport cross-check',
+         ['git find 1a2b3c4d5e6f --no-backport']),
+        ('--no-tags', 'Skip the release-tag lookup (much faster)',
+         ['git find 1a2b3c4d5e6f --no-tags']),
+        ('--patch, -p', 'Show the full diff of each match',
+         ['git find 1a2b3c4d5e6f -p']),
+        ('--stat', 'Show a diffstat for each match',
+         ['git find 1a2b3c4d5e6f --repos=rhel8,rhel9 --stat']),
+        ('--update', 'Fetch the latest branch and tags into every repo first',
+         ['git find 1a2b3c4d5e6f --update']),
+        ('--timeout=<secs>', 'Request timeout in seconds (default: 3600)',
+         ['git find 1a2b3c4d5e6f --update --timeout=7200']),
+        ('--verbose', 'Show verbose output',
+         ['git find 1a2b3c4d5e6f --verbose']),
+    ],
+}
+
+
+def print_option_examples(subcommand=None):
+    """'git -hh': every subcommand's options; 'git log -hh': just log's."""
+    subcommands = [subcommand] if subcommand else ['log', 'show', 'find']
+    for n, sub in enumerate(subcommands):
+        if n:
+            print("")
+        print("Examples for each 'git %s' option:" % sub)
+        for label, help_str, examples in OPTION_EXAMPLES[sub]:
+            print("")
+            print("  " + label)
+            print("      " + help_str)
+            for ex in examples:
+                print("      crash> " + ex)
+
+
 def print_help():
     print("Usage: git <subcommand> [options]")
     print("")
@@ -348,6 +450,7 @@ def print_help():
     print("  --verbose          Show verbose output")
     print("  --all              Show all commit versions (default: only commits >= current kernel version)")
     print("  --help, -h         Show this help")
+    print("  -hh                Show examples for each option")
     print("")
     print("Examples:")
     print("  git log -Sclip_push --max-count=5")

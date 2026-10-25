@@ -9,6 +9,7 @@ from LinuxDump import Tasks
 
 import crashcolor
 import btgroup
+import optexamples
 
 from datetime import datetime
 
@@ -274,6 +275,18 @@ def hangcheck_display(options, args):
         show_zombie_tasks()
 
 
+OPTION_EXAMPLES = {
+    "-a": ["hangcheck -a"],
+    "-n": ["hangcheck -n 10"],
+    "-d": ["hangcheck -d", "hangcheck -n 5 -d"],
+    "-f": ["hangcheck -f", "hangcheck -n 3 -f"],
+    "-b": ["hangcheck -b", "hangcheck -n 3 -b"],
+    "-t": ["hangcheck -t 120", "hangcheck -t 120 -b"],
+    "-g": ["hangcheck -g", "hangcheck -a -g"],
+    "-z": ["hangcheck -z"],
+}
+
+
 def hangcheck_main():
     op = OptionParser()
     op.add_option("-a", "--all",
@@ -316,6 +329,7 @@ def hangcheck_main():
                   dest="zombie",
                   default=False,
                   help="Show zombie (ZO) processes")
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     hangcheck_display(o, args)
 

@@ -16,6 +16,7 @@ import time
 import re
 import shlex
 
+import optexamples
 import crashcolor
 import crashhelper
 
@@ -4403,6 +4404,30 @@ def show_call_paths(root, target, max_depth):
         print("(first 50 paths shown)")
 
 
+OPTION_EXAMPLES = {
+    "-r": ["edis -r schedule+0x1a"],
+    "-l": ["edis -l __schedule"],
+    "-S": ["edis -S 0xffff8881234abcd0 __schedule"],
+    "-p": ["edis -p 1234 -S 0xffff8881234abcd0 __schedule"],
+    "-C": ["edis -C 5 schedule+0x1a"],
+    "-e": ["edis -e schedule+0x1a", "edis -e -C 3 __schedule+0x1a"],
+    "-a": ["edis -a vfs_read"],
+    "-T": ["edis -T vfs_read"],
+    "-F": ["edis -c -F schedule do_sys_open"],
+    "--save": ["edis --save /tmp/vfs_read.old vfs_read"],
+    "--diff": ["edis --diff /tmp/vfs_read.old vfs_read"],
+    "-g": ["edis -g __schedule"],
+    "-f": ["edis -f vfs_read"],
+    "-b": ["edis -b vfs_read"],
+    "-j": ["edis -g -j jmp,je __schedule"],
+    "-D": ["edis -D __schedule"],
+    "-n": ["edis -n vfs_read"],
+    "-s": ["edis -s vfs_read"],
+    "-c": ["edis -c do_sys_open", "edis -c -m 3 do_sys_open"],
+    "-m": ["edis -c -m 3 do_sys_open"],
+}
+
+
 def edis():
     op = OptionParser()
     op.add_option("-r", "--reverse",
@@ -4546,6 +4571,7 @@ def edis():
                   help="Maximum depth of graph for callgraph. default=%s" %
                         MAX_DEPTH)
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.callgraph == True:

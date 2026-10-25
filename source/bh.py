@@ -11,6 +11,8 @@ from LinuxDump import percpu
 
 import sys
 
+import optexamples
+
 def show_softirq_list(options):
     softirq_vec = readSymbol("softirq_vec")
     count = 0
@@ -48,6 +50,13 @@ def show_tasklet_list_details(tasklet_vec_addr, options):
 
     return
 
+OPTION_EXAMPLES = {
+    "-s": ["bh -s"],
+    "-t": ["bh -t", "bh -t -i"],
+    "-i": ["bh -i"],
+}
+
+
 def bh():
     op = OptionParser()
     op.add_option("-s", "--softirq", dest="softirq", default=0,
@@ -60,6 +69,7 @@ def bh():
                   action="store_true",
                   help="Show tasklet_hi list")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.tasklet):

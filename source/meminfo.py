@@ -19,6 +19,7 @@ import shutil
 import copy
 
 import crashcolor
+import optexamples
 from crashhelper import *
 
 
@@ -6179,6 +6180,57 @@ def show_overall_memory(options):
     print("\n" + "=" * 80)
 
 
+OPTION_EXAMPLES = {
+    "-a": ["meminfo -a"],
+    "-b": ["meminfo -b", "meminfo -b -d"],
+    "-c": ["meminfo -u -c"],
+    "-d": ["meminfo -S kmalloc-256 -d", "meminfo -f 0xffffade6b68037e0 -d"],
+    "--debug": ["meminfo -s --debug"],
+    "-e": ["meminfo -e 0x7"],
+    "-f": ["meminfo -f 0xffffade6b68037e0 -d"],
+    "-F": ["meminfo -F 0x8000000000000067"],
+    "-G": ["meminfo -G 0x14200ca"],
+    "-g": ["meminfo -i -g", "meminfo -u -g"],
+    "-i": ["meminfo -i"],
+    "-l": ["meminfo -s -l", "meminfo -u -l"],
+    "-m": ["meminfo -m"],
+    "--maxcount": ["meminfo -u --maxcount 20"],
+    "--memory_limit": ["meminfo -o --memory_limit 100000"],
+    "-n": ["meminfo -u -n"],
+    "-o": ["meminfo -o", "meminfo -o --po-slab"],
+    "--po-slab": ["meminfo -o --po-slab"],
+    "-O": ["meminfo -O", "meminfo -O --process-filter java"],
+    "--overall": ["meminfo --overall"],
+    "--oom-summary": ["meminfo --oom-summary"],
+    "--process-filter": [
+        "meminfo -O --process-filter java",
+        "meminfo -O --process-filter java,mysqld",
+    ],
+    "--oom-count": ["meminfo -O --oom-count 3"],
+    "--oom-tree": [
+        "meminfo -O --oom-tree",
+        "meminfo -O --oom-tree --oom-ascii",
+    ],
+    "--oom-ascii": ["meminfo -O --oom-tree --oom-ascii"],
+    "--oom-top": ["meminfo -O --oom-top 20"],
+    "-P": ["meminfo -P", "meminfo -P --shared"],
+    "-p": ["meminfo -p 0x2f1c0 -t u64"],
+    "--pager": ["meminfo -u --progress --pager 500"],
+    "--progress": ["meminfo -u --progress"],
+    "--reverse": ["meminfo -s --reverse"],
+    "-s": ["meminfo -s", "meminfo -s -l"],
+    "-S": ["meminfo -S kmalloc-256", "meminfo -S dentry -d"],
+    "--shared": ["meminfo -O --shared", "meminfo -P --shared"],
+    "--corrupt": ["meminfo --corrupt dentry", "meminfo --corrupt dentry:3"],
+    "-t": ["meminfo -p 0x2f1c0 -t u64"],
+    "-u": ["meminfo -u", "meminfo -u -n"],
+    "-U": ["meminfo -U kmalloc-256"],
+    "-v": ["meminfo -v"],
+    "-w": ["meminfo -w"],
+    "-W": ["meminfo -W"],
+}
+
+
 def meminfo():
     global debug_mode
 
@@ -6315,6 +6367,7 @@ def meminfo():
                   help="Show swap usage in detail")
 
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     debug_mode = o.debug

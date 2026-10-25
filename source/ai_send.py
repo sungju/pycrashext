@@ -14,6 +14,16 @@ import socket
 import os
 import netutil
 from optparse import OptionParser
+import optexamples
+
+
+OPTION_EXAMPLES = {
+    "-e": ["ai_send -e claude -i /tmp/data.txt"],
+    "-i": ["ai_send -i /tmp/data.txt"],
+    "-m": ["ai_send -e claude -m opus -i /tmp/data.txt"],
+    "-r": ["ai_send -r"],
+    "-t": ["ai_send -t 12345678 -i /tmp/data.txt"],
+}
 
 
 def ai_send():
@@ -59,6 +69,7 @@ def ai_send():
                   default="",
                   dest="taskid",
                   help="vmcore taskid")
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     orig_query = "".join(sys.stdin.readlines())

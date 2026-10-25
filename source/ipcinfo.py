@@ -10,6 +10,7 @@ import sys
 import operator
 import crashcolor
 import meminfo
+import optexamples
 
 
 def bytes_to_str(num_bytes):
@@ -175,6 +176,14 @@ def show_sysv(options):
     print("=" * 70)
 
 
+OPTION_EXAMPLES = {
+    "-a": ["ipcinfo -a"],
+    "-m": ["ipcinfo -m", "ipcinfo -m -d"],
+    "-d": ["ipcinfo -d"],
+    "-s": ["ipcinfo -s"],
+}
+
+
 def ipcinfo():
     op = OptionParser()
     op.add_option("-a", "--all", dest="all", default=0,
@@ -190,6 +199,7 @@ def ipcinfo():
                   action="store_true",
                   help="Show SYSV allocations in each tasks")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.show_shared_memory:

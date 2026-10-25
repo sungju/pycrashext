@@ -4,6 +4,27 @@ Pycrashext is a PyKdump-based extension suite for the Linux crash utility. It pr
 
 All commands are invoked inside the crash utility as `epython <command>.py [options]` or directly by name if registered via `install.sh`.
 
+Every command takes `-h` for its options and `-hh` for each option with its help line and example command lines:
+
+```
+crash> bh -hh
+Usage: bh.py [options]
+
+Examples for each option:
+
+  -s, --softirq
+      Show softirq list
+      crash> bh -s
+
+  -t, --tasklet
+      Show tasklet list
+      crash> bh -t
+      crash> bh -t -i
+...
+```
+
+`git -hh` covers all three subcommands; `git log -hh`, `git show -hh` and `git find -hh` show one.
+
 ---
 
 ## Table of Contents
@@ -1415,7 +1436,7 @@ caseinfo -s            # Show sys output
 
 Execute `git log` and `git show` against remote kernel source repositories, and `git find` to check whether an upstream patch is backported into this kernel. Needs the remoteapi server (`CRASHEXT_SERVER`).
 
-**Usage:** `git <log|show|find> [options]` (`git -h` is not accepted; use `git log --help`, `git show --help` or `git find --help`)
+**Usage:** `git <log|show|find> [options]` (`git -h` is not accepted; use `git log --help`, `git show --help` or `git find --help`; `git -hh` or `git <subcommand> -hh` lists each option with examples)
 
 #### Subcommands
 

@@ -14,6 +14,7 @@ import signal
 from optparse import OptionParser
 
 import crashcolor
+import optexamples
 
 modules = {}
 sysinfo = {}
@@ -209,6 +210,13 @@ def reload_rules():
     print("Reloading DONE")
 
 
+OPTION_EXAMPLES = {
+    "-a": ["autocheck -a"],
+    "-l": ["autocheck -l"],
+    "-r": ["autocheck -r", "autocheck -r -a"],
+}
+
+
 def autocheck():
     op = OptionParser()
 
@@ -231,6 +239,7 @@ def autocheck():
                   help="Re-load rules")
 
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     get_system_info()
 

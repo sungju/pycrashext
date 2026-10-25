@@ -14,6 +14,7 @@ import operator
 import crashcolor
 import crashhelper
 from datetime import datetime, timedelta
+import optexamples
 
 '''
 /*
@@ -90,6 +91,13 @@ def get_sidtab_info(total_only, print_detail, is_print):
 
     return result
 
+OPTION_EXAMPLES = {
+    "-s": ["seinfo -s", "seinfo -s -t"],
+    "-t": ["seinfo -t"],
+    "-d": ["seinfo -d"],
+}
+
+
 def seinfo():
     op = OptionParser()
     op.add_option("-s", "--sidtab", dest="sidtab", default=0,
@@ -102,6 +110,7 @@ def seinfo():
                   action="store_true",
                   help="Show details")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.sidtab):

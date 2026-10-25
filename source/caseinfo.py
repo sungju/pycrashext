@@ -14,6 +14,7 @@ import crashcolor
 
 import sys
 from datetime import datetime
+import optexamples
 
 sysinfo = {}
 sys_str = ""
@@ -100,12 +101,18 @@ def read_string(addr, delimiter=0x0):
 
     return result
 
+OPTION_EXAMPLES = {
+    "-s": ["caseinfo -s"],
+}
+
+
 def caseinfo():
     op = OptionParser()
     op.add_option("-s", "--sys", dest="sysinfo", default=0,
                   action="store_true",
                   help="Shows sys output")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     show_case_info(o)

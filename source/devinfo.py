@@ -17,6 +17,7 @@ import struct
 import crashcolor
 import pvring
 import storstat
+import optexamples
 
 
 ULONG_MASK = 0xffffffffffffffff
@@ -1842,6 +1843,17 @@ def show_pvio(options):
                   % (r["addr"], r["driver"], r["sub"]))
 
 
+OPTION_EXAMPLES = {
+    "-b": ["devinfo -b", "devinfo -b -d"],
+    "-c": ["devinfo -c"],
+    "-d": ["devinfo -s -d", "devinfo -q -d"],
+    "-i": ["devinfo -i", "devinfo -i -d"],
+    "-q": ["devinfo -q", "devinfo -q -d"],
+    "-s": ["devinfo -s", "devinfo -s -d"],
+    "-p": ["devinfo -p"],
+}
+
+
 def devinfo():
     op = OptionParser()
     op.add_option("-b", "--block",
@@ -1885,6 +1897,7 @@ def devinfo():
                        "VMBus): requests the host has not completed and "
                        "completions the guest has not processed")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if not (o.show_block or o.show_char or o.show_iotlb or o.show_requests

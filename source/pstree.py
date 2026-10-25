@@ -10,6 +10,7 @@ from LinuxDump.Tasks import Task, TaskTable
 
 import sys
 import crashcolor
+import optexamples
 
 class LineType(object):
     LINE_SPACE = 0,
@@ -494,6 +495,19 @@ def print_state_legend():
         crashcolor.set_color(crashcolor.RESET)
         print()
 
+OPTION_EXAMPLES = {
+    "-p": ["pstree -p"],
+    "-u": ["pstree -u"],
+    "-g": ["pstree -g"],
+    "-s": ["pstree -s", "pstree -s -l"],
+    "-t": ["pstree -t 1234", "pstree -p -t 1234"],
+    "-A": ["pstree -A"],
+    "-l": ["pstree -s -l"],
+    "-T": ["pstree -T", "pstree -T -p -t 1234"],
+    "-c": ["pstree -c"],
+}
+
+
 def pstree():
     op = OptionParser()
     op.add_option("-p", dest="print_pid", default=0,
@@ -524,6 +538,7 @@ def pstree():
                   action="store_false",
                   help="Disable compact mode (compact identical leaf processes by default)")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)

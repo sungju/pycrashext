@@ -40,6 +40,7 @@ import sys
 import time
 
 import evidplan
+import optexamples
 
 
 def find_module(name):
@@ -204,6 +205,17 @@ def collect(steps, task, raw, blocks, failed, quiet):
             failed.append("%s: %s" % (step.cmd, status))
 
 
+OPTION_EXAMPLES = {
+    "-o": ["evidence -o /tmp/evidence.txt"],
+    "-t": ["evidence -t 12345678"],
+    "-x": ["evidence -x 'foreach bt; kmem -i'"],
+    "-f": ["evidence -f /tmp/extra_cmds.txt"],
+    "-a": ["evidence -a -x 'dev -d'"],
+    "--stdout": ["evidence --stdout"],
+    "-q": ["evidence -q"],
+}
+
+
 def evidence():
     op = OptionParser(usage="evidence [-o FILE] [-x 'cmd; cmd'] [-f FILE] [-a] [--stdout] [-q]")
     op.add_option("-o", "--output", dest="output", default="", help="Write the evidence file here")
@@ -217,6 +229,7 @@ def evidence():
                   help="Print the evidence instead of writing a file")
     op.add_option("-q", "--quiet", dest="quiet", default=0, action="store_true",
                   help="Do not print each command as it runs")
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     sys_lines, _, _ = run_command("sys")

@@ -33,6 +33,7 @@ import re
 
 import crashcolor
 import pdatapath
+import optexamples
 
 
 USAGE = "pdata [-a|-n] [-o] [-x|-d] <type> <address> [<path>]"
@@ -249,6 +250,18 @@ def pdata(type_name, address, path, o):
             print(err if err else "*%s" % out.strip())
 
 
+OPTION_EXAMPLES = {
+    "-a": ["pdata -a task_struct 0xffff8881234abcd0 mm.mmap"],
+    "-n": ["pdata -n task_struct 0xffff8881234abcd0 mm.mmap"],
+    "-o": ["pdata -o task_struct 0xffff8881234abcd0 mm"],
+    "-x": [
+        "pdata -x task_struct 0xffff8881234abcd0 mm",
+        "pdata -a -x task_struct 0xffff8881234abcd0 mm.mmap",
+    ],
+    "-d": ["pdata -d task_struct 0xffff8881234abcd0 mm"],
+}
+
+
 def pdata_cmd():
     op = OptionParser(usage=USAGE)
     op.add_option("-a", "--all", dest="all", default=0, action="store_true",
@@ -264,6 +277,7 @@ def pdata_cmd():
     op.add_option("-d", "--dec", dest="dec_out", default=0,
                   action="store_true", help="Decimal dumps")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     if args and args[0] in ("struct", "union") and len(args) > 1:
         args = [args[0] + " " + args[1]] + args[2:]

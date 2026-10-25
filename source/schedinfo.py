@@ -10,6 +10,7 @@ from LinuxDump import Tasks
 
 import sys
 import crashcolor
+import optexamples
 
 def show_sched_details(sched_class):
     result = exec_crash_command("sched_class %s" %
@@ -106,6 +107,15 @@ def show_worker_pool(options):
         except:
             pass
 
+OPTION_EXAMPLES = {
+    "-c": ["schedinfo -c"],
+    "-d": ["schedinfo -d", "schedinfo -c -d"],
+    "-f": ["schedinfo -f"],
+    "-r": ["schedinfo -r"],
+    "-w": ["schedinfo -w 0xffff8881234abcd0"],
+}
+
+
 def schedinfo():
     op = OptionParser()
     op.add_option("-c", "--classes", dest="sched_classes", default=0,
@@ -124,6 +134,7 @@ def schedinfo():
                   action="store",
                   help="Show worker pool information")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.sched_classes):

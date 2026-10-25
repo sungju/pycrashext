@@ -12,6 +12,7 @@ import sys
 import operator
 import signal
 
+import optexamples
 import crashcolor
 import pstree
 import crashhelper
@@ -832,6 +833,22 @@ def show_task_details(options):
         pass
 
 
+OPTION_EXAMPLES = {
+    "--aux": ["psinfo --aux"],
+    "--auxcww": ["psinfo --auxcww"],
+    "--auxww": ["psinfo --auxww"],
+    "--ef": ["psinfo --ef"],
+    "-p": ["psinfo -p 1", "psinfo -p 6"],
+    "-s": ["psinfo -s -i 0xffff8881234abcd0"],
+    "-S": ["psinfo -S -i 0xffff8881234abcd0"],
+    "-n": ["psinfo -s -n -i 0xffff8881234abcd0"],
+    "-i": ["psinfo -s -i 0xffff8881234abcd0,0xffff8881234abce0"],
+    "-e": ["psinfo -s -i 0xffff8881234abcd0 -e 0xffff8881234abce0"],
+    "-k": ["psinfo -s -i 0xffff8881234abcd0 -k nginx"],
+    "-t": ["psinfo -t ffff8881234abcd0", "psinfo -t 1234"],
+}
+
+
 def psinfo():
     op = OptionParser()
     op.add_option("--aux", dest="aux", default=0,
@@ -878,6 +895,7 @@ def psinfo():
                   action="store", type="string",
                   help="Shows general information about a task")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
 

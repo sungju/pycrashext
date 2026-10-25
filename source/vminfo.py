@@ -10,6 +10,7 @@ from LinuxDump import Tasks, percpu
 import crashcolor
 import overcommit
 import re
+import optexamples
 
 
 def vmw_mem(options, balloon, balloon_stats=False):
@@ -1975,6 +1976,14 @@ def show_overcommit(options):
                 oc_print_related_line(line, related)
 
 
+OPTION_EXAMPLES = {
+    "-d": ["vminfo -d", "vminfo -o -d"],
+    "-a": ["vminfo -a"],
+    "-c": ["vminfo -c"],
+    "-o": ["vminfo -o"],
+}
+
+
 def vminfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
@@ -1993,6 +2002,7 @@ def vminfo():
                   help="Assess hypervisor CPU/memory overcommit, signal "
                        "by signal")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.show_context:

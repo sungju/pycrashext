@@ -9,6 +9,7 @@ import enum
 
 import sys
 import crashcolor
+import optexamples
 
 
 def hvballoon_mem(options):
@@ -53,12 +54,18 @@ def hvballoon_mem(options):
     print ("\n")
 
 
+OPTION_EXAMPLES = {
+    "-d": ["hvballoon -d"],
+}
+
+
 def hvballooninfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="show_details", default=0,
                   action="store_true",
                   help="Show details")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     hvballoon_mem(o)

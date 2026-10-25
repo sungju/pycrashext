@@ -9,6 +9,7 @@ from pykdump.API import *
 import sys
 import os
 from optparse import OptionParser
+import optexamples
 
 
 arch_register_list = {}
@@ -138,6 +139,13 @@ def read_database(filename):
         return
 
 
+OPTION_EXAMPLES = {
+    "-r": ["revs -r"],
+    "-a": ["revs -a mov", "revs -a lea"],
+    "-l": ["revs -l"],
+}
+
+
 def revs():
     op = OptionParser()
     op.add_option("-r", "--regs", dest="Regs", default=0,
@@ -152,6 +160,7 @@ def revs():
                 action="store_true",
                 help="Shows the list of instructions you can check details")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
 

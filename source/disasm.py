@@ -12,6 +12,13 @@ import urllib.error
 import os
 import netutil
 from optparse import OptionParser
+import optexamples
+
+
+OPTION_EXAMPLES = {
+    "-f": ["dis -l vfs_read | disasm -f"],
+    "-s": ["dis -l vfs_read | disasm -s"],
+}
 
 
 def disasm():
@@ -45,6 +52,7 @@ def disasm():
                   default=False,
                   help="Shows source lines only")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
 

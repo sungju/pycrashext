@@ -79,7 +79,8 @@ def setup(root):
         f.write(FAKE_API)
     src = os.path.join(root, "src")
     os.makedirs(src)
-    for name in ("evidence.py", "evidplan.py", "logsig.py", "logscan.py"):
+    for name in ("evidence.py", "evidplan.py", "logsig.py", "logscan.py",
+                 "optexamples.py"):
         shutil.copy(os.path.join(HERE, name), src)
     for name, body in FAKE_CMDS.items():
         with open(os.path.join(src, name + ".py"), "w") as f:

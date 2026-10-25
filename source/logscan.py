@@ -18,6 +18,12 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 
 import logsig
+import optexamples
+
+
+OPTION_EXAMPLES = {
+    "-a": ["logscan -a"],
+}
 
 
 def logscan():
@@ -25,6 +31,7 @@ def logscan():
     op.add_option("-a", "--all", dest="show_all", default=0, action="store_true",
                   help="Print every matching line, not only the first and last")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     lines = exec_crash_command("log").splitlines()
     print(logsig.report(lines, source="log", show_all=o.show_all))

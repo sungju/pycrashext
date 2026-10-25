@@ -26,6 +26,7 @@ import urllib.request
 import timeinfo
 import meminfo
 import psinfo
+import optexamples
 
 
 sysinfo={}
@@ -195,6 +196,11 @@ def exec_insights(o, args, cmd_path_list):
         print_report_list(report_list)
 
 
+OPTION_EXAMPLES = {
+    "-t": ["insights -t"],
+}
+
+
 def insights():
     op = OptionParser()
 
@@ -202,6 +208,7 @@ def insights():
                   action="store_true",
                   help="Run with test data")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     exec_insights(o, args, os.environ["PYKDUMPPATH"])
 

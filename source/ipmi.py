@@ -7,6 +7,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 
 import sys
+import optexamples
 
 def si_state_str(state):
     try:
@@ -81,6 +82,12 @@ def show_smi_list(show_details):
         print()
 
 
+OPTION_EXAMPLES = {
+    "-l": ["ipmi -l"],
+    "-d": ["ipmi -d", "ipmi -l -d"],
+}
+
+
 def ipmi():
     op = OptionParser()
     op.add_option("-l", "--smi_list", dest="smi_list", default=0,
@@ -90,6 +97,7 @@ def ipmi():
                   action="store_true",
                   help="Show detailed information")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     try:

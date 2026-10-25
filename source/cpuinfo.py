@@ -12,6 +12,7 @@ import sys
 from optparse import OptionParser
 
 import crashcolor
+import optexamples
 
 
 def  show_cpuid_x86(options):
@@ -1103,6 +1104,19 @@ def show_online_cpus(options):
     print("\nTotal possible CPUs: %d" % len(possible_cpus))
 
 
+OPTION_EXAMPLES = {
+    "-c": ["cpuinfo -c"],
+    "-d": ["cpuinfo -d"],
+    "-f": ["cpuinfo -f", "cpuinfo -f -v"],
+    "-i": ["cpuinfo -i"],
+    "-o": ["cpuinfo -o"],
+    "-s": ["cpuinfo -s", "cpuinfo -s -v"],
+    "--speed": ["cpuinfo --speed"],
+    "-t": ["cpuinfo -t"],
+    "-v": ["cpuinfo -v -c"],
+}
+
+
 def cpuinfo():
     op = OptionParser()
     op.add_option("-c", "--capability", dest="capability", default=0,
@@ -1134,6 +1148,7 @@ def cpuinfo():
                   action="store_true",
                   help="Show more information")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.online):

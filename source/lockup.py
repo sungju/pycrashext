@@ -10,6 +10,7 @@ from LinuxDump import Tasks
 from LinuxDump.trees import *
 
 import crashcolor
+import optexamples
 
 import sys
 from datetime import datetime
@@ -584,6 +585,19 @@ def show_smp_call_data(cfd_addr, csd_addr=None):
         traceback.print_exc()
 
 
+OPTION_EXAMPLES = {
+    "-b": ["lockup -b"],
+    "-c": ["lockup -c", "lockup -c -b"],
+    "-d": ["lockup -d"],
+    "-r": ["lockup -r", "lockup -r -c"],
+    "-t": ["lockup -t"],
+    "-s": ["lockup -s"],
+    "-q": ["lockup -q 0xffff8881234abcd0"],
+    "--smp-call": ["lockup --smp-call ffff9caa268f4a00,ffff9caa2633ae60"],
+    "-u": ["lockup -u", "lockup -u -b"],
+}
+
+
 def lockup():
     op = OptionParser()
     op.add_option("-b", "--backtrace", dest="backtrace", default=0,
@@ -614,6 +628,7 @@ def lockup():
                   action="store_true",
                   help="show user space running only")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.smp_call:

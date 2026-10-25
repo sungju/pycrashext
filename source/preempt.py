@@ -15,6 +15,12 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 
 import preemptcount
+import optexamples
+
+
+OPTION_EXAMPLES = {
+    "-l": ["preempt -l", "preempt -l 0x10200"],
+}
 
 
 def preempt():
@@ -22,6 +28,7 @@ def preempt():
     op.add_option("-l", "--log", dest="log", default=0, action="store_true",
                   help="Decode every preempt_count printed in the kernel log")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     if o.log:
         print(preemptcount.report_log(exec_crash_command("log").splitlines()))

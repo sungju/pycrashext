@@ -31,6 +31,7 @@ import sysenv
 
 
 import textwrap
+import optexamples
 
 WIDTH = 78
 LABEL_W = 10
@@ -521,10 +522,16 @@ def gather():
     return f
 
 
+OPTION_EXAMPLES = {
+    "-v": ["sysinfo -v"],
+}
+
+
 def sysinfo():
     op = OptionParser(usage="sysinfo [-v]")
     op.add_option("-v", "--verbose", dest="verbose", default=0, action="store_true",
                   help="Every DMI field, the whole boot command line, every interface and tainted module")
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     try:

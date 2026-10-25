@@ -13,10 +13,16 @@ import operator
 
 import crashcolor
 import crashhelper
+import optexamples
 
 def do_reset_screen(options):
     crashcolor.clear_screen()
     crashcolor.set_cursor(0,0)
+
+
+OPTION_EXAMPLES = {
+    "-r": ["screen -r"],
+}
 
 
 def screen():
@@ -25,6 +31,7 @@ def screen():
                   action="store_true",
                   help="reset screen")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.reset_screen):

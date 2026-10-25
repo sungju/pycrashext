@@ -11,6 +11,7 @@ import sys
 import operator
 from optparse import OptionParser
 
+import optexamples
 import crashcolor
 
 PAGE_SIZE = 4096
@@ -2271,6 +2272,23 @@ def show_cgroup_overview():
     print("")
 
 
+OPTION_EXAMPLES = {
+    "-m": ["cginfo -m", "cginfo -m -d"],
+    "-p": ["cginfo -p"],
+    "-s": ["cginfo -s memory", "cginfo -s cpu,cpuset -d"],
+    "-t": ["cginfo -t", "cginfo -t -d"],
+    "-a": ["cginfo -t -a"],
+    "-d": ["cginfo -t -d"],
+    "-l": ["cginfo -t -l"],
+    "-n": ["cginfo -t -n docker"],
+    "-c": ["cginfo -c 0xffff8881234abcd0"],
+    "-g": ["cginfo -g"],
+    "-G": ["cginfo -G 0xffff8881234abcd0"],
+    "-i": ["cginfo -i"],
+    "-I": ["cginfo -I"],
+}
+
+
 def cgroupinfo():
     global empty_count
     global cgroup_count
@@ -2347,6 +2365,7 @@ def cgroupinfo():
                   action="store_true",
                   help="[Advanced] mem_cgroup IDR all entries including free slots")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)

@@ -10,6 +10,7 @@ from LinuxDump import Tasks
 
 import sys
 import datetime
+import optexamples
 
 timekeeper = None
 xtime_sec = None
@@ -75,6 +76,12 @@ def show_timesources(show_details):
             show_clocksource_details(clocksource_addr)
 
 
+OPTION_EXAMPLES = {
+    "-s": ["timeinfo -s"],
+    "-d": ["timeinfo -d", "timeinfo -s -d"],
+}
+
+
 def timeinfo():
     op = OptionParser()
     op.add_option("-s", "--source", dest="timesource", default=0,
@@ -84,6 +91,7 @@ def timeinfo():
                   action="store_true",
                   help="Show details")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.timesource):

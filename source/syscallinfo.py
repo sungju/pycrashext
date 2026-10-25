@@ -10,6 +10,7 @@ from LinuxDump import syscall
 import sys
 
 import crashcolor
+import optexamples
 
 pattern = re.compile(r"(.+)/linux-(?P<releaseversion>[^/]+)/(?P<filepath>.*)")
 
@@ -125,6 +126,12 @@ def check_syscall_table(options):
         print("No issues detected")
 
 
+OPTION_EXAMPLES = {
+    "-c": ["syscallinfo -c"],
+    "-n": ["syscallinfo -n 1", "syscallinfo -n 231"],
+}
+
+
 def syscallinfo():
     op = OptionParser()
     op.add_option("-c", "--check", dest="syscall_check", default=0,
@@ -135,6 +142,7 @@ def syscallinfo():
                   type="int", action="store",
                   help="Shows detailed information for a specific syscall no")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     check_syscall_table(o)

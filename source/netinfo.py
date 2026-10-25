@@ -12,6 +12,7 @@ import sys
 import collections
 
 import crashcolor
+import optexamples
 
 
 def show_network_interfaces(options):
@@ -363,6 +364,16 @@ def show_sock_details(options):
         print(sock)
 
 
+OPTION_EXAMPLES = {
+    "-d": ["netinfo -d", "netinfo -i -d"],
+    "-i": ["netinfo -i"],
+    "-n": ["netinfo -n"],
+    "-p": ["netinfo -p"],
+    "-s": ["netinfo -s 0xffff8881234abcd0"],
+    "-S": ["netinfo -S 0xffff8881234abcd0"],
+}
+
+
 def netinfo():
     op = OptionParser()
     op.add_option("-d", "--details", dest="details", default=0,
@@ -390,6 +401,7 @@ def netinfo():
                   help="Show struct sock details")
 
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if (o.show_interface):

@@ -14,6 +14,7 @@ import struct as pystruct
 from datetime import datetime
 import crashcolor
 import crashhelper
+import optexamples
 
 module_list = []
 def load_module_details():
@@ -3057,6 +3058,47 @@ def show_third_party(options):
           " <module>, --log <module>, --kabi <module>")
 
 
+OPTION_EXAMPLES = {
+    "--disasm": ["modinfo --disasm nfs"],
+    "--details": ["modinfo --details xfs", "modinfo xfs"],
+    "-p": ["modinfo -p nfs"],
+    "-d": ["modinfo -d xfs"],
+    "-b": ["modinfo -b"],
+    "--bt-all": ["modinfo --bt-all"],
+    "--hooks": ["modinfo --hooks nfs", "modinfo --hooks all"],
+    "--third-party": ["modinfo --third-party"],
+    "--log": ["modinfo --log nfs"],
+    "--kabi": [
+        "modinfo --kabi nfs",
+        "modinfo --kabi nfs --kabi-list /tmp/kabi_stablelist_x86_64",
+    ],
+    "--kabi-list": [
+        "modinfo --kabi nfs --kabi-list /tmp/kabi_stablelist_x86_64",
+    ],
+    "--mem": ["modinfo --mem nfs", "modinfo --mem all"],
+    "-c": ["modinfo -c nfs"],
+    "-t": ["modinfo -t"],
+    "-g": ["modinfo -g"],
+    "-a": ["modinfo -a"],
+    "-u": ["modinfo -u"],
+    "-f": ["modinfo -f"],
+    "-s": ["modinfo -s nfs", "modinfo -s -l 10 nfs"],
+    "-l": ["modinfo -s -l 10 nfs"],
+    "--batch_run": [
+        "modinfo --batch_run nfs",
+        "modinfo --batch_run nfs --target_dir /tmp/out --nodate",
+    ],
+    "--target_dir": ["modinfo --batch_run nfs --target_dir /tmp/out"],
+    "--nodate": ["modinfo --batch_run nfs --target_dir /tmp/out --nodate"],
+    "-m": [
+        "modinfo -m 0xffffffffc0a12000",
+        "modinfo -m 0xffffffffc0a12000 -y",
+    ],
+    "-y": ["modinfo -m 0xffffffffc0a12000 -y"],
+    "-r": ["modinfo -m 0xffffffffc0a12000 -r"],
+}
+
+
 def modinfo():
     op = OptionParser(usage="%prog [options] [<module>]\n\n"
                       "With no options, list the loaded modules. 'modinfo <module>'"
@@ -3161,6 +3203,7 @@ def modinfo():
                   help="Trying to disasm from unloaded module")
 
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     # 'modinfo <module>' is 'modinfo --details <module>'.

@@ -10,6 +10,7 @@ from optparse import OptionParser
 import re
 import sys
 import crashcolor
+import optexamples
 
 info="""
 enforcing   SELinux policy is enforced.
@@ -184,6 +185,13 @@ def show_fsmount():
         show_selinuxfs(None)
 
 # defining options
+OPTION_EXAMPLES = {
+    "-d": ["selinuxinfo -d"],
+    "-i": ["selinuxinfo -i"],
+    "-f": ["selinuxinfo -f"],
+}
+
+
 def selinuxinfo():
     op = OptionParser()
     
@@ -197,6 +205,7 @@ def selinuxinfo():
             default=0, action="store_true",
             help="show selinux fs mount informationn")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (opt, args) = op.parse_args()
 
     if not (opt.detail or opt.info or opt.fsmount):

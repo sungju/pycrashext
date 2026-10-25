@@ -12,6 +12,7 @@ import re
 from optparse import OptionParser
 
 import crashcolor
+import optexamples
 
 
 RCU_SEQ_STATE_MASK = 0x3
@@ -817,6 +818,17 @@ def show_blocked_tasks(options):
         print("    (could not list)")
 
 
+OPTION_EXAMPLES = {
+    "-s": ["rcuinfo -s"],
+    "-g": ["rcuinfo -g"],
+    "-n": ["rcuinfo -n"],
+    "-c": ["rcuinfo -c"],
+    "-t": ["rcuinfo -t", "rcuinfo -t -v"],
+    "-a": ["rcuinfo -a"],
+    "-v": ["rcuinfo -t -v"],
+}
+
+
 def rcuinfo():
     op = OptionParser()
     op.add_option("-s", "--stall", dest="stall", default=0,
@@ -841,6 +853,7 @@ def rcuinfo():
                   action="store_true",
                   help="Show additional details (backtraces for blocked tasks)")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.show_all:

@@ -14,6 +14,7 @@ import re
 from collections import deque
 
 import crashcolor
+import optexamples
 
 
 sysinfo = {}
@@ -4415,6 +4416,36 @@ def show_swap_usage(options):
         show_task_swap_usage(task, options)
 
 
+OPTION_EXAMPLES = {
+    "-a": ["fsinfo -a"],
+    "-d": ["fsinfo -d"],
+    "-c": ["fsinfo -c"],
+    "-C": ["fsinfo -C"],
+    "-f": ["fsinfo -f 0xffff8881234abcd0"],
+    "--findpidbyfile": ["fsinfo --findpidbyfile 0xffff8881234abcd0"],
+    "--findpidbydentry": ["fsinfo --findpidbydentry 0xffff8881234abcd0"],
+    "-i": ["fsinfo -i 0xffff8881234abcd0"],
+    "-I": ["fsinfo -I", "fsinfo -I 0xffff8881234abcd0 --holders"],
+    "--max": ["fsinfo -I 0xffff8881234abcd0 --max 500000"],
+    "-n": ["fsinfo -n 0xffff8881234abcd0"],
+    "--negdents": ["fsinfo --negdents"],
+    "-r": ["fsinfo -r", "fsinfo -r 0xffff8881234abcd0 --breakdown"],
+    "--top": ["fsinfo -r 0xffff8881234abcd0 --top 50"],
+    "--breakdown": ["fsinfo -r 0xffff8881234abcd0 --breakdown --depth 2"],
+    "--holders": ["fsinfo -r 0xffff8881234abcd0 --holders"],
+    "--depth": ["fsinfo -r 0xffff8881234abcd0 --breakdown --depth 2"],
+    "-s": ["fsinfo -s"],
+    "--show_open_files": ["fsinfo --show_open_files"],
+    "--show_open_file_size": [
+        "fsinfo --show_open_files --show_open_file_size",
+    ],
+    "-S": ["fsinfo -S"],
+    "-t": ["fsinfo -t 0xffff8881234abcd0"],
+    "-p": ["fsinfo -p ext4", "fsinfo -p '*'"],
+    "-z": ["fsinfo -z", "fsinfo -z -d"],
+}
+
+
 def fsinfo():
     op = OptionParser()
     op.add_option("-a", "--all", dest="all", default=0,
@@ -4509,6 +4540,7 @@ def fsinfo():
                        "filesystems, tasks waiting for a thaw, freeze "
                        "agents and hung-task reports (-d for backtraces)")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     sys.setrecursionlimit(10**6)

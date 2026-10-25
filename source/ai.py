@@ -21,6 +21,7 @@ import re
 
 import crashcolor
 import crashhelper
+import optexamples
 
 sysinfo = {}
 sys_str = ""
@@ -382,6 +383,19 @@ def detect_local_engine():
     return ""
 
 
+OPTION_EXAMPLES = {
+    "-c": ["ai -c bt", "ai -c bt -c 'log' what caused the panic"],
+    "-e": ["ai -e claude -c bt", "ai -e gemini -c 'ps -m' summarize"],
+    "-i": [
+        "ai -i /tmp/vmcore-log.txt",
+        "ai -i /tmp/dmesg.txt why did it hang",
+    ],
+    "-m": ["ai -m opus -c bt", "ai -e claude -m sonnet -c log"],
+    "-r": ["ai -r"],
+    "-t": ["ai -t 12345678 -c bt"],
+}
+
+
 def ai():
     op = OptionParser()
 
@@ -430,6 +444,7 @@ def ai():
                   default="",
                   dest="taskid",
                   help="vmcore taskid")
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
 
     if o.taskid == "":

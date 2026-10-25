@@ -18,6 +18,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 
 import kernel_version
+import optexamples
 
 
 def dump_release():
@@ -29,11 +30,20 @@ def dump_release():
     return None
 
 
+OPTION_EXAMPLES = {
+    "-k": [
+        "kvercmp -k 4.18.0-513.el8 kernel-4.18.0-513.5.1.el8_9",
+        "kvercmp -k 5.14.0-362.el9 5.14.0-427.el9",
+    ],
+}
+
+
 def kvercmp():
     op = OptionParser(usage="kvercmp [-k <kernel>] <fixed kernel>...")
     op.add_option("-k", "--kernel", dest="kernel", default=None,
                   help="Kernel to check instead of this dump's own release")
 
+    optexamples.handle(op, OPTION_EXAMPLES)
     (o, args) = op.parse_args()
     if not args:
         print("usage: kvercmp [-k <kernel>] <fixed kernel>...")
