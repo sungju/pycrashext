@@ -107,7 +107,7 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | `-d` | `--details` | Show detailed output |
 | `-g` | `--graph` | Show bar chart for memory usage visualization |
 | `-l` | `--longer` | Show more data than normal |
-| `--debug` | | Show debug output |
+| `-D` | `--debug-output` | Show debug output (`--debug N` is epython's own option, so meminfo cannot use it) |
 | `--progress` | | Show progress results while handling operation |
 | `--reverse` | | Show results in reverse order |
 | `--pager N` | | Show progress per specified term (default: 2000) |
@@ -199,6 +199,12 @@ of the dump. `--oom-tree` ignores `--shared`.
 | `-v` | `--vm` | Show 'vm' output with more details |
 | `-w` | `--swap` | Show swap usage |
 | `-W` | `--swap_full` | Show swap usage in detail |
+
+`meminfo -v [-a]` adds each mapping's size and a breakdown by type. `-l`
+names the `vm_flags` bits as this kernel defines them (RHEL 7 to 10; bits
+not known are printed in hex). `-d` adds each mapping's private and
+shared pages (P:, S:), read from the task's page tables and each page's
+mapcount, without changing crash's task context.
 
 #### Percpu
 

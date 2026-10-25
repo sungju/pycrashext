@@ -2577,49 +2577,22 @@ def show_percpu(options):
 
 
 
-def show_vm_details(options, words):
+def show_vm_details(scanner, task_addr, pgd, words):
+    """[private, shared] pages of one mapping, by each page's mapcount."""
     private_mem_pages = 0
     shared_mem_pages = 0
 
-    result_str = exec_crash_command("vm -P %s" % (words[0]))
-    if result_str == "":
-        return
-    result_lines = result_str.splitlines()
-    total_lines = len(result_lines)
-    if total_lines < 4:
-        return
-    for i in range(4, total_lines):
-        page_words = result_lines[i].split()
-        try:
-            physical_addr = int(page_words[1], 16)
-        except:
-            physical_addr = 0
-
-        if physical_addr != 0:
-            vtop_result = exec_crash_command("vtop %s" % (page_words[0]))
-            if vtop_result == "":
-                continue
-            vtop_list = vtop_result.splitlines()
-            vtop_len = len(vtop_list)
-            page_addr_str = vtop_list[vtop_len - 1].split()[0]
-            try:
-                page_addr = int(page_addr_str, 16)
-            except:
-                page_addr = 0
-
-            if page_addr == 0:
-                continue
-
-            page_data = readSU("struct page", page_addr)
-            if member_offset("struct page", "_refcount") >= 0:
-                counter = page_data._refcount.counter 
-            else:
-                counter = page_data._count.counter
-
-            if counter == 1:
-                private_mem_pages = private_mem_pages + 1
-            else:
-                shared_mem_pages = shared_mem_pages + 1
+    start = int(words[1], 16)
+    end = int(words[2], 16)
+    # device memory has no struct page to read a mapcount from
+    if int(words[3], 16) & (VM_IO | VM_PFNMAP):
+        return [0, 0]
+    for pfn, pages, huge in scanner.vma_pages(task_addr, pgd, words[0],
+                                              start, end):
+        if scanner.page_mapcount(pfn, huge) > 1:
+            shared_mem_pages = shared_mem_pages + pages
+        else:
+            private_mem_pages = private_mem_pages + pages
 
     return [private_mem_pages, shared_mem_pages]
 
@@ -2638,102 +2611,98 @@ def show_all_vm(options):
         print()
 
 
-VM_READ         = 0x00000001   # currently active flags
+# vm_area_struct.vm_flags on RHEL 7 to 10 (include/linux/mm.h).  A bit
+# added later is unused on the kernels before it, so naming it there is
+# harmless; only 0x00800000 changed meaning.
+VM_READ         = 0x00000001
 VM_WRITE        = 0x00000002
 VM_EXEC         = 0x00000004
 VM_SHARED       = 0x00000008
-VM_MAYREAD      = 0x00000010   # limits for mprotect() etc
+VM_MAYREAD      = 0x00000010
 VM_MAYWRITE     = 0x00000020
 VM_MAYEXEC      = 0x00000040
 VM_MAYSHARE     = 0x00000080
-VM_GROWSDOWN    = 0x00000100   # general info on the segment
-VM_GROWSUP      = 0x00000200
-VM_NOHUGEPAGE   = 0x00000200   # MADV_NOHUGEPAGE marked this vma
-VM_SHM          = 0x00000400   # shared memory area, don't swap out
-VM_PFNMAP       = 0x00000400
-VM_DENYWRITE    = 0x00000800   # ETXTBSY on write attempts..
-VM_EXECUTABLE   = 0x00001000
+VM_GROWSDOWN    = 0x00000100
+VM_UFFD_MISSING = 0x00000200   # 4.3 and later
+VM_PFNMAP       = 0x00000400   # page frames without struct page (devices)
+VM_DENYWRITE    = 0x00000800   # gone in 5.15
+VM_UFFD_WP      = 0x00001000   # 4.3 and later
 VM_LOCKED       = 0x00002000
-VM_IO           = 0x00004000   # Memory mapped I/O or similar
-VM_SEQ_READ     = 0x00008000   # App will access data sequentially
-VM_RAND_READ    = 0x00010000   # App will not benefit from clustered reads
-VM_DONTCOPY     = 0x00020000   # Do not copy this vma on fork
-VM_DONTEXPAND   = 0x00040000   # Cannot expand with mremap()
-VM_RESERVED     = 0x00080000   # Don't unmap it from swap_out
+VM_IO           = 0x00004000   # memory-mapped I/O
+VM_SEQ_READ     = 0x00008000
+VM_RAND_READ    = 0x00010000
+VM_DONTCOPY     = 0x00020000
+VM_DONTEXPAND   = 0x00040000
+VM_LOCKONFAULT  = 0x00080000   # 4.4 and later
+VM_ACCOUNT      = 0x00100000
+VM_NORESERVE    = 0x00200000
+VM_HUGETLB      = 0x00400000
+VM_NONLINEAR    = 0x00800000   # before 4.0
+VM_SYNC         = 0x00800000   # 4.15 and later
+VM_ARCH_1       = 0x01000000   # x86: VM_PAT
+VM_WIPEONFORK   = 0x02000000   # 4.14 and later
+VM_DONTDUMP     = 0x04000000
+VM_SOFTDIRTY    = 0x08000000
+VM_MIXEDMAP     = 0x10000000
+VM_HUGEPAGE     = 0x20000000
+VM_NOHUGEPAGE   = 0x40000000
+VM_MERGEABLE    = 0x80000000
 
-VM_BIGPAGE      = 0x00100000   # bigpage mappings, no pte's
-VM_BIGMAP       = 0x00200000   # user wants bigpage mapping
+vm_flag_names = None
 
-VM_WRITECOMBINED = 0x00100000   # Write-combined
-VM_NONCACHED     = 0x00200000   # Noncached access
-VM_HUGETLB       = 0x00400000   # Huge tlb Page*/
-VM_ACCOUNT       = 0x00100000   # Memory is a vm accounted object
 
-VM_NONLINEAR     = 0x00800000   # Is non-linear (remap_file_pages)
+def get_vm_flag_names():
+    """[(bit, name)] for this kernel, in bit order."""
+    global vm_flag_names
+    if vm_flag_names is not None:
+        return vm_flag_names
 
-VM_MAPPED_COPY  = 0x01000000    # T if mapped copy of data (nommu mmap)
-VM_HUGEPAGE     = 0x01000000    # MADV_HUGEPAGE marked this vma
+    kernel_major = 0
+    try:
+        kernel_major = int(re.match(r"(\d+)\.", str(sys_info.RELEASE)).group(1))
+    except:
+        pass
+    x86 = False
+    try:
+        x86 = sys_info.machine in ("x86_64", "i686", "i386")
+    except:
+        pass
 
-VM_INSERTPAGE   = 0x02000000    # The vma has had "vm_insert_page()" done on it
-VM_ALWAYSDUMP   = 0x04000000    # Always include in core dumps
+    vm_flag_names = [
+        (VM_READ, "VM_READ"), (VM_WRITE, "VM_WRITE"), (VM_EXEC, "VM_EXEC"),
+        (VM_SHARED, "VM_SHARED"), (VM_MAYREAD, "VM_MAYREAD"),
+        (VM_MAYWRITE, "VM_MAYWRITE"), (VM_MAYEXEC, "VM_MAYEXEC"),
+        (VM_MAYSHARE, "VM_MAYSHARE"), (VM_GROWSDOWN, "VM_GROWSDOWN"),
+        (VM_UFFD_MISSING, "VM_UFFD_MISSING"), (VM_PFNMAP, "VM_PFNMAP"),
+        (VM_DENYWRITE, "VM_DENYWRITE"), (VM_UFFD_WP, "VM_UFFD_WP"),
+        (VM_LOCKED, "VM_LOCKED"), (VM_IO, "VM_IO"),
+        (VM_SEQ_READ, "VM_SEQ_READ"), (VM_RAND_READ, "VM_RAND_READ"),
+        (VM_DONTCOPY, "VM_DONTCOPY"), (VM_DONTEXPAND, "VM_DONTEXPAND"),
+        (VM_LOCKONFAULT, "VM_LOCKONFAULT"), (VM_ACCOUNT, "VM_ACCOUNT"),
+        (VM_NORESERVE, "VM_NORESERVE"), (VM_HUGETLB, "VM_HUGETLB"),
+        (VM_SYNC, "VM_SYNC" if kernel_major >= 4 or kernel_major == 0
+                  else "VM_NONLINEAR"),
+        (VM_ARCH_1, "VM_PAT" if x86 else "VM_ARCH_1"),
+        (VM_WIPEONFORK, "VM_WIPEONFORK"), (VM_DONTDUMP, "VM_DONTDUMP"),
+        (VM_SOFTDIRTY, "VM_SOFTDIRTY"), (VM_MIXEDMAP, "VM_MIXEDMAP"),
+        (VM_HUGEPAGE, "VM_HUGEPAGE"), (VM_NOHUGEPAGE, "VM_NOHUGEPAGE"),
+        (VM_MERGEABLE, "VM_MERGEABLE"),
+    ]
+    if x86:
+        # memory protection keys, 4.6 and later
+        for bit in range(4):
+            vm_flag_names.append((1 << (32 + bit), "VM_PKEY_BIT%d" % bit))
+    return vm_flag_names
 
-VM_CAN_NONLINEAR = 0x08000000   # Has ->fault & does nonlinear pages
-VM_MIXEDMAP     = 0x10000000    # Can contain "struct page" and pure PFN pages
-VM_SAO          = 0x20000000    # Strong Access Ordering (powerpc)
-VM_PFN_AT_MMAP  = 0x40000000    # PFNMAP vma that is fy mapped at mmap time
-VM_MERGEABLE    = 0x80000000    # KSM may merge identical pages
-
-vm_flags_dict = {
-	0x00000001 : "VM_READ",
-	0x00000002 : "VM_WRITE",
-	0x00000004 : "VM_EXEC",
-	0x00000008 : "VM_SHARED",
-	0x00000010 : "VM_MAYREAD",
-	0x00000020 : "VM_MAYWRITE",
-	0x00000040 : "VM_MAYEXEC",
-	0x00000080 : "VM_MAYSHARE",
-	0x00000100 : "VM_GROWSDOWN",
-	0x00000200 : "VM_GROWSUP",
-	0x00000200 : "VM_NOHUGEPAGE",
-	0x00000400 : "VM_SHM",
-	0x00000400 : "VM_PFNMAP",
-	0x00000800 : "VM_DENYWRITE",
-	0x00001000 : "VM_EXECUTABLE",
-	0x00002000 : "VM_LOCKED",
-	0x00004000 : "VM_IO",
-	0x00008000 : "VM_SEQ_READ",
-	0x00010000 : "VM_RAND_READ",
-	0x00020000 : "VM_DONTCOPY",
-	0x00040000 : "VM_DONTEXPAND",
-	0x00080000 : "VM_RESERVED",
-
-	0x00100000 : "VM_BIGPAGE",
-	0x00200000 : "VM_BIGMAP",
-
-	0x00100000 : "VM_WRITECOMBINED",
-	0x00200000 : "VM_NONCACHED",
-	0x00400000 : "VM_HUGETLB",
-	0x00100000 : "VM_ACCOUNT",
-
-	0x00800000 : "VM_NONLINEAR",
-
-	0x01000000 : "VM_MAPPED_COPY",
-	0x01000000 : "VM_HUGEPAGE",
-
-	0x02000000 : "VM_INSERTPAGE",
-	0x04000000 : "VM_ALWAYSDUMP",
-
-	0x08000000 : "VM_CAN_NONLINEAR",
-	0x10000000 : "VM_MIXEDMAP",
-	0x20000000 : "VM_SAO",
-	0x40000000 : "VM_PFN_AT_MMAP",
-	0x80000000 : "VM_MERGEABLE",
-}
 
 def show_flags_str(vm_flags):
-    for val in vm_flags_dict:
-        if val & vm_flags == val:
-            print(" %s" % (vm_flags_dict[val]), end="")
+    known = 0
+    for bit, name in get_vm_flag_names():
+        known |= bit
+        if vm_flags & bit:
+            print(" %s" % (name), end="")
+    if vm_flags & ~known:
+        print(" 0x%x" % (vm_flags & ~known), end="")
 
 
 def show_vm(options, pid):
@@ -2780,6 +2749,16 @@ def show_vm(options, pid):
         print(result_lines[i])
     print("%10s %s" % ("", result_lines[3]))
 
+    scanner = None
+    if options.details:
+        try:
+            task_addr = result_lines[0].split("TASK:")[1].split()[0]
+            task = readSU("struct task_struct", int(task_addr, 16))
+            pgd = int(task.mm.pgd)
+            scanner = PageScanner()
+        except Exception as e:
+            print("Cannot read the page tables: %s" % str(e))
+
     # Dictionary to track memory by type
     mem_by_type = {}
     total_vm_size = 0
@@ -2813,7 +2792,7 @@ def show_vm(options, pid):
             elif filename and filename.startswith('SYSV'):
                 vma_type = "Shared Memory (SYSV)"
                 vma_name = filename
-            # Check if it has a file mapping (do this before VM_SHM check)
+            # Check if it has a file mapping
             elif vma.vm_file != 0:
                 try:
                     # If we don't have filename from vm output, get it from structure
@@ -2841,9 +2820,9 @@ def show_vm(options, pid):
                     if debug_mode:
                         print(f"Exception getting filename: {e}")
                     vma_type = "File Mapping"
-            # Check for shared memory flag (as fallback)
-            elif vm_flags & VM_SHM:
-                vma_type = "Shared Memory (SYSV)"
+            # [vvar] and device mappings: no file, no struct pages
+            elif vm_flags & (VM_IO | VM_PFNMAP):
+                vma_type = "PFN/IO mapping"
             else:
                 # Anonymous mapping
                 if vm_flags & VM_GROWSDOWN:
@@ -2864,8 +2843,8 @@ def show_vm(options, pid):
         if options.longer:
             show_flags_str(int(words[3], 16))
 
-        if options.details:
-            pages_list = show_vm_details(options, words)
+        if scanner is not None:
+            pages_list = show_vm_details(scanner, task_addr, pgd, words)
             private_mem_pages = private_mem_pages + pages_list[0]
             shared_mem_pages = shared_mem_pages + pages_list[1]
             print(", P: %d, S: %d" % (pages_list[0], pages_list[1]), end="")
@@ -2878,9 +2857,10 @@ def show_vm(options, pid):
         print("")
         crashcolor.set_color(crashcolor.RESET)
 
-    if options.details:
+    if scanner is not None:
         print("\n\tPrivate memory pages = %d" % private_mem_pages)
-        print("\n\tShared memory pages = %d" % shared_mem_pages)
+        print("\tShared memory pages = %d (mapped by more than one process)" %
+              shared_mem_pages)
 
     # Show graphical breakdown by memory type
     if len(mem_by_type) > 0:
@@ -6154,7 +6134,7 @@ OPTION_EXAMPLES = {
     "-b": ["meminfo -b", "meminfo -b -d"],
     "-c": ["meminfo -u -c"],
     "-d": ["meminfo -S kmalloc-256 -d", "meminfo -f 0xffffade6b68037e0 -d"],
-    "--debug": ["meminfo -s --debug"],
+    "-D": ["meminfo -s -D", "meminfo -u --shared -D"],
     "-e": ["meminfo -e 0x7"],
     "-f": ["meminfo -f 0xffffade6b68037e0 -d"],
     "-F": ["meminfo -F 0x8000000000000067"],
@@ -6217,7 +6197,8 @@ def meminfo():
     op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
                   help="Show detailed output")
-    op.add_option("--debug", dest="debug", default=0,
+    # Not --debug: epython takes '--debug N' as its own debug level
+    op.add_option("-D", "--debug-output", dest="debug", default=0,
                   action="store_true",
                   help="Show debug output")
     op.add_option("-e", "--error", dest="error_code", default="",
