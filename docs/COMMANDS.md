@@ -635,7 +635,9 @@ Taint letters come from the vmcore's own `taint_flags[]` table (RHEL 7: `tnts[]`
 
 `-b` maps every frame address of `bt -a` (`--bt-all`: `foreach bt`), including exception RIPs, to the module whose core or init range holds it, and lists each module's frames by task.
 
-`--hooks <module>` (`all` for every module) lists where the kernel holds a pointer into the module's code or data, which is what calls into it: timers and hrtimers, delayed works (the work function, not `delayed_work_timer_fn`), pending and running works, IRQ handlers and threads, kthreads (their `threadfn`), the common notifier chains, char and misc devices' `file_operations`, netfilter hooks of the initial namespace, kprobes and kretprobes, and ftrace ops. References with the same kind and function are grouped with a count.
+`--hooks <module>` (`all` for every module) lists where the kernel holds a pointer into the module's code or data, which is what calls into it: timers and hrtimers, delayed works (the work function, not `delayed_work_timer_fn`), pending and running works, IRQ handlers and threads, kthreads (their `threadfn`), the common notifier chains, char and misc devices' `file_operations`, netfilter hooks of the initial namespace, kprobes and kretprobes, ftrace ops, and system call table entries (`sys_call_table` and the compat tables) that a module replaced. References with the same kind and function are grouped with a count.
+
+`-b` and `--third-party` also list the frames in kernel functions a module has a kprobe or kretprobe on, with the module and handler: the module's code runs inside those functions even when none of its own frames are on the stack. Frames in a kprobe, kretprobe or ftrace trampoline are listed too; a kretprobe trampoline doesn't say whose probe it returns through, so the modules that own kretprobes are named.
 
 `--mem <module>` (`all` for every module) shows the memory a module holds: its own code and data, the vmalloc areas whose `vm_struct->caller` is in the module (with the callers), and the slab caches whose constructor is in it, with their size from `kmem -s`. Caches without a constructor have nothing naming their creator, so for one module those named like it are listed separately as likely owners. A module's code and data are allocated by the module loader, so they are not counted as vmalloc.
 
@@ -1250,6 +1252,15 @@ Automated detection of known issues using a rules engine. Runs detection rules a
 | `-a` | `--all` | Run all rules (default runs major rules only) |
 | `-l` | `--list` | Show currently available rules |
 | `-r` | `--reload` | Reload rules |
+
+Rules about modules (they use `modinfo`'s checks; see its section):
+
+| Rule | Raised when |
+|------|-------------|
+| `module_freed_code` | A frame of `bt -a` is in freed module-area memory: an unloaded module's code, or a freed BPF program or trampoline |
+| `module_debuginfo_mismatch` | crash loaded debuginfo of another build for a third-party module (build ID or srcversion differs), so its source lines and structs are wrong |
+| `module_memory_on_oom` | On an OOM, a module's code allocated 5% of RAM or more (vmalloc areas and slab caches it created) |
+| `module_probe_on_stack` | The crashing task (`bt`) is in a function a third-party module probes, or in a probe trampoline |
 
 #### Examples
 

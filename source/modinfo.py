@@ -1662,11 +1662,17 @@ def show_bt_modules(options, max_frames=8):
         return
     frames = parse_backtraces(text)
     tasks = len(set((f[0], f[2]) for f in frames))
-    result = frames_by_module(frames, code_ranges(), module_areas())
+    ranges = code_ranges()
+    areas = module_areas()
+    result = frames_by_module(frames, ranges, areas)
+    try:
+        hooked, trampolines = hooked_frames(frames, module_probes(ranges, areas))
+    except Exception:
+        hooked, trampolines = [], []
     print("Modules in '%s' (%d frames in %d tasks)" % (command, len(frames), tasks))
     if not result:
         print("  No frame is in module code")
-        return
+    print_hooked_frames(hooked, trampolines)
     for name, mod_frames in result:
         mod_tasks = len(set((f[0], f[2]) for f in mod_frames))
         crashcolor.set_color(crashcolor.LIGHTRED)
@@ -2081,15 +2087,21 @@ def hooks_netfilter():
     return hooks
 
 
-def hooks_kprobes():
-    hooks = []
+def kprobe_entries():
+    """
+    [(kind, handler, field, probed address, probed function, kprobe)] for
+    every kprobe and kretprobe handler: kind is 'kprobe' or 'kretprobe',
+    field the handler member ('pre_handler', 'entry_handler', ...).
+    """
+    entries = []
     base = sym2addr("kprobe_table")
     hlist_off = _off("struct kprobe", "hlist")
     kretprobe_pre = sym2addr("pre_handler_kretprobe")
     for i in range(64):
         for node in _hlist_entries(base + i * sys_info.pointersize):
             kp = readSU("struct kprobe", node - hlist_off)
-            where = sym_name(int(kp.addr)) or "0x%x" % int(kp.addr)
+            target = int(kp.addr)
+            where = (sym_name(target) or "0x%x" % target).split("+")[0]
             for field in ("pre_handler", "post_handler"):
                 fn = int(getattr(kp, field))
                 if not fn:
@@ -2100,10 +2112,50 @@ def hooks_kprobes():
                     for rfield in ("handler", "entry_handler"):
                         rfn = int(getattr(rp, rfield))
                         if rfn:
-                            hooks.append(("kretprobe", rfn, "%s on %s" % (rfield, where),
-                                          Addr(kp)))
+                            entries.append(("kretprobe", rfn, rfield, target, where, Addr(kp)))
                     continue
-                hooks.append(("kprobe", fn, "%s on %s" % (field, where), Addr(kp)))
+                entries.append(("kprobe", fn, field, target, where, Addr(kp)))
+    return entries
+
+
+def hooks_kprobes():
+    return [(kind, fn, "%s on %s" % (field, where), kp)
+            for kind, fn, field, target, where, kp in kprobe_entries()]
+
+
+SYSCALL_PREFIXES = ("__x64_sys_", "__ia32_sys_", "__x32_compat_sys_", "__ia32_compat_sys_",
+                    "__x64_compat_sys_", "__arm64_sys_", "__arm64_compat_sys_",
+                    "__s390x_sys_", "__s390_sys_", "__riscv_sys_", "__se_sys_",
+                    "sys_", "compat_sys_", "ppc_", "__se_compat_sys_")
+
+
+def is_syscall_entry(name):
+    """True for the name of a function a system call table points to."""
+    return bool(name) and (name.split("+")[0].startswith(SYSCALL_PREFIXES) or
+                           "ni_syscall" in name)
+
+
+def hooks_syscalls(limit=2048):
+    """
+    sys_call_table entries (and the compat tables'): one that points into a
+    module means the module replaced that system call. The tables are
+    declared without a size, so each is read until an entry is neither a
+    system call function nor in module memory.
+    """
+    hooks = []
+    ranges = code_ranges()
+    areas = module_areas()
+    for table in ("sys_call_table", "ia32_sys_call_table", "x32_sys_call_table",
+                  "compat_sys_call_table"):
+        base = sym2addr(table)
+        if not base:
+            continue
+        for nr in range(limit):
+            fn = readPtr(base + nr * sys_info.pointersize)
+            in_module = classify_address(fn, ranges, areas) is not None if fn else False
+            if not fn or not (in_module or is_syscall_entry(addr2sym(fn))):
+                break
+            hooks.append(("syscall", fn, "%s[%d]" % (table, nr), 0))
     return hooks
 
 
@@ -2132,7 +2184,75 @@ HOOK_COLLECTORS = (
     ("netfilter hooks", hooks_netfilter),
     ("kprobes", hooks_kprobes),
     ("ftrace ops", hooks_ftrace),
+    ("syscall tables", hooks_syscalls),
 )
+
+
+# Frames of the code a probe or ftrace hook runs through.
+PROBE_TRAMPOLINES = ("kretprobe_trampoline", "__kretprobe_trampoline",
+                     "kretprobe_trampoline_holder",
+                     "kretprobe_trampoline_handler", "__kretprobe_trampoline_handler",
+                     "ftrace_trampoline", "ftrace_caller", "ftrace_regs_caller",
+                     "ftrace_regs_call", "ftrace_call", "optprobe_template_entry",
+                     "kprobe_ftrace_handler", "rethook_trampoline", "arch_rethook_trampoline")
+
+
+def module_probes(ranges, areas):
+    """
+    {probed function: [(kind, field, owner, handler)]} for the kprobes and
+    kretprobes whose handler is in a module (owner) or in freed
+    module-area memory.
+    """
+    probes = {}
+    for kind, fn, field, target, where, kp in kprobe_entries():
+        owner = classify_address(fn, ranges, areas)
+        if owner is not None:
+            probes.setdefault(where, []).append((kind, field, owner, fn))
+    return probes
+
+
+def hooked_frames(frames, probes):
+    """
+    [(frame, [(kind, field, owner, handler)])] for the backtrace frames in
+    a function a module probes, and [(frame, owners)] for the frames in a
+    probe or ftrace trampoline, with the modules that own kretprobes (the
+    trampoline doesn't say which probe it returns through).
+    """
+    hooked = []
+    trampolines = []
+    kret_owners = sorted(set(p[2] for plist in probes.values() for p in plist
+                             if p[0] == "kretprobe"))
+    for frame in frames:
+        func = frame[4].split("+")[0]
+        if func in probes:
+            hooked.append((frame, probes[func]))
+        elif func in PROBE_TRAMPOLINES:
+            trampolines.append((frame, kret_owners if "kretprobe" in func or "rethook" in func
+                                else []))
+    return hooked, trampolines
+
+
+def print_hooked_frames(hooked, trampolines, limit=10):
+    if not hooked and not trampolines:
+        return
+    crashcolor.set_color(crashcolor.LIGHTRED)
+    print("\nFrames in functions a module probes (%d), and in probe trampolines (%d):"
+          % (len(hooked), len(trampolines)))
+    crashcolor.set_color(crashcolor.RESET)
+    for frame, plist in hooked[:limit]:
+        pid, comm, cpu, fno, func, addr = frame
+        owners = ", ".join(sorted(set("%s %s of %s" % (k, f.replace("_handler", ""), o)
+                                      for k, f, o, h in plist)))
+        print("    PID %-7d %-16s CPU %-3d %-4s %s: %s" % (pid, comm, cpu, fno, func, owners))
+    for frame, owners in trampolines[:limit]:
+        pid, comm, cpu, fno, func, addr = frame
+        print("    PID %-7d %-16s CPU %-3d %-4s %s%s" % (
+            pid, comm, cpu, fno, func,
+            ": returning through a kretprobe (kretprobes of %s)" % ", ".join(owners)
+            if owners else ""))
+    more = len(hooked) + len(trampolines) - min(len(hooked), limit) - min(len(trampolines), limit)
+    if more > 0:
+        print("    ... %d more" % more)
 
 
 def hooks_by_module(hooks, ranges, areas):
@@ -2886,11 +3006,15 @@ def show_third_party(options):
             pass
     found = hooks_by_module(hooks, ranges, areas)
     try:
-        frames = frames_by_module(parse_backtraces(exec_crash_command("bt -a")),
-                                  ranges, areas)
+        all_frames = parse_backtraces(exec_crash_command("bt -a"))
     except Exception:
-        frames = []
+        all_frames = []
+    frames = frames_by_module(all_frames, ranges, areas)
     in_bt = dict((name, len(f)) for name, f in frames)
+    try:
+        hooked, trampolines = hooked_frames(all_frames, module_probes(ranges, areas))
+    except Exception:
+        hooked, trampolines = [], []
 
     print("Third-party modules: %d of %d (out-of-tree, unsigned, proprietary, partner,"
           " staging or force-loaded)" % (len(third), len(module_list)))
@@ -2914,6 +3038,7 @@ def show_third_party(options):
             len(found.get(name, [])), in_bt.get(name) or "-"))
         crashcolor.set_color(crashcolor.RESET)
 
+    print_hooked_frames(hooked, trampolines)
     freed_hooks = found.get(UNLOADED, [])
     freed_frames = dict(frames).get(UNLOADED, [])
     if freed_hooks or freed_frames:

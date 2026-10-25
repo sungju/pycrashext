@@ -345,6 +345,35 @@ LOG = """[    1.847807] sfc 0000:3b:00.0: Solarflare NIC detected: device 1924:0
 """
 
 
+def check_hooked_frames():
+    # traps on the RHEL 8.10 vmcore: kretprobes on security_file_open and
+    # a kprobe on cgroup_procs_write_start.
+    probes = {
+        "security_file_open": [("kretprobe", "handler", "traps", 0xffffffffc08ff640),
+                               ("kretprobe", "entry_handler", "traps", 0xffffffffc0902e60)],
+        "cgroup_procs_write_start": [("kprobe", "pre_handler", "traps", 0xffffffffc09030d0)],
+    }
+    frames = [
+        (4242, "cat", 3, "#5", "security_file_open", 0xffffffff8f23ffc0),
+        (4242, "cat", 3, "#6", "do_dentry_open", 0xffffffff8f1a0000),
+        (4242, "cat", 3, "#2", "__kretprobe_trampoline", 0xffffffff8ef00000),
+        (99, "x", 1, "RIP", "cgroup_procs_write_start+0x12", 0xffffffff8efc2bc2),
+    ]
+    hooked, trampolines = modinfo.hooked_frames(frames, probes)
+    assert [f[4] for f, _ in hooked] == ["security_file_open", "cgroup_procs_write_start+0x12"]
+    assert len(hooked[0][1]) == 2
+    # A kretprobe trampoline doesn't say whose probe: the kretprobe owners.
+    assert trampolines == [(frames[2], ["traps"])]
+    assert modinfo.hooked_frames(frames, {}) == ([], [(frames[2], [])])
+
+
+def check_syscall_entries():
+    s = modinfo.is_syscall_entry
+    assert s("__x64_sys_read") and s("__ia32_compat_sys_open") and s("sys_ni_syscall")
+    assert s("__arm64_sys_openat") and s("__x64_sys_read+0x0")
+    assert not s("fs_dax_get_by_bdev") and not s(None) and not s("")
+
+
 def check_is_third_party():
     t = modinfo.is_third_party
     assert t("OE", False) and t("P", None) and t("p", True) and t("C", True)
