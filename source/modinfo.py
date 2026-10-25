@@ -7,7 +7,9 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+import os
 import re
+import glob
 import struct as pystruct
 from datetime import datetime
 import crashcolor
@@ -1129,6 +1131,14 @@ def show_module_summary(module, max_params=20):
     row("source ver", _cstr(module.srcversion) or "-")
     if _has_member("rhelversion"):
         row("rhel version", _cstr(module.rhelversion) or "-")
+    for warn, text in debuginfo_note(module):
+        if warn:
+            crashcolor.set_color(crashcolor.LIGHTRED)
+        lines = text.split("\n")
+        row("debuginfo" if not warn else "  WARNING", lines[0])
+        for more in lines[1:]:
+            print(" " * 18 + more)
+        crashcolor.set_color(crashcolor.RESET)
     if _has_member("sig_ok"):
         row("signed", "yes" if module.sig_ok else "no")
     taints = module_taints(module)
@@ -1671,6 +1681,13 @@ def show_bt_modules(options, max_frames=8):
             print("    ... %d more" % (len(mod_frames) - max_frames))
         if name == UNLOADED:
             print_unloaded_hint([f[5] for f in mod_frames])
+        elif not name.startswith("("):
+            # The faulting instruction if there is one, else the frame
+            # nearest the top of the stack.
+            rips = [f for f in mod_frames if f[3] == "RIP"]
+            first = (rips or mod_frames)[0]
+            print("    next: edis -C 8 0x%x    (modinfo %s, modinfo --hooks %s)"
+                  % (first[5], name, name))
 
 
 def print_unloaded_hint(addrs=()):
@@ -2350,6 +2367,445 @@ def show_module_mem(options):
         print_unloaded_hint([c for c, _ in vmalloc[UNLOADED]])
 
 
+# ============================================================================
+# --log: what the kernel log says about a module
+# ============================================================================
+
+# Log messages that matter most when a module is the suspect.
+LOG_NOTABLE = (
+    ("taint", re.compile(r'taints kernel|module verification failed|'
+                         r'loading out-of-tree|unsupported|tech preview|tainting', re.I)),
+    ("error", re.compile(r'Unknown symbol|disagrees about version|'
+                         r'BUG:|WARNING:|Oops|general protection|RIP:|'
+                         r'invalid opcode|soft lockup|hung_task|blocked for more than|'
+                         r'\berror\b|\bfailed\b|\bfail\b|timed? ?out', re.I)),
+)
+_RE_LOG_TIME = re.compile(r'^\[\s*([0-9.]+)\]\s?')
+
+
+def _module_name_pattern(name):
+    """The module's name as a word: 'sfc' matches 'sfc 0000:3b:00.0:' and
+    '[sfc efrm]', not 'sfc_char'. Kernel log lines may use '-' for '_'."""
+    names = set([name, name.replace("_", "-")])
+    alt = "|".join(re.escape(n) for n in sorted(names))
+    return re.compile(r'(?<![\w-])(%s)(?![\w-])' % alt)
+
+
+def module_log_lines(log_text, name):
+    """
+    [(time, kind, message, repeats)] for the log lines that name the
+    module, consecutive repeats of the same message (ignoring the
+    timestamp) folded into one. kind is 'taint', 'error' or ''.
+    """
+    pattern = _module_name_pattern(name)
+    result = []
+    for line in log_text.splitlines():
+        if not pattern.search(line):
+            continue
+        m = _RE_LOG_TIME.match(line)
+        time = m.group(1) if m else ""
+        message = line[m.end():] if m else line
+        kind = ""
+        for label, notable in LOG_NOTABLE:
+            if notable.search(message):
+                kind = label
+                break
+        if result and result[-1][2] == message:
+            t, k, msg, repeats = result[-1]
+            result[-1] = (t, k, msg, repeats + 1)
+            continue
+        result.append((time, kind, message, 1))
+    return result
+
+
+def show_module_log(options, head=20, tail=40):
+    module = find_module(options.module_log)
+    name = str(module.name) if module is not None else options.module_log
+    try:
+        text = exec_crash_command("log")
+    except Exception as e:
+        print("'log' failed: %s" % e)
+        return
+    lines = module_log_lines(text, name)
+    notable = [l for l in lines if l[1]]
+    print("Kernel log lines naming %s: %d%s" % (
+        name, len(lines), "" if module is not None else " (not loaded now)"))
+    if not lines:
+        return
+    print("  first at [%s], last at [%s]" % (lines[0][0], lines[-1][0]))
+    if notable:
+        print("\nNotable (%d):" % len(notable))
+        for time, kind, message, repeats in notable[:30]:
+            crashcolor.set_color(crashcolor.LIGHTYELLOW if kind == "taint"
+                                 else crashcolor.LIGHTRED)
+            print("  [%12s] %s%s" % (time, message,
+                                     "  (x%d)" % repeats if repeats > 1 else ""))
+            crashcolor.set_color(crashcolor.RESET)
+        if len(notable) > 30:
+            print("  ... %d more" % (len(notable) - 30))
+    print("\nAll (%s):" % ("%d" % len(lines) if len(lines) <= head + tail
+                           else "first %d and last %d" % (head, tail)))
+    shown = lines if len(lines) <= head + tail else lines[:head] + [None] + lines[-tail:]
+    for entry in shown:
+        if entry is None:
+            print("  ... %d lines" % (len(lines) - head - tail))
+            continue
+        time, kind, message, repeats = entry
+        print("  [%12s] %s%s" % (time, message, "  (x%d)" % repeats if repeats > 1 else ""))
+    last = last_unloaded_module_str()
+    if last and last.split()[0] == name:
+        print("\n%s is the last module unloaded: %s" % (name, last))
+
+
+# ============================================================================
+# --kabi: the kernel symbols a module uses, against the kABI stablelist
+# ============================================================================
+
+# Symbols the compiler emits calls to: not something the module chose.
+COMPILER_SYMBOLS = ("__fentry__", "mcount", "__x86_return_thunk", "__stack_chk_fail",
+                    "srso_return_thunk", "srso_alias_return_thunk",
+                    "retbleed_return_thunk", "zen_untrain_ret", "entry_untrain_ret",
+                    "__x86_indirect_thunk_", "__x86_indirect_call_thunk_",
+                    "__sanitizer_cov_", "__ubsan_handle_", "__asan_", "__SCT__",
+                    "__x86_indirect_jump_thunk_", "_mcount", "__pfx_")
+
+_RE_DIS_LINE = re.compile(r'^(0x[0-9a-fA-F]+) <([^>+]+)(?:\+(?:0x)?[0-9a-fA-F]+)?>:')
+_RE_DIS_REF = re.compile(r'(0x[0-9a-fA-F]+) <([^>+]+)(?:\+(?:0x)?[0-9a-fA-F]+)?>')
+
+
+def kernel_refs_in_dis(dis_text, inside):
+    """
+    {symbol: set of the module's functions using it} for the '<symbol>'
+    references in 'dis' output whose address is outside the module
+    (inside(addr) is False): the kernel symbols the module code calls,
+    jumps to or reads.
+    """
+    refs = {}
+    for line in dis_text.splitlines():
+        m = _RE_DIS_LINE.match(line)
+        if m is None:
+            continue
+        func = m.group(2)
+        for addr, name in _RE_DIS_REF.findall(line[m.end():]):
+            if inside(int(addr, 16)) or name.startswith(COMPILER_SYMBOLS):
+                continue
+            refs.setdefault(name, set()).add(func)
+    return refs
+
+
+def get_module_text_range(module):
+    """(start, end) of a module's core text."""
+    try:
+        m = module.mem[0]                       # MOD_TEXT
+        return int(m.base), int(m.base) + int(m.size)
+    except Exception:
+        pass
+    try:
+        base = int(module.core_layout.base)
+        return base, base + int(module.core_layout.text_size)
+    except Exception:
+        pass
+    base = int(module.module_core)
+    return base, base + int(module.core_text_size)
+
+
+KABI_ARCH = {"x86_64": "x86_64", "aarch64": "aarch64", "ppc64le": "ppc64le",
+             "ppc64": "ppc64", "s390x": "s390x"}
+
+
+def read_kabi_list(path):
+    """The symbols of a kABI stablelist: a kabi_stablelist_<arch> file
+    (kernel-abi-stablelists; '[section]' then one symbol per line) or a
+    kabi_<arch> directory of the kernel source (one file per symbol)."""
+    if os.path.isdir(path):
+        return set(n for n in os.listdir(path) if not n.startswith("."))
+    names = set()
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith(("[", "#")):
+                names.add(line.split()[0])
+    return names
+
+
+def kabi_list_candidates(release, machine, explicit, environ):
+    """Where a kABI stablelist for this kernel may be, in order."""
+    arch = KABI_ARCH.get(machine, machine)
+    candidates = []
+    if explicit:
+        candidates.append(explicit)
+    if environ.get("KABI_STABLELIST"):
+        candidates.append(environ["KABI_STABLELIST"])
+    m = re.search(r'\.el(\d+)(?:_(\d+))?', release)
+    if m:
+        major, minor = m.group(1), m.group(2) or ""
+        for d in ("/lib/modules", "/usr/lib/modules"):
+            candidates.append("%s/kabi-rhel%s%s/kabi_stablelist_%s" % (d, major, minor, arch))
+            candidates.append("%s/kabi-current/kabi_stablelist_%s" % (d, arch))
+    src = environ.get("EDIS_SOURCE_DIR")
+    if src:
+        candidates.append(os.path.join(src, "redhat/kabi/kabi-module/kabi_%s" % arch))
+    return candidates
+
+
+def find_kabi_list(explicit=None):
+    """(symbols, where they came from), or (None, the places looked at)."""
+    release = ""
+    try:
+        release = str(sys_info.RELEASE)
+    except Exception:
+        try:
+            release = get_release_from_sys()
+        except Exception:
+            pass
+    candidates = kabi_list_candidates(release, sys_info.machine, explicit, os.environ)
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                return read_kabi_list(path), path
+            except Exception:
+                continue
+    return None, candidates
+
+
+def get_release_from_sys():
+    for line in exec_crash_command("sys").splitlines():
+        words = line.split()
+        if len(words) > 1 and words[0] == "RELEASE:":
+            return words[1]
+    return ""
+
+
+def kabi_alias(name, kabi, addr_of):
+    """
+    The stablelist name the module meant, when crash named the address by
+    an alias: the module calls memcpy, crash shows __memcpy at the same
+    address. None when there is no such alias.
+    """
+    plain = name.lstrip("_")
+    if plain != name and plain in kabi:
+        addr = addr_of(name)
+        if addr and addr == addr_of(plain):
+            return plain
+    return None
+
+
+def on_kabi_list(name, kabi):
+    return name in kabi or kabi_alias(name, kabi, sym2addr) is not None
+
+
+def show_module_kabi(options):
+    module = find_module(options.module_kabi)
+    if module is None:
+        print("The module %s does not exist" % options.module_kabi)
+        return
+    name = str(module.name)
+    start, end = get_module_text_range(module)
+    regions = module_regions(module)
+
+    def inside(addr):
+        return any(s <= addr < e for s, e in regions)
+
+    # One 'dis' over the whole text; the count is more instructions than
+    # can fit, and lines past the end are another module's.
+    try:
+        text = exec_crash_command("dis 0x%x %d" % (start, max(16, (end - start) // 2)))
+    except Exception as e:
+        print("'dis' of %s failed: %s" % (name, e))
+        return
+    text = "\n".join(l for l in text.splitlines()
+                     if _RE_DIS_LINE.match(l) and int(_RE_DIS_LINE.match(l).group(1), 16) < end)
+    refs = kernel_refs_in_dis(text, inside)
+    exported = dict((n, f) for n, f in refs.items() if sym2addr("__ksymtab_" + n))
+    others = dict((n, f) for n, f in refs.items() if n not in exported)
+
+    kabi, source = find_kabi_list(options.kabi_list)
+    print("%s uses %d exported kernel symbols (from %d bytes of code)"
+          % (name, len(exported), end - start))
+    taints = module_taints(module)
+    if not any(t in taints for t in "OEP") and getattr(module, "sig_ok", True):
+        print("%s is an in-tree module, built and shipped with this kernel: the kABI"
+              " applies to\nthird-party modules, so symbols off the list are expected"
+              " here." % name)
+
+    def users(funcs):
+        funcs = sorted(funcs)
+        return ", ".join(funcs[:3]) + (" +%d" % (len(funcs) - 3) if len(funcs) > 3 else "")
+
+    if kabi is None:
+        print("No kABI stablelist found; looked at:")
+        for path in source:
+            print("    %s" % path)
+        print("Pass one with --kabi-list FILE|DIR, or set KABI_STABLELIST. Symbols used:")
+        for sym in sorted(exported):
+            print("    %-40s  used in %s" % (sym, users(exported[sym])))
+    else:
+        outside = sorted(n for n in exported if not on_kabi_list(n, kabi))
+        print("%d on the kABI stablelist (%s), %d not:" % (len(exported) - len(outside),
+                                                        source, len(outside)))
+        for sym in outside:
+            crashcolor.set_color(crashcolor.LIGHTRED)
+            print("    %-40s" % sym, end="")
+            crashcolor.set_color(crashcolor.RESET)
+            print("  used in %s" % users(exported[sym]))
+        if not outside:
+            print("    none: every exported symbol it uses is kABI-stable")
+    if others:
+        print("\nReferences to kernel symbols that are not exported (%d): data the"
+              " compiler placed\nnext to an exported symbol, or symbols reached"
+              " some other way:" % len(others))
+        for sym in sorted(others)[:20]:
+            print("    %-40s  used in %s" % (sym, users(others[sym])))
+        if len(others) > 20:
+            print("    ... %d more" % (len(others) - 20))
+
+
+# ============================================================================
+# Debuginfo check for --details
+# ============================================================================
+
+SHT_NOTE = 7
+SHT_NOBITS = 8
+NT_GNU_BUILD_ID = 3
+
+
+def parse_build_id(notes, order="<"):
+    """The GNU build ID, as hex, in a block of ELF notes; None if absent."""
+    pos = 0
+    while pos + 12 <= len(notes):
+        namesz, descsz, ntype = pystruct.unpack_from(order + "III", notes, pos)
+        pos = pos + 12
+        name = notes[pos:pos + namesz]
+        pos = pos + ((namesz + 3) & ~3)
+        desc = notes[pos:pos + descsz]
+        pos = pos + ((descsz + 3) & ~3)
+        if ntype == NT_GNU_BUILD_ID and name.rstrip(b"\0") == b"GNU":
+            return "".join("%02x" % b for b in bytearray(desc))
+    return None
+
+
+def elf_sections(data):
+    """[(name, type, bytes)] of an ELF file's sections; a NOBITS section
+    (in a separated .debug file every allocated section is one) has no
+    bytes. None when it is not an ELF file."""
+    if data[:4] != b"\x7fELF":
+        return None
+    order = "<" if data[5] == 1 else ">"
+    try:
+        if data[4] == 2:
+            shoff, = pystruct.unpack_from(order + "Q", data, 0x28)
+            shentsize, shnum, shstrndx = pystruct.unpack_from(order + "HHH", data, 0x3a)
+            fmt = order + "IIQQQQIIQQ"
+        else:
+            shoff, = pystruct.unpack_from(order + "I", data, 0x20)
+            shentsize, shnum, shstrndx = pystruct.unpack_from(order + "HHH", data, 0x2e)
+            fmt = order + "IIIIIIIIII"
+        headers = [pystruct.unpack_from(fmt, data, shoff + i * shentsize) for i in range(shnum)]
+        strtab = headers[shstrndx]
+        names = data[strtab[4]:strtab[4] + strtab[5]]
+        sections = []
+        for h in headers:
+            name = names[h[0]:names.index(b"\0", h[0])].decode("ascii", "replace")
+            body = b"" if h[1] == SHT_NOBITS else data[h[4]:h[4] + h[5]]
+            sections.append((name, h[1], body))
+        return sections
+    except Exception:
+        return None
+
+
+def elf_identity(path):
+    """(build ID, srcversion) of a .ko or .ko.debug, either None when the
+    file lacks it; None when the file can't be read."""
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except Exception:
+        return None
+    sections = elf_sections(data)
+    if sections is None:
+        return None
+    order = "<" if data[5] == 1 else ">"
+    build_id = None
+    srcversion = None
+    for name, stype, body in sections:
+        if stype == SHT_NOTE and body and build_id is None:
+            build_id = parse_build_id(body, order)
+        elif name == ".modinfo" and body:
+            for item in body.split(b"\0"):
+                if item.startswith(b"srcversion="):
+                    srcversion = item.split(b"=", 1)[1].decode("ascii", "replace")
+    return build_id, srcversion
+
+
+def module_build_id(module):
+    """The loaded module's GNU build ID, from the notes the kernel keeps
+    for /sys/module/<name>/notes; None when unavailable."""
+    try:
+        attrs = readPtr(Addr(module) + _off("struct module", "notes_attrs"))
+        if not attrs:
+            return None
+        count = readU32(attrs + _off("struct module_notes_attrs", "notes"))
+        base = attrs + _off("struct module_notes_attrs", "attrs")
+        stride = struct_size("struct bin_attribute")
+        size_off = _off("struct bin_attribute", "size")
+        private_off = _off("struct bin_attribute", "private")
+        order = byte_order(sys_info.machine)
+        for i in range(min(count, 16)):
+            attr = base + i * stride
+            size = readULong(attr + size_off)
+            data = readmem(readPtr(attr + private_off), size) if 0 < size < 4096 else b""
+            build_id = parse_build_id(data, order)
+            if build_id:
+                return build_id
+    except Exception:
+        pass
+    return None
+
+
+def module_object_file(name):
+    """The file crash loaded for a module ('mod' OBJECT FILE), None when it
+    loaded none."""
+    try:
+        for line in exec_crash_command("mod").splitlines():
+            words = line.split()
+            if len(words) >= 5 and words[1] == name:
+                return None if words[4] == "(not" else words[4]
+    except Exception:
+        pass
+    return None
+
+
+def debuginfo_note(module):
+    """[(warn, text)] about the debuginfo crash uses for the module."""
+    name = str(module.name)
+    path = module_object_file(name)
+    if path is None:
+        return [(True, "crash has no debuginfo for %s: source lines, struct layouts and"
+                       " 'edis -T' need it.\nLoad it with: mod -s %s <path to %s.ko"
+                       " or .ko.debug>" % (name, name, name))]
+    notes = [(False, path)]
+    identity = elf_identity(path)
+    file_id, file_src = identity if identity else (None, None)
+    loaded_id = module_build_id(module)
+    loaded_src = _cstr(module.srcversion)
+    mismatch = None
+    if file_id and loaded_id:
+        if file_id != loaded_id:
+            mismatch = "build ID %s, the loaded module's %s" % (file_id, loaded_id)
+    elif file_src and loaded_src and file_src != loaded_src:
+        mismatch = "srcversion %s, the loaded module's %s" % (file_src, loaded_src)
+    if mismatch:
+        notes.append((True, "This debuginfo is for another build of %s: %s.\nSource lines,"
+                            " structs and 'edis -T' for it are not to be trusted; load the"
+                            "\nmatching one with mod -s." % (name, mismatch)))
+    elif file_id and loaded_id:
+        notes[0] = (False, "%s (build ID matches)" % path)
+    elif "O" in module_taints(module):
+        notes.append((True, "Could not compare it with the loaded module, and %s is"
+                            " out-of-tree: check that\nthe debuginfo is for this build." % name))
+    return notes
+
+
 def modinfo():
     op = OptionParser(usage="%prog [options] [<module>]\n\n"
                       "With no options, list the loaded modules. 'modinfo <module>'"
@@ -2384,6 +2840,20 @@ def modinfo():
                        " and misc devices, netfilter hooks, kprobes, ftrace"
                        " ops. References into freed memory in the module area"
                        " are listed too")
+    op.add_option("--log", dest="module_log", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="Show the kernel log lines that name a module, taint"
+                       " and error messages first")
+    op.add_option("--kabi", dest="module_kabi", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="List the exported kernel symbols a module's code uses,"
+                       " and those not on the RHEL kABI stablelist")
+    op.add_option("--kabi-list", dest="kabi_list", default=None, metavar="PATH",
+                  action="store", type="string",
+                  help="kABI stablelist for --kabi: a kabi_stablelist_<arch>"
+                       " file or a source tree's redhat/kabi/kabi-module/"
+                       "kabi_<arch> directory (else $KABI_STABLELIST,"
+                       " /lib/modules/kabi-*, $EDIS_SOURCE_DIR)")
     op.add_option("--mem", dest="module_mem", default=None, metavar="MODULE",
                   action="store", type="string",
                   help="Show the memory a module holds ('all' for every"
@@ -2439,6 +2909,7 @@ def modinfo():
     if args and o.module_detail is None and o.disasm_module is None and \
        o.module_params is None and o.module_deps is None and \
        o.module_hooks is None and o.module_mem is None and \
+       o.module_log is None and o.module_kabi is None and \
        o.batch_run is None and o.module_addr is None:
         o.module_detail = args[0]
 
@@ -2452,6 +2923,14 @@ def modinfo():
 
     if o.module_mem is not None:
         show_module_mem(o)
+        sys.exit(0)
+
+    if o.module_log is not None:
+        show_module_log(o)
+        sys.exit(0)
+
+    if o.module_kabi is not None:
+        show_module_kabi(o)
         sys.exit(0)
 
     if o.module_params is not None:

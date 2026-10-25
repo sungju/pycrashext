@@ -641,6 +641,12 @@ Taint letters come from the vmcore's own `taint_flags[]` table (RHEL 7: `tnts[]`
 
 `-b`, `--hooks` and `--mem` map addresses with the same rules. BPF programs and trampolines (`bpf_kallsyms`), kprobe instruction slots and ftrace trampolines are allocated in the module area too, and are shown as such. An address in the module area (`mod_tree.addr_min`..`addr_max`) that belongs to none of them is shown as **freed memory in the module area**: the code or data of an unloaded module, or of a freed BPF program or trampoline, that something still uses. The note under it says whether any module has been unloaded since boot (`last_unloaded_module`) and whether each address is still mapped.
 
+`--log <module>` shows the kernel log lines that name the module (as a word, so `sfc` matches `sfc 0000:3b:00.0:` and `[sfc efrm]` but not `sfc_char`). Taint, signature and error lines (`Unknown symbol`, `WARNING:`, `RIP:`, lockups, failures) come first, and repeats of the same message are folded into one line.
+
+`--kabi <module>` disassembles the module's text once and lists the exported kernel symbols its code calls, jumps to or reads, with the functions that use them. With a kABI stablelist it marks the ones not on it, which matters for supporting a third-party module. The list is looked for in `--kabi-list`, `$KABI_STABLELIST`, `/lib/modules/kabi-rhel<N><M>/kabi_stablelist_<arch>` and `kabi-current` (kernel-abi-stablelists), and `$EDIS_SOURCE_DIR/redhat/kabi/kabi-module/kabi_<arch>` (RHEL 9+ source trees). An alias crash shows instead of the listed name (`__memcpy` for `memcpy`) counts as listed, and compiler-emitted calls (`__fentry__`, return thunks, `__stack_chk_fail`) are left out.
+
+`--details` also checks the debuginfo crash uses for the module. With none it gives the `mod -s` to run. Otherwise it compares the GNU build ID of the debuginfo file with the one the kernel keeps for the loaded module (its `/sys/module/<name>/notes`), or the `srcversion` when there is no build ID. crash picks debuginfo by module name, so an out-of-tree module that has the name of an in-tree one (Solarflare's `sfc`, for example) gets RHEL's debuginfo, and its source lines, structs and `edis -T` are then wrong. `-b` ends each module with the `edis -C 8` of its faulting or topmost frame.
+
 The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which registers its own `modinfo` first; `modinfo -h` shows this command's options.
 
 | Option | Long Form | Argument | Description |
@@ -652,6 +658,9 @@ The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which re
 | | `--bt-all` | | Like `-b`, for every task (`foreach bt`; can be slow) |
 | | `--hooks` | `<module>\|all` | Where the kernel calls into a module, and pointers into freed module-area memory |
 | | `--mem` | `<module>\|all` | Memory a module holds: its size, vmalloc areas and slab caches it allocated |
+| | `--log` | `<module>` | Kernel log lines naming the module, taint and errors first |
+| | `--kabi` | `<module>` | Exported kernel symbols the module uses, and those not on the kABI stablelist |
+| | `--kabi-list` | `<path>` | kABI stablelist file or directory for `--kabi` |
 | `--disasm` | | `<module>` | Disassemble functions in a module |
 | `-c` | `--contents` | | Show contents of each symbol |
 | `-t` | | | Show tainted modules only |
@@ -682,6 +691,9 @@ modinfo --hooks sfc               # Timers, works, IRQs, notifiers... that call 
 modinfo --hooks all               # The same for every module, and freed module-area memory
 modinfo --mem onload              # Memory onload's code allocated
 modinfo --mem all                 # vmalloc and slab memory per module, largest first
+modinfo --log openafs             # When it loaded, its taint messages, its errors
+modinfo --kabi openafs            # Kernel symbols it uses outside the kABI stablelist
+modinfo --kabi onload --kabi-list /lib/modules/kabi-rhel810/kabi_stablelist_x86_64
 modinfo -g                        # Show module gaps and sizes
 modinfo -a                        # Show module address ranges
 modinfo --disasm mymodule         # Disassemble module functions

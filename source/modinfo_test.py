@@ -332,6 +332,138 @@ def check_hooks_grouping():
         [modinfo.UNLOADED, "sfc"]
 
 
+LOG = """[    1.847807] sfc 0000:3b:00.0: Solarflare NIC detected: device 1924:0b03
+[    1.888335] sfc 0000:3b:00.0 eth1: driverlink registering nic
+[    1.900000] sfc_char: loaded
+[    4.777686] [sfc efrm] 0000:3b:00.0 pci_dev=1924:0b03(1) type=1:C1 ifindex=3
+[    5.753482] openafs: loading out-of-tree module taints kernel.
+[    5.754065] openafs: module verification failed: signature and/or required key missing - tainting kernel
+[  100.000000] sfc 0000:3b:00.0 ens1f0: link down
+[  100.100000] sfc 0000:3b:00.0 ens1f0: link down
+[  100.200000] sfc 0000:3b:00.0 ens1f0: link down
+[495099.605149] RIP: 0010:afsremove+0x6e5/0x770 [openafs]
+"""
+
+
+def check_module_log():
+    lines = modinfo.module_log_lines(LOG, "sfc")
+    # 'sfc_char' is another module; '[sfc efrm]' is sfc.
+    assert [l[2][:16] for l in lines] == ["sfc 0000:3b:00.0", "sfc 0000:3b:00.0",
+                                          "[sfc efrm] 0000:", "sfc 0000:3b:00.0"], lines
+    # The same message three times in a row is one line, x3.
+    assert lines[-1] == ("100.000000", "", "sfc 0000:3b:00.0 ens1f0: link down", 3)
+
+    afs = modinfo.module_log_lines(LOG, "openafs")
+    assert [l[1] for l in afs] == ["taint", "taint", "error"]
+    assert afs[0][0] == "5.753482"
+    # Kernel log lines may spell the module with '-' for '_'.
+    assert modinfo.module_log_lines("[1.0] dm-mod: hello\n", "dm_mod")[0][2] == "dm-mod: hello"
+
+
+DIS = """0xffffffffc0d90000 <afsremove>:\tcall   0xffffffffa6e00000 <__fentry__>
+0xffffffffc0d90005 <afsremove+0x5>:\tcall   0xffffffffa7123450 <__memcpy>
+0xffffffffc0d9000a <afsremove+0xa>:\tcall   0xffffffffc0d95000 <afs_PutVCache>
+0xffffffffc0d9000f <afsremove+0xf>:\tmov    0xffffffffa8000000(%rip),%rax        # 0xffffffffa8000000 <jiffies>
+0xffffffffc0d90016 <afsremove+0x16>:\tjmp    0xffffffffa7001000 <srso_return_thunk>
+0xffffffffc0d9001b <afs_remove>:\tcall   0xffffffffa7123450 <__memcpy>
+0xffffffffc0d90020 <afs_remove+0x5>:\tcall   0xffffffffa7200000 <d_splice_alias+0x10>
+"""
+
+
+def check_kernel_refs_in_dis():
+    inside = lambda addr: 0xffffffffc0d4b000 <= addr < 0xffffffffc10e8000
+    refs = modinfo.kernel_refs_in_dis(DIS, inside)
+    # Its own functions and compiler-emitted calls are left out.
+    assert refs == {"__memcpy": {"afsremove", "afs_remove"}, "jiffies": {"afsremove"},
+                    "d_splice_alias": {"afs_remove"}}, refs
+
+
+def check_kabi_lists():
+    import os
+    import shutil
+    import tempfile
+    root = tempfile.mkdtemp()
+    try:
+        path = os.path.join(root, "kabi_stablelist_x86_64")
+        with open(path, "w") as f:
+            f.write("[rhel8_x86_64_stablelist]\n\tmemcpy\n\tjiffies\n# comment\n")
+        assert modinfo.read_kabi_list(path) == {"memcpy", "jiffies"}
+        d = os.path.join(root, "kabi_x86_64")
+        os.makedirs(d)
+        for name in ("memcpy", "d_splice_alias"):
+            with open(os.path.join(d, name), "w") as f:
+                f.write("#6-\n0x0a2e5f59\t%s\tvmlinux\tEXPORT_SYMBOL\n" % name)
+        assert modinfo.read_kabi_list(d) == {"memcpy", "d_splice_alias"}
+    finally:
+        shutil.rmtree(root)
+
+    c = modinfo.kabi_list_candidates("5.14.0-570.141.1.el9_6.x86_64", "x86_64", "/x",
+                                     {"KABI_STABLELIST": "/y", "EDIS_SOURCE_DIR": "/src"})
+    assert c[:3] == ["/x", "/y", "/lib/modules/kabi-rhel96/kabi_stablelist_x86_64"], c
+    assert c[-1] == "/src/redhat/kabi/kabi-module/kabi_x86_64"
+
+    # crash names memcpy's address __memcpy: the module meant memcpy.
+    addrs = {"__memcpy": 0x10, "memcpy": 0x10, "__other": 0x20, "other": 0x30}
+    assert modinfo.kabi_alias("__memcpy", {"memcpy"}, addrs.get) == "memcpy"
+    assert modinfo.kabi_alias("__other", {"other"}, addrs.get) is None
+    assert modinfo.kabi_alias("memcpy", {"memcpy"}, addrs.get) is None
+
+
+def _elf(sections):
+    """A minimal little-endian ELF64 file with these (name, type, bytes)
+    sections and a .shstrtab."""
+    import struct
+    names = b"\0"
+    offsets = []
+    for name, _, _ in sections + [(".shstrtab", 3, b"")]:
+        offsets.append(len(names))
+        names = names + name.encode() + b"\0"
+    body = b""
+    placed = []
+    data_start = 64
+    for name, stype, data in sections:
+        placed.append((data_start + len(body), len(data)))
+        body = body + data
+    placed.append((data_start + len(body), len(names)))
+    body = body + names
+    shoff = data_start + len(body)
+    header = b"\x7fELF" + bytes([2, 1, 1]) + b"\0" * 9
+    header = header + struct.pack("<HHIQQQIHHHHHH", 1, 62, 1, 0, 0, shoff, 0, 64, 0, 0,
+                                  64, len(sections) + 2, len(sections) + 1)
+    shdrs = struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    types = [t for _, t, _ in sections] + [3]
+    for (off, size), name_off, stype in zip(placed, offsets, types):
+        shdrs = shdrs + struct.pack("<IIQQQQIIQQ", name_off, stype, 0, 0, off, size, 0, 0, 1, 0)
+    return header + body + shdrs
+
+
+def check_build_id_and_srcversion():
+    import os
+    import struct
+    import tempfile
+    build_id = bytes.fromhex("48951daf9dc8d4f792866e7d5d97054f31d6d3fb")
+    note = struct.pack("<III", 4, len(build_id), 3) + b"GNU\0" + build_id
+    assert modinfo.parse_build_id(note) == build_id.hex()
+    assert modinfo.parse_build_id(struct.pack("<III", 4, 4, 1) + b"GNU\0abcd") is None
+
+    modinfo_sec = b"license=GPL\0srcversion=EFBAAC855FA04AA13E16937\0vermagic=4.18.0\0"
+    fd, path = tempfile.mkstemp()
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(_elf([(".note.gnu.build-id", 7, note), (".modinfo", 1, modinfo_sec)]))
+        assert modinfo.elf_identity(path) == (build_id.hex(), "EFBAAC855FA04AA13E16937")
+        # A .ko.debug: .modinfo is NOBITS there, so no srcversion.
+        with open(path, "wb") as f:
+            f.write(_elf([(".note.gnu.build-id", 7, note), (".modinfo", 8, b"")]))
+        assert modinfo.elf_identity(path) == (build_id.hex(), None)
+        with open(path, "wb") as f:
+            f.write(b"not an elf file")
+        assert modinfo.elf_identity(path) is None
+    finally:
+        os.remove(path)
+    assert modinfo.elf_identity("/nonexistent/x.ko") is None
+
+
 if (__name__ == '__main__'):
     checks = [v for k, v in sorted(globals().items()) if k.startswith('check_')]
     for check in checks:
