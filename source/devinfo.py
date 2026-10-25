@@ -1845,12 +1845,10 @@ def show_pvio(options):
 
 OPTION_EXAMPLES = {
     "-b": ["devinfo -b", "devinfo -b -d"],
-    "-c": ["devinfo -c"],
     "-d": ["devinfo -s -d", "devinfo -q -d"],
     "-i": ["devinfo -i", "devinfo -i -d"],
     "-q": ["devinfo -q", "devinfo -q -d"],
     "-s": ["devinfo -s", "devinfo -s -d"],
-    "-p": ["devinfo -p"],
 }
 
 

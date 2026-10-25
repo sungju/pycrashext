@@ -135,11 +135,14 @@ def load_json_config():
         cache_path = helptext.cache_file(os.environ)
         cache = helptext.load_cache(cache_path)
         cache_changed = False
+        # optexamples.py adds the '-hh' hint to every command's '-h'
+        help_deps = [os.path.join(source_dir, "optexamples.py")]
         for cmd_name, cmd_info in registered.items():
             options, help_str = cmd_info['options'], cmd_info['help']
             script = helptext.find_script(cmd_name, script_dirs)
             if script is not None:
-                text, changed = helptext.cached_help(cache, script, command_help)
+                text, changed = helptext.cached_help(cache, script, command_help,
+                                                     help_deps)
                 cache_changed = cache_changed or changed
                 options, help_str = helptext.crash_help(cmd_info, text)
             rprog(cmd_info['command'], cmd_info['desc'], options, help_str)

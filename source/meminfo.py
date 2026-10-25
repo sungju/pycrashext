@@ -6181,7 +6181,6 @@ def show_overall_memory(options):
 
 
 OPTION_EXAMPLES = {
-    "-a": ["meminfo -a"],
     "-b": ["meminfo -b", "meminfo -b -d"],
     "-c": ["meminfo -u -c"],
     "-d": ["meminfo -S kmalloc-256 -d", "meminfo -f 0xffffade6b68037e0 -d"],
@@ -6191,17 +6190,13 @@ OPTION_EXAMPLES = {
     "-F": ["meminfo -F 0x8000000000000067"],
     "-G": ["meminfo -G 0x14200ca"],
     "-g": ["meminfo -i -g", "meminfo -u -g"],
-    "-i": ["meminfo -i"],
     "-l": ["meminfo -s -l", "meminfo -u -l"],
-    "-m": ["meminfo -m"],
     "--maxcount": ["meminfo -u --maxcount 20"],
     "--memory_limit": ["meminfo -o --memory_limit 100000"],
     "-n": ["meminfo -u -n"],
     "-o": ["meminfo -o", "meminfo -o --po-slab"],
     "--po-slab": ["meminfo -o --po-slab"],
     "-O": ["meminfo -O", "meminfo -O --process-filter java"],
-    "--overall": ["meminfo --overall"],
-    "--oom-summary": ["meminfo --oom-summary"],
     "--process-filter": [
         "meminfo -O --process-filter java",
         "meminfo -O --process-filter java,mysqld",
@@ -6225,9 +6220,6 @@ OPTION_EXAMPLES = {
     "-t": ["meminfo -p 0x2f1c0 -t u64"],
     "-u": ["meminfo -u", "meminfo -u -n"],
     "-U": ["meminfo -U kmalloc-256"],
-    "-v": ["meminfo -v"],
-    "-w": ["meminfo -w"],
-    "-W": ["meminfo -W"],
 }
 
 

@@ -25,6 +25,8 @@ Examples for each option:
 
 `git -hh` covers all three subcommands; `git log -hh`, `git show -hh` and `git find -hh` show one.
 
+An option with no example of its own (a flag, usually) gets one built from its name, such as `bh -s`. A `-hh` that is the value of an option taking one (`edis -j -hh`, `git log --grep -hh`) is passed to that option.
+
 ---
 
 ## Table of Contents
@@ -1436,7 +1438,7 @@ caseinfo -s            # Show sys output
 
 Execute `git log` and `git show` against remote kernel source repositories, and `git find` to check whether an upstream patch is backported into this kernel. Needs the remoteapi server (`CRASHEXT_SERVER`).
 
-**Usage:** `git <log|show|find> [options]` (`git -h` is not accepted; use `git log --help`, `git show --help` or `git find --help`; `git -hh` or `git <subcommand> -hh` lists each option with examples)
+**Usage:** `git <log|show|find> [options]` (`git -h` lists the subcommands; `git log --help`, `git show --help` and `git find --help` give each one's options; `git -hh` or `git <subcommand> -hh` lists each option with examples)
 
 #### Subcommands
 
@@ -1460,7 +1462,7 @@ Execute `git log` and `git show` against remote kernel source repositories, and 
 |--------|----------|-------------|
 | `--commit` | `<id>` | Force commit ID lookup |
 | `--subject` | `<text>` | Force subject text search |
-| `--max-count` | `N` | Maximum matches to report (default: 10) |
+| `--max-count`, `-n` | `N` | Maximum matches to report (default: 10) |
 | `--upstream` | `<dir>` | Upstream repo directory name (default: auto-detect) |
 | `--web` / `--no-web` | | Always / never query the public kernel sources (default: only when the local repos miss) |
 | `--web-timeout` | `N` | Per-request web timeout in seconds (default: 20) |

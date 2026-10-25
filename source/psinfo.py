@@ -834,10 +834,6 @@ def show_task_details(options):
 
 
 OPTION_EXAMPLES = {
-    "--aux": ["psinfo --aux"],
-    "--auxcww": ["psinfo --auxcww"],
-    "--auxww": ["psinfo --auxww"],
-    "--ef": ["psinfo --ef"],
     "-p": ["psinfo -p 1", "psinfo -p 6"],
     "-s": ["psinfo -s -i 0xffff8881234abcd0"],
     "-S": ["psinfo -S -i 0xffff8881234abcd0"],

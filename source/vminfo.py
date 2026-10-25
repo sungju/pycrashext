@@ -1978,9 +1978,6 @@ def show_overcommit(options):
 
 OPTION_EXAMPLES = {
     "-d": ["vminfo -d", "vminfo -o -d"],
-    "-a": ["vminfo -a"],
-    "-c": ["vminfo -c"],
-    "-o": ["vminfo -o"],
 }
 
 

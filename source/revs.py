@@ -140,9 +140,7 @@ def read_database(filename):
 
 
 OPTION_EXAMPLES = {
-    "-r": ["revs -r"],
     "-a": ["revs -a mov", "revs -a lea"],
-    "-l": ["revs -l"],
 }
 
 

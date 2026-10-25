@@ -54,9 +54,7 @@ def hvballoon_mem(options):
     print ("\n")
 
 
-OPTION_EXAMPLES = {
-    "-d": ["hvballoon -d"],
-}
+OPTION_EXAMPLES = {}
 
 
 def hvballooninfo():

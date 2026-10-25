@@ -127,7 +127,6 @@ def check_syscall_table(options):
 
 
 OPTION_EXAMPLES = {
-    "-c": ["syscallinfo -c"],
     "-n": ["syscallinfo -n 1", "syscallinfo -n 231"],
 }
 

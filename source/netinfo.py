@@ -366,9 +366,6 @@ def show_sock_details(options):
 
 OPTION_EXAMPLES = {
     "-d": ["netinfo -d", "netinfo -i -d"],
-    "-i": ["netinfo -i"],
-    "-n": ["netinfo -n"],
-    "-p": ["netinfo -p"],
     "-s": ["netinfo -s 0xffff8881234abcd0"],
     "-S": ["netinfo -S 0xffff8881234abcd0"],
 }

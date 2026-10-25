@@ -586,12 +586,8 @@ def show_smp_call_data(cfd_addr, csd_addr=None):
 
 
 OPTION_EXAMPLES = {
-    "-b": ["lockup -b"],
     "-c": ["lockup -c", "lockup -c -b"],
-    "-d": ["lockup -d"],
     "-r": ["lockup -r", "lockup -r -c"],
-    "-t": ["lockup -t"],
-    "-s": ["lockup -s"],
     "-q": ["lockup -q 0xffff8881234abcd0"],
     "--smp-call": ["lockup --smp-call ffff9caa268f4a00,ffff9caa2633ae60"],
     "-u": ["lockup -u", "lockup -u -b"],

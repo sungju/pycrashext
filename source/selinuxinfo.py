@@ -185,11 +185,7 @@ def show_fsmount():
         show_selinuxfs(None)
 
 # defining options
-OPTION_EXAMPLES = {
-    "-d": ["selinuxinfo -d"],
-    "-i": ["selinuxinfo -i"],
-    "-f": ["selinuxinfo -f"],
-}
+OPTION_EXAMPLES = {}
 
 
 def selinuxinfo():

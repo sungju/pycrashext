@@ -2274,7 +2274,6 @@ def show_cgroup_overview():
 
 OPTION_EXAMPLES = {
     "-m": ["cginfo -m", "cginfo -m -d"],
-    "-p": ["cginfo -p"],
     "-s": ["cginfo -s memory", "cginfo -s cpu,cpuset -d"],
     "-t": ["cginfo -t", "cginfo -t -d"],
     "-a": ["cginfo -t -a"],
@@ -2282,10 +2281,7 @@ OPTION_EXAMPLES = {
     "-l": ["cginfo -t -l"],
     "-n": ["cginfo -t -n docker"],
     "-c": ["cginfo -c 0xffff8881234abcd0"],
-    "-g": ["cginfo -g"],
     "-G": ["cginfo -G 0xffff8881234abcd0"],
-    "-i": ["cginfo -i"],
-    "-I": ["cginfo -I"],
 }
 
 

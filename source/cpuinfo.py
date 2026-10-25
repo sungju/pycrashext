@@ -1105,14 +1105,8 @@ def show_online_cpus(options):
 
 
 OPTION_EXAMPLES = {
-    "-c": ["cpuinfo -c"],
-    "-d": ["cpuinfo -d"],
     "-f": ["cpuinfo -f", "cpuinfo -f -v"],
-    "-i": ["cpuinfo -i"],
-    "-o": ["cpuinfo -o"],
     "-s": ["cpuinfo -s", "cpuinfo -s -v"],
-    "--speed": ["cpuinfo --speed"],
-    "-t": ["cpuinfo -t"],
     "-v": ["cpuinfo -v -c"],
 }
 

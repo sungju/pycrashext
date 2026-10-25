@@ -522,9 +522,7 @@ def gather():
     return f
 
 
-OPTION_EXAMPLES = {
-    "-v": ["sysinfo -v"],
-}
+OPTION_EXAMPLES = {}
 
 
 def sysinfo():

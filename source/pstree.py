@@ -496,15 +496,10 @@ def print_state_legend():
         print()
 
 OPTION_EXAMPLES = {
-    "-p": ["pstree -p"],
-    "-u": ["pstree -u"],
-    "-g": ["pstree -g"],
     "-s": ["pstree -s", "pstree -s -l"],
     "-t": ["pstree -t 1234", "pstree -p -t 1234"],
-    "-A": ["pstree -A"],
     "-l": ["pstree -s -l"],
     "-T": ["pstree -T", "pstree -T -p -t 1234"],
-    "-c": ["pstree -c"],
 }
 
 

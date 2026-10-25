@@ -51,9 +51,7 @@ def show_tasklet_list_details(tasklet_vec_addr, options):
     return
 
 OPTION_EXAMPLES = {
-    "-s": ["bh -s"],
     "-t": ["bh -t", "bh -t -i"],
-    "-i": ["bh -i"],
 }
 
 

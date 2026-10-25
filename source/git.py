@@ -28,7 +28,7 @@ def git():
         print_help()
         return
 
-    if '-hh' in args:
+    if wants_examples(args):
         print_option_examples(args[0] if args[0] in OPTION_EXAMPLES else None)
         return
 
@@ -420,6 +420,25 @@ OPTION_EXAMPLES = {
 }
 
 
+# Options that take the next word as their value, so a '-hh' right after
+# one of them is that value ('git log --grep -hh'), not a request for -hh.
+VALUE_OPTIONS = ('--repos', '--timeout', '--commit', '--subject', '--upstream',
+                 '--max-count', '-n', '--web-timeout', '--message-lines',
+                 '-S', '-G', '--grep', '--author', '--since', '--until')
+
+
+def wants_examples(args):
+    """True when '-hh' is given as an option of its own."""
+    prev = None
+    for arg in args:
+        if arg == '--':
+            return False
+        if arg == '-hh' and prev not in VALUE_OPTIONS:
+            return True
+        prev = arg
+    return False
+
+
 def print_option_examples(subcommand=None):
     """'git -hh': every subcommand's options; 'git log -hh': just log's."""
     subcommands = [subcommand] if subcommand else ['log', 'show', 'find']
@@ -476,6 +495,7 @@ def print_help_for_subcommand(subcommand):
         print("  --oneline          Show compact one-line format")
         print("  --repos=<repos>    Search additional repositories (e.g., rhel9,linux)")
         print("  --all              Show all commit versions (default: only commits >= current kernel version)")
+        print("  -hh                Show examples for each option")
         print("")
         print("Examples:")
         print("  git log -Sclip_push --max-count=5")
@@ -493,6 +513,7 @@ def print_help_for_subcommand(subcommand):
         print("  --pretty=<format>  Format output (oneline, short, medium, full)")
         print("  --repos=<repo>     Specify repository to search (e.g., rhel9, linux)")
         print("  --all              Show all commit versions (default: only commits >= current kernel version)")
+        print("  -hh                Show examples for each option")
         print("")
         print("Examples:")
         print("  git show abc123def")
@@ -517,7 +538,7 @@ def print_help_for_subcommand(subcommand):
         print("Options:")
         print("  --commit=<id>      Force commit ID lookup")
         print("  --subject=<text>   Force subject text search")
-        print("  --max-count=<n>    Maximum matches to report (default: 10)")
+        print("  --max-count=<n>, -n Maximum matches to report (default: 10)")
         print("  --upstream=<name>  Upstream repo dir name (default: upstream,linux,")
         print("                     mainline,torvalds - first one that exists)")
         print("  --repos=<repos>    Extra repos to check for backports (e.g. rhel8,rhel9)")
@@ -534,6 +555,7 @@ def print_help_for_subcommand(subcommand):
         print("                     repo first, reporting each one's before/after")
         print("  --timeout=<secs>   Request timeout in seconds (default: 3600)")
         print("  --verbose          Show verbose output")
+        print("  -hh                Show examples for each option")
         print("")
         print("Examples:")
         print("  git find <commit-id>")

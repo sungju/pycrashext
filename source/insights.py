@@ -196,9 +196,7 @@ def exec_insights(o, args, cmd_path_list):
         print_report_list(report_list)
 
 
-OPTION_EXAMPLES = {
-    "-t": ["insights -t"],
-}
+OPTION_EXAMPLES = {}
 
 
 def insights():

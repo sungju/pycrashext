@@ -177,10 +177,7 @@ def show_sysv(options):
 
 
 OPTION_EXAMPLES = {
-    "-a": ["ipcinfo -a"],
     "-m": ["ipcinfo -m", "ipcinfo -m -d"],
-    "-d": ["ipcinfo -d"],
-    "-s": ["ipcinfo -s"],
 }
 
 

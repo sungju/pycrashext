@@ -110,6 +110,17 @@ def check_find_script_and_cache():
         assert helptext.cached_help(loaded, script, compute)[1] is True
         assert len(calls) == 2
 
+        # So is one whose dependency (optexamples.py) changed.
+        dep = os.path.join(a, "optexamples.py")
+        with open(dep, "w") as f:
+            f.write("# v1\n")
+        assert helptext.cached_help(loaded, script, compute, [dep])[1] is True
+        assert helptext.cached_help(loaded, script, compute, [dep])[1] is False
+        with open(dep, "a") as f:
+            f.write("# v2\n")
+        assert helptext.cached_help(loaded, script, compute, [dep])[1] is True
+        assert len(calls) == 4
+
         # A failed run is not cached.
         assert helptext.cached_help({}, script, lambda p: None) == (None, False)
 

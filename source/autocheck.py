@@ -211,8 +211,6 @@ def reload_rules():
 
 
 OPTION_EXAMPLES = {
-    "-a": ["autocheck -a"],
-    "-l": ["autocheck -l"],
     "-r": ["autocheck -r", "autocheck -r -a"],
 }
 

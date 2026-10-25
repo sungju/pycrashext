@@ -83,7 +83,6 @@ def show_smi_list(show_details):
 
 
 OPTION_EXAMPLES = {
-    "-l": ["ipmi -l"],
     "-d": ["ipmi -d", "ipmi -l -d"],
 }
 

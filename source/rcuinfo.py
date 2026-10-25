@@ -819,12 +819,7 @@ def show_blocked_tasks(options):
 
 
 OPTION_EXAMPLES = {
-    "-s": ["rcuinfo -s"],
-    "-g": ["rcuinfo -g"],
-    "-n": ["rcuinfo -n"],
-    "-c": ["rcuinfo -c"],
     "-t": ["rcuinfo -t", "rcuinfo -t -v"],
-    "-a": ["rcuinfo -a"],
     "-v": ["rcuinfo -t -v"],
 }
 

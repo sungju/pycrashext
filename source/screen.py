@@ -20,9 +20,7 @@ def do_reset_screen(options):
     crashcolor.set_cursor(0,0)
 
 
-OPTION_EXAMPLES = {
-    "-r": ["screen -r"],
-}
+OPTION_EXAMPLES = {}
 
 
 def screen():

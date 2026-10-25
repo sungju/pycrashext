@@ -25,7 +25,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 import os
 import sys
 import textwrap
-from optparse import SUPPRESS_HELP
+from optparse import NO_DEFAULT, SUPPRESS_HELP
 
 TRIGGER = "-hh"
 HINT = "Run '%s -hh' for examples of each option."
@@ -85,6 +85,31 @@ def examples_for(opt, examples):
     return []
 
 
+def default_text(op, opt):
+    """What optparse's own '-h' puts in place of %default."""
+    value = op.defaults.get(opt.dest)
+    if value is NO_DEFAULT or value is None:
+        return "none"
+    return str(value)
+
+
+def wants_examples(op, args):
+    """
+    True when '-hh' is on the command line as an option of its own, not as
+    the value of an option that takes one ('edis -j -hh') or after '--'.
+    """
+    prev = None
+    for arg in args:
+        if arg == "--":
+            return False
+        if arg == TRIGGER:
+            opt = op._short_opt.get(prev) or op._long_opt.get(prev)
+            if opt is None or not opt.takes_value():
+                return True
+        prev = arg
+    return False
+
+
 def format_examples(op, examples, cmd):
     """The '-hh' text."""
     out = []
@@ -98,7 +123,7 @@ def format_examples(op, examples, cmd):
         out.append("  " + option_label(opt))
         help_text = op.expand_prog_name(opt.help or "")
         if "%default" in help_text:
-            help_text = help_text.replace("%default", str(op.defaults.get(opt.dest)))
+            help_text = help_text.replace("%default", default_text(op, opt))
         for line in textwrap.wrap(" ".join(help_text.split()), 70):
             out.append("      " + line)
         for ex in examples_for(opt, examples) or [default_example(cmd, opt)]:
@@ -115,7 +140,7 @@ def handle(op, examples, argv=None, out=None):
     argv = sys.argv if argv is None else argv
     cmd = command_name(argv[0] if argv else "")
     add_hint(op, cmd)
-    if TRIGGER not in argv[1:]:
+    if not wants_examples(op, argv[1:]):
         return
     (out or sys.stdout).write(format_examples(op, examples, cmd))
     sys.exit(0)

@@ -3063,10 +3063,7 @@ OPTION_EXAMPLES = {
     "--details": ["modinfo --details xfs", "modinfo xfs"],
     "-p": ["modinfo -p nfs"],
     "-d": ["modinfo -d xfs"],
-    "-b": ["modinfo -b"],
-    "--bt-all": ["modinfo --bt-all"],
     "--hooks": ["modinfo --hooks nfs", "modinfo --hooks all"],
-    "--third-party": ["modinfo --third-party"],
     "--log": ["modinfo --log nfs"],
     "--kabi": [
         "modinfo --kabi nfs",
@@ -3077,11 +3074,6 @@ OPTION_EXAMPLES = {
     ],
     "--mem": ["modinfo --mem nfs", "modinfo --mem all"],
     "-c": ["modinfo -c nfs"],
-    "-t": ["modinfo -t"],
-    "-g": ["modinfo -g"],
-    "-a": ["modinfo -a"],
-    "-u": ["modinfo -u"],
-    "-f": ["modinfo -f"],
     "-s": ["modinfo -s nfs", "modinfo -s -l 10 nfs"],
     "-l": ["modinfo -s -l 10 nfs"],
     "--batch_run": [

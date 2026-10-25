@@ -21,9 +21,7 @@ import logsig
 import optexamples
 
 
-OPTION_EXAMPLES = {
-    "-a": ["logscan -a"],
-}
+OPTION_EXAMPLES = {}
 
 
 def logscan():

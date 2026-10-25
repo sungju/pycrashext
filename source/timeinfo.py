@@ -77,7 +77,6 @@ def show_timesources(show_details):
 
 
 OPTION_EXAMPLES = {
-    "-s": ["timeinfo -s"],
     "-d": ["timeinfo -d", "timeinfo -s -d"],
 }
 

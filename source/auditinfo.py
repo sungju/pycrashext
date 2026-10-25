@@ -1600,9 +1600,6 @@ def show_audit_rule_match(options):
 OPTION_EXAMPLES = {
     "-b": ["auditinfo -b", "auditinfo -b -d"],
     "-d": ["auditinfo -d", "auditinfo -r -d"],
-    "-m": ["auditinfo -m"],
-    "-r": ["auditinfo -r"],
-    "-s": ["auditinfo -s"],
 }
 
 

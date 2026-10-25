@@ -211,8 +211,6 @@ OPTION_EXAMPLES = {
     "-x": ["evidence -x 'foreach bt; kmem -i'"],
     "-f": ["evidence -f /tmp/extra_cmds.txt"],
     "-a": ["evidence -a -x 'dev -d'"],
-    "--stdout": ["evidence --stdout"],
-    "-q": ["evidence -q"],
 }
 
 

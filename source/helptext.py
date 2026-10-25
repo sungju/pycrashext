@@ -115,17 +115,25 @@ def save_cache(path, scripts):
         return False
 
 
-def cached_help(cache, script, compute):
+def cached_help(cache, script, compute, deps=()):
     """
-    The '-h' output of `script`, from `cache` when the file has not changed
-    since, otherwise from compute(script), which is then stored in `cache`.
-    Returns (text, changed); text is None when compute() gave nothing.
+    The '-h' output of `script`, from `cache` when neither the file nor any
+    of `deps` (modules that add to every command's '-h', like optexamples.py)
+    has changed since, otherwise from compute(script), which is then stored
+    in `cache`. Returns (text, changed); text is None when compute() gave
+    nothing.
     """
     try:
         st = os.stat(script)
     except OSError:
         return None, False
     stamp = [st.st_mtime_ns, st.st_size]
+    for dep in deps:
+        try:
+            st = os.stat(dep)
+            stamp += [st.st_mtime_ns, st.st_size]
+        except OSError:
+            stamp += [None, None]
     entry = cache.get(script)
     if isinstance(entry, dict) and entry.get("stamp") == stamp:
         return entry.get("text"), False

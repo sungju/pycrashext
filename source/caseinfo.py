@@ -101,9 +101,7 @@ def read_string(addr, delimiter=0x0):
 
     return result
 
-OPTION_EXAMPLES = {
-    "-s": ["caseinfo -s"],
-}
+OPTION_EXAMPLES = {}
 
 
 def caseinfo():

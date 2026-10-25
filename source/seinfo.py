@@ -93,8 +93,6 @@ def get_sidtab_info(total_only, print_detail, is_print):
 
 OPTION_EXAMPLES = {
     "-s": ["seinfo -s", "seinfo -s -t"],
-    "-t": ["seinfo -t"],
-    "-d": ["seinfo -d"],
 }
 
 

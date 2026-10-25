@@ -108,10 +108,7 @@ def show_worker_pool(options):
             pass
 
 OPTION_EXAMPLES = {
-    "-c": ["schedinfo -c"],
     "-d": ["schedinfo -d", "schedinfo -c -d"],
-    "-f": ["schedinfo -f"],
-    "-r": ["schedinfo -r"],
     "-w": ["schedinfo -w 0xffff8881234abcd0"],
 }
 

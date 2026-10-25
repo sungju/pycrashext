@@ -1011,8 +1011,6 @@ def show_bpf_tree(options):
 OPTION_EXAMPLES = {
     "-b": ["traceinfo -b", "traceinfo -b -d"],
     "-d": ["traceinfo -b -d", "traceinfo -b -d 12,15"],
-    "-m": ["traceinfo -m"],
-    "-t": ["traceinfo -t"],
     "-D": ["traceinfo -b -d -D"],
     "--disasm": ["traceinfo -b -d --disasm"],
     "-i": ["traceinfo -i 0xffffffff81234567"],

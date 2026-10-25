@@ -391,7 +391,6 @@ OPTION_EXAMPLES = {
         "ai -i /tmp/dmesg.txt why did it hang",
     ],
     "-m": ["ai -m opus -c bt", "ai -e claude -m sonnet -c log"],
-    "-r": ["ai -r"],
     "-t": ["ai -t 12345678 -c bt"],
 }
 

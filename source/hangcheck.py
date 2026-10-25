@@ -276,14 +276,12 @@ def hangcheck_display(options, args):
 
 
 OPTION_EXAMPLES = {
-    "-a": ["hangcheck -a"],
     "-n": ["hangcheck -n 10"],
     "-d": ["hangcheck -d", "hangcheck -n 5 -d"],
     "-f": ["hangcheck -f", "hangcheck -n 3 -f"],
     "-b": ["hangcheck -b", "hangcheck -n 3 -b"],
     "-t": ["hangcheck -t 120", "hangcheck -t 120 -b"],
     "-g": ["hangcheck -g", "hangcheck -a -g"],
-    "-z": ["hangcheck -z"],
 }
 
 
