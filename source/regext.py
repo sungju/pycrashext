@@ -10,12 +10,16 @@ from pykdump.API import *
 
 import os
 import sys
+import io
 import json
 import re
+import runpy
 import traceback
+import contextlib
 
 import crashcolor
 import extcmds
+import helptext
 
 try:
     if "PYTHON_LIB" in os.environ:
@@ -68,6 +72,28 @@ def validate_command_entry(cmd_entry):
     }
 
 
+def command_help(script):
+    """
+    What '<command> -h' prints, so 'help <command>' and 'man <command>' can
+    show the same. The script runs here as crash would run it, with '-h' as
+    its only argument; optparse prints the help and exits. None if it fails.
+    """
+    saved_argv = sys.argv
+    out = io.StringIO()
+    sys.argv = [script, "-h"]
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            try:
+                runpy.run_path(script, run_name="__main__")
+            except SystemExit:
+                pass
+    except Exception:
+        return None
+    finally:
+        sys.argv = saved_argv
+    return out.getvalue()
+
+
 def load_json_config():
     try:
         config_file = os.path.dirname(sys.argv[0]) + "/config.json"
@@ -104,9 +130,21 @@ def load_json_config():
             if normalized is not None:
                 registered[normalized['command']] = normalized
 
+        script_dirs = extcmds.split_path(os.environ.get("PYKDUMPPATH", "")) + \
+                      [source_dir]
+        cache_path = helptext.cache_file(os.environ)
+        cache = helptext.load_cache(cache_path)
+        cache_changed = False
         for cmd_name, cmd_info in registered.items():
-            rprog(cmd_info['command'], cmd_info['desc'],
-                  cmd_info['options'], cmd_info['help'])
+            options, help_str = cmd_info['options'], cmd_info['help']
+            script = helptext.find_script(cmd_name, script_dirs)
+            if script is not None:
+                text, changed = helptext.cached_help(cache, script, command_help)
+                cache_changed = cache_changed or changed
+                options, help_str = helptext.crash_help(cmd_info, text)
+            rprog(cmd_info['command'], cmd_info['desc'], options, help_str)
+        if cache_changed:
+            helptext.save_cache(cache_path, cache)
     except Exception as e:
         crashcolor.set_color(crashcolor.RED)
         traceback.print_exc()

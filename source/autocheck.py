@@ -9,6 +9,7 @@ import sys
 import re
 import importlib
 import signal
+from optparse import OptionParser
 
 import crashcolor
 

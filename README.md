@@ -51,7 +51,7 @@ pycrashext/
 
 ## Commands
 
-Every command accepts `-h` to show its available options, except `git`, which takes `git log --help`, `git show --help` or `git find --help`. [`docs/COMMANDS.md`](docs/COMMANDS.md) lists every option of every command, and [`source/README.md`](source/README.md) walks through many of them with real output.
+Every command accepts `-h` to show its available options; `git -h` lists its subcommands, and `git log --help`, `git show --help` and `git find --help` give each one's options. crash's `help <command>` and `man <command>` show the same text: when the commands are registered, each one's `-h` output is captured and cached in `~/.cache/pycrashext/help.json` (`$XDG_CACHE_HOME` if set), and a changed command is re-read on the next crash start. The exceptions are `cpuinfo`, `modinfo` and `pstree`, which mpykdump registers first with its own help text; `-h` still shows pycrashext's. [`docs/COMMANDS.md`](docs/COMMANDS.md) lists every option of every command, and [`source/README.md`](source/README.md) walks through many of them with real output.
 
 | Command | Description |
 |---|---|

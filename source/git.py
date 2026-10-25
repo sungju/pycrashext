@@ -24,7 +24,7 @@ def git():
     # Parse command line arguments manually to support git-style options
     args = sys.argv[1:] if __name__ == '__main__' else exec_crash_command("set").split()[1:]
 
-    if len(args) == 0:
+    if len(args) == 0 or args[0] in ('-h', '--help'):
         print_help()
         return
 
