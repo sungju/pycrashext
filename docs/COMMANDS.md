@@ -621,23 +621,39 @@ ring arithmetic is in `source/pvring.py`, with checks in `pvring_test.py`.
 
 ### modinfo
 
-Kernel module information including taint status, symbols, disassembly, and gap analysis.
+Kernel module information: the module list with taints and reference counts, per-module details, parameters, dependencies, modules in the backtraces, disassembly and gap analysis.
 
-**Usage:** `modinfo [options]`
+**Usage:** `modinfo [options] [<module>]`
+
+With no options it lists the loaded modules: `struct module` address, name, core size, REFS (what lsmod shows as "Used by") and the module's own TAINTS letters. A module that was being loaded or unloaded when the dump was taken is marked `[COMING]`, `[GOING]` or `[UNFORMED]`. `modinfo <module>` is the same as `modinfo --details <module>`.
+
+Taint letters come from the vmcore's own `taint_flags[]` table (RHEL 7: `tnts[]`), because RHEL gives bits 26-31 different letters in each release: RHEL 8 uses `r` (support removed), `t` (Technology Preview) and `u` (unprivileged BPF); RHEL 9 uses `p` (partner supported), `h` (support removed) and `u`. Core sizes and ranges cover every layout: `module_core`/`core_size` (RHEL 6/7), `core_layout` (RHEL 8, RHEL 9 before 9.4) and `mem[]` (RHEL 9.4+ and RHEL 10).
+
+`--details` starts with a summary of the module: its state, versions, whether it is signed, its taints and what they mean, refs, what it uses and what uses it, core and init ranges, `init()`/`exit()`, the arguments it was loaded with, and up to 20 parameters with their values. The symbol sections follow. The load arguments are rebuilt from `mod->args`, which the kernel splits in place when it parses them.
+
+`-p` decodes each parameter from its `kernel_param_ops`: integers, `bool`/`invbool`/`bint`, `hexint`, `charp`, `string` and arrays of these. A parameter with its own ops shows `(set by <ops>)`. A permission of `-` means the parameter is not in sysfs.
+
+`-b` maps every frame address of `bt -a` (`--bt-all`: `foreach bt`), including exception RIPs, to the module whose core or init range holds it, and lists each module's frames by task.
+
+The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which registers its own `modinfo` first; `modinfo -h` shows this command's options.
 
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
+| `--details` | | `<module>` | Module summary, then its symbols |
+| `-p` | `--params` | `<module>` | Module parameters and their current values |
+| `-d` | `--deps` | `<module>` | Modules it uses and modules that use it |
+| `-b` | `--bt` | | Modules whose code is in the backtraces of the active tasks (`bt -a`) |
+| | `--bt-all` | | Like `-b`, for every task (`foreach bt`; can be slow) |
 | `--disasm` | | `<module>` | Disassemble functions in a module |
-| `--details` | | `<module>` | Show module details |
 | `-c` | `--contents` | | Show contents of each symbol |
 | `-t` | | | Show tainted modules only |
 | `-g` | | | Show gaps between modules and physically allocated sizes |
 | `-a` | | | Show address range for the module |
 | `-u` | | | Show unloaded module data if possible |
-| `-f` | | | Show meanings of tainted flags |
+| `-f` | | | Show meanings of tainted flags and the last unloaded module |
 | `-s` | | | Show strings from each data section |
 | `-l` | | `N` | Set minimum string size to show for -s (default: 5) |
-| `--batch_run` | | `<module>` | Run major options together for detailed info |
+| `--batch_run` | | `<module>` | Run major options together for detailed info (`*` for every module) |
 | `--target_dir` | | `<dir>` | Save results to this directory |
 | `--nodate` | | | Do not use date in target filename |
 | `-m` | `--module` | `<addr>` | Retrieve module structure from address |
@@ -647,14 +663,17 @@ Kernel module information including taint status, symbols, disassembly, and gap 
 #### Examples
 
 ```
-modinfo                           # List all loaded modules
-modinfo -t                        # Show tainted modules only
-modinfo -f                        # Show tainted flag meanings
+modinfo                           # List all loaded modules with refs and taints
+modinfo -t -f                     # Tainted modules and what each taint means
+modinfo sfc                       # Details for a module (same as --details sfc)
+modinfo -p sfc                    # sfc's parameters and their values
+modinfo -d dm_mod                 # What dm_mod uses and what uses it
+modinfo -b                        # Modules in the backtraces of the active tasks
+modinfo --bt-all                  # Modules in every task's backtrace
 modinfo -g                        # Show module gaps and sizes
 modinfo -a                        # Show module address ranges
-modinfo --details mymodule        # Detailed info for a module
 modinfo --disasm mymodule         # Disassemble module functions
-modinfo -y mymodule               # Show module symbol table
+modinfo -m 0xffffffffc0a1b2c5 -y  # Find a module structure from an address
 modinfo --batch_run mymod --target_dir /tmp  # Full analysis to /tmp
 modinfo -u                        # Show unloaded module info
 ```

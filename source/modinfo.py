@@ -7,6 +7,8 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 from LinuxDump import Tasks
 import sys
+import re
+import struct as pystruct
 from datetime import datetime
 import crashcolor
 import crashhelper
@@ -56,9 +58,30 @@ def is_our_module(module_addr):
     return True
 
 
+# Since 6.4 (RHEL 9.4+) a module's memory is mem[MOD_MEM_NUM_TYPES], one
+# struct module_memory per type, instead of core_layout and init_layout.
+MOD_CORE_TYPES = (0, 1, 2, 3)   # MOD_TEXT, MOD_DATA, MOD_RODATA, MOD_RO_AFTER_INIT
+MOD_INIT_TYPES = (4, 5, 6)      # MOD_INIT_TEXT, MOD_INIT_DATA, MOD_INIT_RODATA
+
+
+def _mem_range(module, types):
+    """(base, size) of the mem[] entries in `types`: the lowest base and the
+    sum of the sizes, or (0, 0) when the kernel has no mem[]."""
+    base = 0
+    size = 0
+    for t in types:
+        m = module.mem[t]
+        if int(m.size) == 0:
+            continue
+        b = int(m.base)
+        base = b if base == 0 else min(base, b)
+        size = size + int(m.size)
+    return base, size
+
+
 def get_module_core_size(module):
     """Return core section size across all kernel versions (RHEL6-10)."""
-    try:                          # RHEL8+ (kernel 4.5+): core_layout.size
+    try:                          # RHEL8, RHEL9 < 9.4: core_layout.size
         return int(module.core_layout.size)
     except Exception:
         pass
@@ -66,12 +89,16 @@ def get_module_core_size(module):
         return int(module.core_size)
     except Exception:
         pass
+    try:                          # 6.4+ (RHEL 9.4+, RHEL10): mem[]
+        return _mem_range(module, MOD_CORE_TYPES)[1]
+    except Exception:
+        pass
     return 0
 
 
 def get_module_core_base(module):
     """Return core section base address across all kernel versions (RHEL6-10)."""
-    try:                          # RHEL8+ (kernel 4.5+): core_layout.base
+    try:                          # RHEL8, RHEL9 < 9.4: core_layout.base
         return int(module.core_layout.base)
     except Exception:
         pass
@@ -79,31 +106,74 @@ def get_module_core_base(module):
         return int(module.module_core)
     except Exception:
         pass
+    try:                          # 6.4+ (RHEL 9.4+, RHEL10): mem[MOD_TEXT]
+        return int(module.mem[0].base)
+    except Exception:
+        pass
     return 0
 
 
-def get_module_alloc_data(module):
-    result = exec_crash_command("kmem 0x%x" % (int(module)))
-    resultlines = result.splitlines()
-    found = 0
-    alloc_size = 0
-    start_addr = 0
-    end_addr = 0
-    for line in resultlines:
-        if found == 1:
+def get_module_init_range(module):
+    """(base, size) of the init sections; size is 0 once they are freed
+    after a successful load."""
+    for get in (lambda: (int(module.init_layout.base), int(module.init_layout.size)),
+                lambda: (int(module.module_init), int(module.init_size)),
+                lambda: _mem_range(module, MOD_INIT_TYPES)):
+        try:
+            return get()
+        except Exception:
+            pass
+    return 0, 0
+
+
+def vmap_area(addr):
+    """(size, start, end) of the vmap area 'kmem <addr>' shows, or None."""
+    try:
+        result = exec_crash_command("kmem 0x%x" % addr)
+    except Exception:
+        return None
+    found = False
+    for line in result.splitlines():
+        if found:
             words = line.split()
             if len(words) < 6:
-                found = 0
+                found = False
                 continue
-            alloc_size = words[5]
-            start_addr = words[2]
-            end_addr = words[4]
-            break
-
+            try:
+                return int(words[5]), int(words[2], 16), int(words[4], 16)
+            except ValueError:
+                return None
         if "ADDRESS RANGE" in line:
-            found = 1
+            found = True
+    return None
 
-    return int(alloc_size), int(start_addr, 16), int(end_addr, 16)
+
+def get_module_alloc_data(module):
+    """
+    (allocated size, start, end) of a module's memory. Before 6.4 one vmap
+    area holds the whole core, struct module included. With mem[] (RHEL
+    9.4+) each core type has its own: the sizes are summed, and the range
+    runs from the lowest start to the highest end.
+    """
+    areas = []
+    try:
+        for t in MOD_CORE_TYPES:
+            m = module.mem[t]
+            if int(m.size):
+                area = vmap_area(int(m.base))
+                if area and area not in areas:
+                    areas.append(area)
+    except Exception:
+        area = vmap_area(int(module))
+        if area:
+            areas.append(area)
+    if not areas:
+        # No vmap area in 'kmem' output: use the core layout instead.
+        base = get_module_core_base(module)
+        size = get_module_core_size(module)
+        return size, base, base + size
+    return (sum(a[0] for a in areas), min(a[1] for a in areas),
+            max(a[2] for a in areas))
 
 
 def do_check_unloaded_module(start_addr, end_addr):
@@ -198,6 +268,9 @@ def do_check_unloaded_module(start_addr, end_addr):
 
 tainted_count = 0
 
+# Used only when the vmcore has neither taint_flags[] (4.10+) nor tnts[]
+# (RHEL 7): the RHEL 7 bits. RHEL assigns its own letters to bits 26-31 and
+# they differ between releases, so they are read from the vmcore when it can.
 taint_flags = [
     [ 'P', 'G', True ],     # TAINT_PROPRIETARY_MODULE
     [ 'F', '', True ],     # TAINT_FORCED_MODULE
@@ -215,61 +288,147 @@ taint_flags = [
     [ 'E', '', True ],     # TAINT_UNSIGNED_MODULE
     [ 'L', '', False ],    # TAINT_SOFTLOCKUP
     [ 'K', '', True ],     # TAINT_LIVEPATCH
-    [ '?', '', False ],    # TAINT_16
-    [ '?', '', False ],    # TAINT_17
-    [ '?', '', False ],    # TAINT_18
-    [ '?', '', False ],    # TAINT_19
-    [ '?', '', False ],    # TAINT_20
-    [ '?', '', False ],    # TAINT_21
-    [ '?', '', False ],    # TAINT_22
-    [ '?', '', False ],    # TAINT_23
-    [ '?', '', False ],    # TAINT_24
-    [ '?', '', False ],    # TAINT_25
-    [ '?', '', False ],    # TAINT_26
-    [ '?', '', False ],    # TAINT_27
-    [ 'H', '', False ],    # TAINT_HARDWARE_UNSUPPORTED
-    [ 'T', '', True ],     # TAINT_TECH_PREVIEW
+] + [ [ '?', '', False ] for _bit in range(16, 28) ] + [
+    [ 'H', '', False ],    # TAINT_HARDWARE_UNSUPPORTED (RHEL 7)
+    [ 'T', '', True ],     # TAINT_TECH_PREVIEW (RHEL 7)
 ]
 
+# What each letter means. RHEL 8 shows a removed feature as 'r', RHEL 9 as 'h'.
 taint_flags_desc = {
-'G' : "Tainted but all module is licensed under GNU or a compatible license",
+'G' : "All loaded modules are GPL or a compatible license.",
 'P' : "Proprietary module has been loaded.",
 'F' : "Module has been forcibly loaded.",
-'S' : "SMP with CPUs not designed for SMP.",
+'S' : "Kernel running on an out of specification system.",
 'R' : "User forced a module unload.",
 'M' : "System experienced a machine check exception.",
-'B' : "System has hit bad_page.",
+'B' : "System has hit bad_page (bad page reference or unexpected page flags).",
 'U' : "Userspace-defined naughtiness.",
-'D' : "Kernel has oopsed before",
+'D' : "Kernel has oopsed or BUGed before.",
 'A' : "ACPI table overridden.",
-'W' : "Taint on warning.",
-'C' : "modules from drivers/staging are loaded.",
+'W' : "Kernel issued a warning.",
+'C' : "Module from drivers/staging has been loaded.",
 'I' : "Working around severe firmware bug.",
 'O' : "Out-of-tree module has been loaded.",
 'E' : "Unsigned module has been loaded.",
 'L' : "A soft lockup has previously occurred.",
 'K' : "Kernel has been live patched.",
-'T' : "TAINT_TECH_PREVIEW",
-'H' : "TAINT_HARDWARE_UNSUPPORTED",
+'X' : "Auxiliary taint, defined for and used by distros.",
+'T' : "Kernel was built with the struct randomization plugin"
+      " (RHEL 7: a Technology Preview feature has been used).",
+'N' : "An in-kernel test has been run.",
+'J' : "Userspace used a mutating debug operation in fwctl.",
+'r' : "RHEL: support for a feature or hardware in use has been removed.",
+'h' : "RHEL: support for a feature or hardware in use has been removed.",
+'p' : "RHEL: a partner-supported module has been loaded.",
+'t' : "RHEL: a Technology Preview feature has been used.",
+'u' : "RHEL: unprivileged BPF has been enabled.",
+'H' : "RHEL 7: unsupported hardware has been detected.",
 }
 
+
+def _flag_char(value):
+    """A taint_flag c_true/c_false member as a one-character string."""
+    if isinstance(value, int):
+        return chr(value)
+    return str(value)[:1] or " "
+
+
+_taint_table = None
+
+def kernel_taint_table():
+    """
+    [(c_true, c_false, module)] per taint bit, from the vmcore's own
+    taint_flags[] when it has one, else the table above. c_false is ''
+    when the kernel prints a blank for an unset bit.
+    """
+    global _taint_table
+    if _taint_table is None:
+        try:
+            table = []
+            for flag in readSymbol("taint_flags"):
+                c_false = _flag_char(flag.c_false)
+                table.append((_flag_char(flag.c_true),
+                              "" if c_false in (" ", "-") else c_false,
+                              bool(flag.module)))
+            _taint_table = table
+        except Exception:
+            _taint_table = rhel7_taint_table()
+    return _taint_table
+
+
+def rhel7_taint_table():
+    """The RHEL 7 kernel's tnts[] ({bit, true, false}) as a table, or the
+    built-in table when the vmcore doesn't have it either."""
+    table = [(t[0], t[1], t[2]) for t in taint_flags]
+    try:
+        for tnt in readSymbol("tnts"):
+            bit = int(tnt.bit)
+            c_false = _flag_char(getattr(tnt, "false"))
+            entry = (_flag_char(getattr(tnt, "true")),
+                     "" if c_false in (" ", "-") else c_false,
+                     table[bit][2] if bit < len(table) else False)
+            while len(table) <= bit:
+                table.append(("?", "", False))
+            table[bit] = entry
+    except Exception:
+        pass
+    return table
+
+
+def taint_letters(mask, table, module_only=False):
+    """
+    The letters for a taint mask, in bit order. For the kernel's mask an
+    unset bit can still print a letter ('G' for no proprietary module);
+    for a module's own taints (module_only) only the set bits that apply
+    to modules print, as /proc/modules and 'mod -t' show them.
+    """
+    letters = ""
+    for bit, (c_true, c_false, is_module) in enumerate(table):
+        if module_only and not is_module:
+            continue
+        if mask & (1 << bit):
+            letters = letters + c_true
+        elif not module_only:
+            letters = letters + c_false
+    for bit in range(len(table), 64):       # bits the table doesn't name
+        if mask & (1 << bit):
+            letters = letters + "?"
+    return letters
+
+
 def taint_str(tainted_mask):
-    result_str = ""
-
     if tainted_mask == 0:
-        result_str = "Not tainted"
-    else:
-        result_str = "Tainted: "
-        pos = 0
-        while tainted_mask != 0:
-            if (tainted_mask & 0x1) == 0x1:
-                result_str = result_str + taint_flags[pos][0]
-            else:
-                result_str = result_str + taint_flags[pos][1]
-            pos = pos + 1
-            tainted_mask = tainted_mask >> 1
+        return "Not tainted"
+    return "Tainted: " + taint_letters(tainted_mask, kernel_taint_table())
 
-    return result_str
+
+def module_taints(module):
+    """A module's own taint letters, '' when it has none."""
+    try:
+        return taint_letters(int(module.taints), kernel_taint_table(),
+                             module_only=True)
+    except Exception:
+        return ""
+
+
+MODULE_STATES = {0: "LIVE", 1: "COMING", 2: "GOING", 3: "UNFORMED"}
+
+def module_state(module):
+    try:
+        state = int(module.state)
+    except Exception:
+        return ""
+    return MODULE_STATES.get(state, "state %d" % state)
+
+
+def module_refs(module):
+    """What lsmod shows as 'Used by': refcnt minus MODULE_REF_BASE (1).
+    None when the kernel keeps per-cpu counters instead (before 4.0)."""
+    try:
+        return int(module.refcnt.counter) - 1
+    except Exception:
+        return None
+
 
 def module_info(options):
     global module_list
@@ -278,9 +437,9 @@ def module_info(options):
     if (len(module_list) == 0):
         load_module_details()
 
-    print("%-18s %-25s %10s %s" % ("struct module *",
+    print("%-18s %-25s %10s %5s %-7s %s" % ("struct module *",
                       "MODULE_NAME",
-                      "SIZE",
+                      "SIZE", "REFS", "TAINTS",
                       "ALLOC_SIZE    GAPSIZE" if options.shows_gaps else ""))
 
     tainted_count = 0
@@ -317,21 +476,51 @@ def module_info(options):
 
     tainted_mask = readSymbol("tainted_mask")
     taint_result = taint_str(tainted_mask)
+    if tainted_mask == 0 and (options.shows_tainted or options.shows_flags_str):
+        print("=" * 75)
+        print("Not tainted (tainted_mask = 0)")
     if tainted_mask > 0:
         print("=" * 75)
         print("There are %d tainted modules, tainted_mask = 0x%x (%s)" %
               (tainted_count, tainted_mask, taint_result))
 
     if options.shows_flags_str and tainted_mask > 0:
-        for c in taint_result.split(':')[1]:
-            if c in taint_flags_desc:
-                print("\t%s : %s" % (c, taint_flags_desc[c]))
-
+        print_taint_meanings(taint_result.split(':')[1].strip())
         print_last_unloaded_module()
 
 
+def print_taint_meanings(letters, indent="\t"):
+    for c in letters:
+        if c in taint_flags_desc:
+            print("%s%s : %s" % (indent, c, taint_flags_desc[c]))
+        elif c != " ":
+            print("%s%s : (no description; see the kernel's taint_flags)" % (indent, c))
+
+
+def last_unloaded_module_str():
+    """
+    The last unloaded module's name, '' if none. RHEL 9.2+ keeps it as a
+    struct with its taints as well ('name (taints: OE)'); older kernels as
+    a char array.
+    """
+    try:
+        lum = readSymbol("last_unloaded_module")
+    except Exception:
+        return ""
+    if isinstance(lum, str):
+        return lum
+    try:
+        name = str(lum.name)
+        taints = str(lum.taints).strip()
+    except Exception:
+        return ""
+    if name and taints:
+        return "%s (taints: %s)" % (name, taints)
+    return name
+
+
 def print_last_unloaded_module():
-    last_unloaded_module = readSymbol("last_unloaded_module")
+    last_unloaded_module = last_unloaded_module_str()
     if len(last_unloaded_module) > 0:
         crashcolor.set_color(crashcolor.BLUE)
         print("\n\tLast unloaded module : %s" % (last_unloaded_module))
@@ -351,11 +540,21 @@ def print_module(module, options, gap_info_str, start_addr, end_addr, unloaded=F
         crashcolor.set_color(crashcolor.MAGENTA | crashcolor.BOLD)
 
     core_size = get_module_core_size(module)
+    refs = module_refs(module)
+    state = module_state(module)
 
-    print("0x%x %-25s %10d %s" % (int(module),
+    print("0x%x %-25s %10d %5s %-7s %s" % (int(module),
                              module.name,
                              core_size,
-                             gap_info_str))
+                             "-" if refs is None else refs,
+                             module_taints(module) or "-",
+                             gap_info_str), end="")
+    if state not in ("", "LIVE"):
+        # Being loaded or unloaded when the dump was taken.
+        crashcolor.set_color(crashcolor.LIGHTYELLOW | crashcolor.BOLD)
+        print(" [%s]" % state, end="")
+        crashcolor.set_color(crashcolor.RESET)
+    print()
     if options.shows_addr:
         print(" " * 3, end="")
         crashcolor.set_color(crashcolor.UNDERLINE)
@@ -447,16 +646,11 @@ def get_sym_type_key(sym_list):
 def show_module_detail(options):
     module = find_module(options.module_detail)
     if (module is None):
-        print("The module %s does not exist" % (options.disasm_module))
+        print("The module %s does not exist" % (options.module_detail))
         return
 
 
-    print ("%-15s : 0x%x" % ("struct module", int(module)))
-    print ("%-15s : %s" % ("name", module.name))
-    print ("%-15s : %s" % ("version", module.version))
-    print ("%-15s : %s" % ("source ver", module.srcversion))
-    print ("%-15s : %s (0x%x)" % ("init", addr2sym(module.init), module.init))
-    print ("%-15s : %s (0x%x)" % ("exit", addr2sym(module.exit), module.exit))
+    show_module_summary(module)
 
     mod_sym_list = get_mod_sym_list(module.name)
 
@@ -635,8 +829,33 @@ def set_error(error_path):
     return ""
 
 
+def module_at(addr):
+    """The loaded module whose struct, core or init memory holds addr."""
+    if len(module_list) == 0:
+        load_module_details()
+    for module in module_list:
+        if int(module) <= addr < int(module) + struct_size("struct module"):
+            return module
+        base = get_module_core_base(module)
+        if base <= addr < base + get_module_core_size(module):
+            return module
+        init_base, init_size = get_module_init_range(module)
+        if init_size and init_base <= addr < init_base + init_size:
+            return module
+    return None
+
+
 def try_get_module_struct(options):
-    module, loaded_module = find_module_struct(options.module_addr)
+    try:
+        addr = int(options.module_addr, 16)
+    except ValueError:
+        print("Not an address: %s" % options.module_addr)
+        return
+    module = module_at(addr)
+    if module is not None:
+        loaded_module = "loaded (%s)" % (module_state(module) or "?")
+    else:
+        module, loaded_module = find_module_struct(options.module_addr)
     if module is not None:
         print("Found the below module")
         print("\tstruct module 0x%x" % module)
@@ -869,6 +1088,9 @@ def find_module_struct(module_addr):
             offset = offset + member_offset("struct module_kobject", "kobj")
             offset = offset + member_offset("struct kobject", "ktype")
             module = readSU("struct module", ktype_location - offset)
+            # Not on the module list (module_at() looked there first): a
+            # LIVE state is what an unloaded module that wasn't cleared
+            # still says.
             if module.state == MODULE_STATE_LIVE:
                 loaded_module = "unloaded, not cleared yet"
             return module, loaded_module
@@ -878,14 +1100,471 @@ def find_module_struct(module_addr):
     return None, ""
 
 
+# ============================================================================
+# --details summary, -p parameters, -d dependencies
+# ============================================================================
+
+def _cstr(value):
+    """A char * member as text, '' for NULL."""
+    if value is None:
+        return ""
+    try:
+        if isinstance(value, int) and value == 0:
+            return ""
+    except Exception:
+        pass
+    return str(value)
+
+
+def _has_member(name):
+    return member_offset("struct module", name) > -1
+
+
+def show_module_summary(module, max_params=20):
+    """The header of --details: what the module is and the state it was in."""
+    def row(label, value):
+        print("%-15s : %s" % (label, value))
+
+    row("struct module", "0x%x" % int(module))
+    row("name", module.name)
+    row("state", module_state(module) or "-")
+    row("version", _cstr(module.version) or "-")
+    row("source ver", _cstr(module.srcversion) or "-")
+    if _has_member("rhelversion"):
+        row("rhel version", _cstr(module.rhelversion) or "-")
+    if _has_member("sig_ok"):
+        row("signed", "yes" if module.sig_ok else "no")
+    taints = module_taints(module)
+    row("taints", taints or "none")
+    print_taint_meanings(taints, indent=" " * 18)
+
+    uses, used_by = module_dependencies(module)
+    refs = module_refs(module)
+    row("refs", "-" if refs is None else refs)
+    row("used by", ", ".join(used_by) or "-")
+    row("uses", ", ".join(uses) or "-")
+
+    base = get_module_core_base(module)
+    size = get_module_core_size(module)
+    row("core", "0x%x - 0x%x (%d bytes)" % (base, base + size, size))
+    init_base, init_size = get_module_init_range(module)
+    if init_size:
+        row("init", "0x%x - 0x%x (%d bytes)" % (init_base, init_base + init_size, init_size))
+    else:
+        row("init", "freed after load")
+    for label, fn in (("init()", "init"), ("exit()", "exit")):
+        try:
+            addr = int(getattr(module, fn))
+        except Exception:
+            continue
+        if fn == "init" and not init_size:
+            # The init sections are freed after load and the address may
+            # now be another module's code: don't name what is there.
+            sym = "(freed with the init sections)"
+        else:
+            sym = addr2sym(addr) if addr else None
+        row(label, "%s (0x%x)" % (sym or "-", addr))
+
+    params = module_params(module)
+    if _has_member("args"):
+        args = module_args(module, [p[0] for p in params])
+        row("args", '"%s"' % args if args else "-")
+
+    row("parameters", len(params))
+    for name, value, perm, ops in params[:max_params]:
+        print("    %-24s = %s%s" % (name, value,
+                                    "" if perm else "  (not in sysfs)"))
+    if len(params) > max_params:
+        print("    ... %d more: modinfo -p %s" % (len(params) - max_params, module.name))
+
+
+def rebuild_module_args(pieces, param_names):
+    """
+    The load arguments ('rx_ring=4096 debug') from mod->args after the
+    kernel parsed it in place: parse_args() writes a NUL over each '=' and
+    each separator, so the buffer reads 'rx_ring', '4096', 'debug'. A
+    piece that names a parameter starts an argument; the next piece is its
+    value unless it names a parameter too.
+    """
+    names = set(param_names)
+    args = []
+    i = 0
+    while i < len(pieces):
+        piece = pieces[i]
+        if piece not in names and not re.match(r'^[A-Za-z_][\w.-]*$', piece):
+            break       # not an argument name: past the end of the buffer
+        if piece in names and i + 1 < len(pieces) and pieces[i + 1] not in names:
+            args.append("%s=%s" % (piece, pieces[i + 1]))
+            i = i + 2
+            continue
+        args.append(piece)
+        i = i + 1
+    return " ".join(args)
+
+
+def module_args(module, param_names, limit=1024):
+    """A module's load arguments as given to insmod/modprobe."""
+    try:
+        addr = readPtr(Addr(module) + member_offset("struct module", "args"))
+    except Exception:
+        return ""
+    if addr == 0:
+        return ""
+    pieces = []
+    current = []
+    try:
+        for i in range(limit):
+            c = readU8(addr + i)
+            if c != 0 and not (0x20 <= c < 0x7f):
+                break                  # not text: past the end of the buffer
+            if c != 0:
+                current.append(chr(c))
+                continue
+            if not current:            # two NULs in a row: the end
+                break
+            pieces.append("".join(current))
+            current = []
+    except Exception:
+        pass
+    if current:
+        pieces.append("".join(current))
+    return rebuild_module_args(pieces, param_names)
+
+
+def module_dependencies(module):
+    """
+    (uses, used_by): the names of the modules this one depends on and of
+    those that depend on it. 'a uses b' is a struct module_use on
+    a->target_list (use->target is b) and on b->source_list (use->source
+    is a).
+    """
+    uses, used_by = [], []
+    try:
+        for use in readSUListFromHead(Addr(module.target_list), "target_list",
+                                      "struct module_use"):
+            uses.append(str(use.target.name))
+        for use in readSUListFromHead(Addr(module.source_list), "source_list",
+                                      "struct module_use"):
+            used_by.append(str(use.source.name))
+    except Exception:
+        pass
+    return uses, used_by
+
+
+# How to read a parameter, by the kernel_param_ops it uses:
+# (kind, size) with kind a struct format character or a name below.
+PARAM_KINDS = {
+    "param_ops_byte": ("B", 1),
+    "param_ops_short": ("h", 2),
+    "param_ops_ushort": ("H", 2),
+    "param_ops_int": ("i", 4),
+    "param_ops_uint": ("I", 4),
+    "param_ops_hexint": ("hex", 4),
+    "param_ops_long": ("q", 8),
+    "param_ops_ulong": ("Q", 8),
+    "param_ops_ullong": ("Q", 8),
+    "param_ops_bool": ("bool", 1),
+    "param_ops_bool_enable_only": ("bool", 1),
+    "param_ops_invbool": ("invbool", 1),
+    "param_ops_bint": ("bint", 4),
+    "param_ops_charp": ("charp", 8),
+    "param_ops_string": ("string", 0),
+    "param_array_ops": ("array", 0),
+}
+
+
+def byte_order(machine):
+    return ">" if machine in ("s390x", "s390", "ppc64", "ppc") else "<"
+
+
+def format_param_scalar(kind, raw, order="<"):
+    """The value of a scalar parameter from its bytes, as sysfs shows it
+    (bool as Y/N). None for kinds that are not scalars."""
+    if kind in ("bool", "invbool"):
+        value = raw[0] != 0
+        if kind == "invbool":
+            value = not value
+        return "Y" if value else "N"
+    if kind == "bint":
+        return "Y" if pystruct.unpack(order + "i", raw[:4])[0] else "N"
+    if kind == "hex":
+        return "0x%x" % pystruct.unpack(order + "I", raw[:4])[0]
+    if len(kind) == 1:
+        return str(pystruct.unpack(order + kind, raw[:pystruct.calcsize(kind)])[0])
+    return None
+
+
+def format_param_array(values, count, shown=16):
+    """'[a, b, c]' for an array parameter's first `shown` of `count`
+    values; the same value in every slot is '[v] x count'."""
+    if count == 0:
+        return "[]"
+    if count > 1 and len(set(values)) == 1 and len(values) == count:
+        return "[%s] x %d" % (values[0], count)
+    more = " ... %d more" % (count - len(values)) if count > len(values) else ""
+    return "[%s%s]" % (", ".join(values), more)
+
+
+def param_ops_label(ops_name, arg):
+    """'uint', 'charp', or 'array of int' for a parameter's ops."""
+    label = ops_name.replace("param_ops_", "")
+    if ops_name == "param_array_ops":
+        try:
+            elem_ops = addr2sym(readPtr(arg + member_offset("struct kparam_array", "ops")))
+            label = "array of %s" % (elem_ops or "?").replace("param_ops_", "")
+        except Exception:
+            label = "array"
+    return label
+
+
+def read_cstring(addr, limit=256):
+    if addr == 0:
+        return None
+    out = []
+    try:
+        for i in range(limit):
+            c = readU8(addr + i)
+            if c == 0:
+                break
+            out.append(chr(c))
+        else:
+            out.append("...")
+    except Exception:
+        return None
+    return "".join(out)
+
+
+def _quoted(text):
+    return "(null)" if text is None else '"%s"' % text
+
+
+def param_scalar_value(ops_name, addr, order):
+    kind, size = PARAM_KINDS.get(ops_name, (None, 0))
+    if kind is None:
+        return None
+    if kind == "charp":
+        return _quoted(read_cstring(readPtr(addr)))
+    if ops_name in ("param_ops_long", "param_ops_ulong") and sys_info.pointersize == 4:
+        kind, size = {"q": "i", "Q": "I"}[kind], 4      # long is 32-bit here
+    return format_param_scalar(kind, readmem(addr, size), order)
+
+
+def param_value(ops_name, arg, order):
+    """A parameter's value from its ops and its kernel_param arg pointer."""
+    kind = PARAM_KINDS.get(ops_name, (None, 0))[0]
+    if kind is None:
+        return "(set by %s)" % ops_name
+    if kind == "string":
+        string_offset = member_offset("struct kparam_string", "string")
+        return _quoted(read_cstring(readPtr(arg + string_offset)))
+    if kind == "array":
+        def field(name):
+            return arg + member_offset("struct kparam_array", name)
+        num_ptr = readPtr(field("num"))
+        count = readU32(num_ptr) if num_ptr else readU32(field("max"))
+        elemsize = readU32(field("elemsize"))
+        elem = readPtr(field("elem"))
+        elem_ops = addr2sym(readPtr(field("ops"))) or ""
+        values = []
+        for i in range(min(count, 16)):
+            v = param_scalar_value(elem_ops, elem + i * elemsize, order)
+            values.append(v if v is not None else "?")
+        return format_param_array(values, count)
+    return param_scalar_value(ops_name, arg, order)
+
+
+def module_params(module):
+    """[(name, value, perm, ops)] for a module's parameters (mod->kp)."""
+    params = []
+    try:
+        count = int(module.num_kp)
+        base = int(module.kp)
+    except Exception:
+        return params
+    if count == 0 or base == 0:
+        return params
+    kp_size = struct_size("struct kernel_param")
+    arg_offset = member_offset("struct kernel_param", "arg")
+    order = byte_order(sys_info.machine)
+    for i in range(count):
+        addr = base + i * kp_size
+        try:
+            kp = readSU("struct kernel_param", addr)
+            name = _cstr(kp.name)
+            ops = addr2sym(int(kp.ops)) or "0x%x" % int(kp.ops)
+            perm = int(kp.perm)
+            arg = readPtr(addr + arg_offset)
+        except Exception:
+            continue
+        try:
+            value = param_value(ops, arg, order)
+        except Exception as e:
+            value = "(unreadable: %s)" % e
+        params.append((name, value, perm, param_ops_label(ops, arg)))
+    return params
+
+
+def show_module_params(options):
+    module = find_module(options.module_params)
+    if module is None:
+        print("The module %s does not exist" % options.module_params)
+        return
+    params = module_params(module)
+    if not params:
+        print("%s has no parameters" % module.name)
+        return
+    print("%-28s %-6s %-20s %s" % ("PARAMETER", "PERM", "OPS", "VALUE"))
+    for name, value, perm, ops in params:
+        print("%-28s %-6s %-20s %s" % (name, "%04o" % perm if perm else "-",
+                                       ops, value))
+
+
+def show_module_deps(options):
+    module = find_module(options.module_deps)
+    if module is None:
+        print("The module %s does not exist" % options.module_deps)
+        return
+    uses, used_by = module_dependencies(module)
+    refs = module_refs(module)
+    print("%s (refs %s)" % (module.name, "-" if refs is None else refs))
+    print("  uses    : %s" % (", ".join(uses) or "-"))
+    print("  used by : %s" % (", ".join(used_by) or "-"))
+
+
+# ============================================================================
+# -b / --bt-all: modules in the backtraces
+# ============================================================================
+
+_RE_BT_TASK = re.compile(r'^PID:\s*(\d+)\s+TASK:\s*([0-9a-fA-F]+)\s+CPU:\s*(\d+)'
+                         r'\s+COMMAND:\s*"(.*)"')
+_RE_BT_FRAME = re.compile(r'^\s*(#\d+)\s+\[[0-9a-fA-F]+\]\s+(\S+)\s+at\s+([0-9a-fA-F]+)')
+_RE_BT_EXCEPTION = re.compile(r'\[exception RIP:\s*([^\]]+)\]')
+_RE_BT_RIP = re.compile(r'\bRIP:\s*([0-9a-fA-F]{8,})')
+
+
+def parse_backtraces(text):
+    """
+    The frames of crash 'bt' output: [(pid, comm, cpu, frame, func, addr)].
+    frame is '#N', or 'RIP' for the address in an exception frame, whose
+    function is named by the '[exception RIP: func+off]' line above it.
+    """
+    frames = []
+    task = None
+    exception_func = None
+    for line in text.splitlines():
+        m = _RE_BT_TASK.match(line.strip())
+        if m:
+            task = (int(m.group(1)), m.group(4), int(m.group(3)))
+            exception_func = None
+            continue
+        if task is None:
+            continue
+        m = _RE_BT_FRAME.match(line)
+        if m:
+            frames.append(task + (m.group(1), m.group(2), int(m.group(3), 16)))
+            m = _RE_BT_EXCEPTION.search(line)
+            exception_func = m.group(1).strip() if m else None
+            continue
+        m = _RE_BT_EXCEPTION.search(line)
+        if m:
+            exception_func = m.group(1).strip()
+            continue
+        m = _RE_BT_RIP.search(line)
+        if m and exception_func is not None:
+            frames.append(task + ("RIP", exception_func, int(m.group(1), 16)))
+            exception_func = None
+    return frames
+
+
+def frames_by_module(frames, ranges):
+    """
+    {module name: [frames]} for the frames whose address is in a module,
+    in the order the modules are first seen. ranges: [(name, start, end)].
+    """
+    found = {}
+    order = []
+    for frame in frames:
+        addr = frame[5]
+        for name, start, end in ranges:
+            if start <= addr < end:
+                if name not in found:
+                    found[name] = []
+                    order.append(name)
+                found[name].append(frame)
+                break
+    return [(name, found[name]) for name in order]
+
+
+def module_ranges():
+    """[(name, start, end)] of every module's core and init sections."""
+    if len(module_list) == 0:
+        load_module_details()
+    ranges = []
+    for module in module_list:
+        name = str(module.name)
+        base = get_module_core_base(module)
+        size = get_module_core_size(module)
+        if base and size:
+            ranges.append((name, base, base + size))
+        init_base, init_size = get_module_init_range(module)
+        if init_base and init_size:
+            ranges.append((name, init_base, init_base + init_size))
+    return ranges
+
+
+def show_bt_modules(options, max_frames=8):
+    command = "foreach bt" if options.bt_all else "bt -a"
+    try:
+        text = exec_crash_command(command)
+    except Exception as e:
+        print("'%s' failed: %s" % (command, e))
+        return
+    frames = parse_backtraces(text)
+    tasks = len(set((f[0], f[2]) for f in frames))
+    result = frames_by_module(frames, module_ranges())
+    print("Modules in '%s' (%d frames in %d tasks)" % (command, len(frames), tasks))
+    if not result:
+        print("  No frame is in module code")
+        return
+    for name, mod_frames in result:
+        mod_tasks = len(set((f[0], f[2]) for f in mod_frames))
+        crashcolor.set_color(crashcolor.LIGHTRED)
+        print("\n%s: %d frame%s in %d task%s" % (name, len(mod_frames),
+                                                "s" if len(mod_frames) != 1 else "",
+                                                mod_tasks, "s" if mod_tasks != 1 else ""))
+        crashcolor.set_color(crashcolor.RESET)
+        for pid, comm, cpu, frame, func, addr in mod_frames[:max_frames]:
+            print("    PID %-7d %-16s CPU %-3d %-4s %s (0x%x)" % (pid, comm, cpu,
+                                                               frame, func, addr))
+        if len(mod_frames) > max_frames:
+            print("    ... %d more" % (len(mod_frames) - max_frames))
+
+
 def modinfo():
-    op = OptionParser()
-    op.add_option("--disasm", dest="disasm_module", default=None,
+    op = OptionParser(usage="%prog [options] [<module>]\n\n"
+                      "With no options, list the loaded modules. 'modinfo <module>'"
+                      " is the same as\n'modinfo --details <module>'.")
+    op.add_option("--disasm", dest="disasm_module", default=None, metavar="MODULE",
                   action="store", type="string",
                   help="Disassemble a module functions")
-    op.add_option("--details", dest="module_detail", default=None,
+    op.add_option("--details", dest="module_detail", default=None, metavar="MODULE",
                   action="store", type="string",
-                  help="Show details")
+                  help="Show details: state, signature, taints, refs, what it"
+                       " uses and what uses it, memory ranges, load arguments,"
+                       " parameters, then its symbols")
+    op.add_option("-p", "--params", dest="module_params", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="Show a module's parameters and their current values")
+    op.add_option("-d", "--deps", dest="module_deps", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="Show the modules a module uses and those that use it")
+    op.add_option("-b", "--bt", dest="bt_modules", default=False,
+                  action="store_true",
+                  help="Show the modules whose code is in the backtraces of"
+                       " the active tasks ('bt -a')")
+    op.add_option("--bt-all", dest="bt_all", default=False,
+                  action="store_true",
+                  help="Like -b, for every task ('foreach bt'; can be slow)")
     op.add_option("-c", "--contents", dest="show_contents", default=False,
                   action="store_true",
                   help="Show contents of each symbols")
@@ -894,7 +1573,7 @@ def modinfo():
                   help="Shows tainted modules only")
     op.add_option("-g", dest="shows_gaps", default=False,
                   action="store_true",
-                  help="Shows gaps between modules as well as phyiscally allocated sizes")
+                  help="Shows gaps between modules as well as physically allocated sizes")
     op.add_option("-a", dest="shows_addr", default=False,
                   action="store_true",
                   help="Shows address range for the module")
@@ -907,19 +1586,19 @@ def modinfo():
     op.add_option("-s", dest="show_content_strings", default=False,
                   action="store_true",
                   help="Shows strings from each data section")
-    op.add_option("-l", dest="show_longer_than", default=5,
+    op.add_option("-l", dest="show_longer_than", default=5, metavar="N",
                   action="store", type="int",
                   help="Set the minimum size to show for -s. default=5")
-    op.add_option("--batch_run", dest="batch_run", default=None,
+    op.add_option("--batch_run", dest="batch_run", default=None, metavar="MODULE",
                   action="store", type="string",
                   help="Run major options all together to get detailed info")
-    op.add_option("--target_dir", dest="target_dir", default=None,
+    op.add_option("--target_dir", dest="target_dir", default=None, metavar="DIR",
                   action="store", type="string",
                   help="Result will be saved in this directory")
     op.add_option("--nodate", dest="nodate", default=False,
                   action="store_true",
                   help="Do not use date in target filename")
-    op.add_option('-m', '--module', dest="module_addr", default=None,
+    op.add_option('-m', '--module', dest="module_addr", default=None, metavar="ADDRESS",
                   action="store", type="string",
                   help="Trying to retrieve module structure")
     op.add_option('-y', '--symtab', dest="show_symtab", default=None,
@@ -931,6 +1610,24 @@ def modinfo():
 
 
     (o, args) = op.parse_args()
+
+    # 'modinfo <module>' is 'modinfo --details <module>'.
+    if args and o.module_detail is None and o.disasm_module is None and \
+       o.module_params is None and o.module_deps is None and \
+       o.batch_run is None and o.module_addr is None:
+        o.module_detail = args[0]
+
+    if o.bt_modules or o.bt_all:
+        show_bt_modules(o)
+        sys.exit(0)
+
+    if o.module_params is not None:
+        show_module_params(o)
+        sys.exit(0)
+
+    if o.module_deps is not None:
+        show_module_deps(o)
+        sys.exit(0)
 
     if (o.module_addr is not None):
         try_get_module_struct(o)
@@ -954,7 +1651,11 @@ def modinfo():
         if o.batch_run == "*":
             mod_list = get_module_list(o.shows_tainted)
         else:
-            mod_list = [find_module(o.batch_run)]
+            module = find_module(o.batch_run)
+            if module is None:
+                print("The module %s does not exist" % o.batch_run)
+                sys.exit(0)
+            mod_list = [module]
 
         orig_stdout = sys.stdout
         for module in mod_list:
