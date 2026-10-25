@@ -223,6 +223,115 @@ def check_backtrace_modules():
     assert modinfo.frames_by_module(frames, []) == []
 
 
+# The rest is the output of crash commands on the RHEL 8.10 vmcore.
+
+TIMER = """JIFFIES
+4759208567
+
+TIMER_BASES[0][BASE_STD]: ffff959e80c22a40
+  EXPIRES        TTE        TIMER_LIST     FUNCTION
+  4759208564      -3  ffffa6a41c707700  ffffffff8ef94910  <process_timeout>
+  4759209360     793  ffff9540f11146f8  ffffffff8ef18090  <delayed_work_timer_fn>
+CPU: 0  HRTIMER_CPU_BASE: ffff959e80c24f40
+  CLOCK: 0  HRTIMER_CLOCK_BASE: ffff959e80c24f80  [ktime_get]
+      CURRENT
+  464541271000000
+    SOFTEXPIRES        EXPIRES            TTE           HRTIMER           FUNCTION
+  464541268000000  464541268000000        -3000000  ffff959e80c25580  ffffffff8efa85f0  <tick_sched_timer>
+"""
+
+
+def check_parse_timers():
+    assert modinfo.parse_timer_output(TIMER) == [
+        (0xffffa6a41c707700, 0xffffffff8ef94910, -3),
+        (0xffff9540f11146f8, 0xffffffff8ef18090, 793),
+        (0xffff959e80c25580, 0xffffffff8efa85f0, -3000000),
+    ]
+
+
+def check_parse_irq_ps_percpu():
+    irq = ''' IRQ   IRQ_DESC/_DATA      IRQACTION      NAME
+  0   ffff9540c0067600  ffffffff908293c0  "timer"
+  1   ffff9540c0065800      (unused)
+ 87   ffff9540d2a1c800  ffff9542292d1a00  "ens1f0-0"
+'''
+    assert modinfo.parse_irq_output(irq) == [(0, 0xffffffff908293c0),
+                                             (87, 0xffff9542292d1a00)]
+    ps = '''   PID    PPID  CPU       TASK        ST  %MEM      VSZ      RSS  COMM
+      2       0  39  ffff9540cc834000  RU   0.0        0        0  [kthreadd]
+>  1173       2  11  ffff95422a2b0000  IN   0.0        0        0  [xfsaild/dm-4]
+'''
+    assert modinfo.parse_ps_tasks(ps) == [(2, 0xffff9540cc834000, "[kthreadd]"),
+                                          (1173, 0xffff95422a2b0000, "[xfsaild/dm-4]")]
+    percpu = '''PER-CPU DATA TYPE:
+  struct worker_pool cpu_worker_pools[2];
+PER-CPU ADDRESSES:
+  [0]: ffff959e80c2b000
+  [1]: ffff959e80c6b000
+'''
+    assert modinfo.parse_percpu_addresses(percpu) == [0xffff959e80c2b000, 0xffff959e80c6b000]
+
+
+def check_parse_kmem():
+    kmem_v = '''   VMAP_AREA         VM_STRUCT                 ADDRESS RANGE                SIZE
+ffff9540c0025c40  ffff9540c014a2c0  ffffa6a400000000 - ffffa6a400005000    20480
+ffff9540c00251c0                    ffffa6a400005000 - ffffa6a400007000     8192
+'''
+    assert modinfo.parse_kmem_v(kmem_v) == [
+        (0xffff9540c014a2c0, 0xffffa6a400000000, 0xffffa6a400005000, 20480),
+        (0, 0xffffa6a400005000, 0xffffa6a400007000, 8192)]
+    kmem_s = '''CACHE             OBJSIZE  ALLOCATED     TOTAL  SLABS  SSIZE  NAME
+ffff9540c00048c0      704          1        46      1    32k  onloadfs_inode_cache
+'''
+    assert modinfo.parse_kmem_s(kmem_s) == (704, 1, 46, 1, 32768)
+    assert modinfo.parse_kmem_s("kmem: invalid cache") is None
+    assert modinfo.size_with_unit("8k") == 8192 and modinfo.size_with_unit("2M") == 2 << 20
+    assert modinfo.size_with_unit("4096") == 4096 and modinfo.size_with_unit("x") == 0
+
+
+RANGES = [("sfc", 0xffffffffc066b000, 0xffffffffc0733000),
+          ("(BPF: bpf_prog_6deef7357e7b4530_sd_fw_ingress)", 0xffffffffc0777000, 0xffffffffc0778000),
+          ("(ftrace trampoline)", 0xffffffffc07e7000, 0xffffffffc07e8000)]
+AREAS = [(0xffffffffc023c000, 0xffffffffc1225000)]
+
+
+def check_classify_address():
+    c = modinfo.classify_address
+    assert c(0xffffffffc06763a0, RANGES, AREAS) == "sfc"
+    # BPF JIT code and ftrace trampolines live in the module area too.
+    assert c(0xffffffffc0777010, RANGES, AREAS).startswith("(BPF: ")
+    assert c(0xffffffffc07e7000, RANGES, AREAS) == "(ftrace trampoline)"
+    # Module area, nothing there now: what 958191513's RIP looked like.
+    assert c(0xffffffffc0745ee4, RANGES, AREAS) == modinfo.UNLOADED
+    assert c(0xffffffff8ef94910, RANGES, AREAS) is None
+    assert c(0xffffffffc0745ee4, RANGES, []) is None
+
+
+def check_hooks_grouping():
+    hooks = [
+        ("irq handler", 0xffffffffc06763a0, 'IRQ 87 "ens1f0-0"', 0xffff9542292d1a00),
+        ("irq handler", 0xffffffffc06763a0, 'IRQ 88 "ens1f0-1"', 0xffff9542292d1b00),
+        ("timer", 0xffffffff8ef94910, "timer_list 0xffffffffc0700100 in 3 jiffies", 0xffffffffc0700100),
+        ("timer", 0xffffffff8ef94910, "timer_list 0xffff9540c0000000 in 3 jiffies", 0xffff9540c0000000),
+        ("notifier", 0xffffffffc0745ee4, "netdev_chain, notifier_block 0x1", 0),
+    ]
+    found = modinfo.hooks_by_module(hooks, RANGES, AREAS)
+    assert sorted(found) == [modinfo.UNLOADED, "sfc"]
+    # A kernel function on a timer that is module data counts, marked so.
+    assert ("timer", 0xffffffff8ef94910,
+            "timer_list 0xffffffffc0700100 in 3 jiffies [object in sfc]") in found["sfc"]
+    groups = modinfo.group_hooks(found["sfc"])
+    assert groups[0] == ("irq handler", 0xffffffffc06763a0,
+                         ['IRQ 87 "ens1f0-0"', 'IRQ 88 "ens1f0-1"'])
+    assert len(groups) == 2
+
+    frames = [(5230, "cribl", 6, "RIP", "unknown or invalid address", 0xffffffffc0745ee4),
+              (1, "x", 0, "#3", "efx_poll", 0xffffffffc066b100)]
+    # In the order first seen.
+    assert [n for n, _ in modinfo.frames_by_module(frames, RANGES, AREAS)] == \
+        [modinfo.UNLOADED, "sfc"]
+
+
 if (__name__ == '__main__'):
     checks = [v for k, v in sorted(globals().items()) if k.startswith('check_')]
     for check in checks:

@@ -635,6 +635,12 @@ Taint letters come from the vmcore's own `taint_flags[]` table (RHEL 7: `tnts[]`
 
 `-b` maps every frame address of `bt -a` (`--bt-all`: `foreach bt`), including exception RIPs, to the module whose core or init range holds it, and lists each module's frames by task.
 
+`--hooks <module>` (`all` for every module) lists where the kernel holds a pointer into the module's code or data, which is what calls into it: timers and hrtimers, delayed works (the work function, not `delayed_work_timer_fn`), pending and running works, IRQ handlers and threads, kthreads (their `threadfn`), the common notifier chains, char and misc devices' `file_operations`, netfilter hooks of the initial namespace, kprobes and kretprobes, and ftrace ops. References with the same kind and function are grouped with a count.
+
+`--mem <module>` (`all` for every module) shows the memory a module holds: its own code and data, the vmalloc areas whose `vm_struct->caller` is in the module (with the callers), and the slab caches whose constructor is in it, with their size from `kmem -s`. Caches without a constructor have nothing naming their creator, so for one module those named like it are listed separately as likely owners. A module's code and data are allocated by the module loader, so they are not counted as vmalloc.
+
+`-b`, `--hooks` and `--mem` map addresses with the same rules. BPF programs and trampolines (`bpf_kallsyms`), kprobe instruction slots and ftrace trampolines are allocated in the module area too, and are shown as such. An address in the module area (`mod_tree.addr_min`..`addr_max`) that belongs to none of them is shown as **freed memory in the module area**: the code or data of an unloaded module, or of a freed BPF program or trampoline, that something still uses. The note under it says whether any module has been unloaded since boot (`last_unloaded_module`) and whether each address is still mapped.
+
 The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which registers its own `modinfo` first; `modinfo -h` shows this command's options.
 
 | Option | Long Form | Argument | Description |
@@ -644,6 +650,8 @@ The `help modinfo` and `man modinfo` text in crash comes from mpykdump, which re
 | `-d` | `--deps` | `<module>` | Modules it uses and modules that use it |
 | `-b` | `--bt` | | Modules whose code is in the backtraces of the active tasks (`bt -a`) |
 | | `--bt-all` | | Like `-b`, for every task (`foreach bt`; can be slow) |
+| | `--hooks` | `<module>\|all` | Where the kernel calls into a module, and pointers into freed module-area memory |
+| | `--mem` | `<module>\|all` | Memory a module holds: its size, vmalloc areas and slab caches it allocated |
 | `--disasm` | | `<module>` | Disassemble functions in a module |
 | `-c` | `--contents` | | Show contents of each symbol |
 | `-t` | | | Show tainted modules only |
@@ -670,6 +678,10 @@ modinfo -p sfc                    # sfc's parameters and their values
 modinfo -d dm_mod                 # What dm_mod uses and what uses it
 modinfo -b                        # Modules in the backtraces of the active tasks
 modinfo --bt-all                  # Modules in every task's backtrace
+modinfo --hooks sfc               # Timers, works, IRQs, notifiers... that call into sfc
+modinfo --hooks all               # The same for every module, and freed module-area memory
+modinfo --mem onload              # Memory onload's code allocated
+modinfo --mem all                 # vmalloc and slab memory per module, largest first
 modinfo -g                        # Show module gaps and sizes
 modinfo -a                        # Show module address ranges
 modinfo --disasm mymodule         # Disassemble module functions

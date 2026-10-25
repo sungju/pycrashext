@@ -836,12 +836,9 @@ def module_at(addr):
     for module in module_list:
         if int(module) <= addr < int(module) + struct_size("struct module"):
             return module
-        base = get_module_core_base(module)
-        if base <= addr < base + get_module_core_size(module):
-            return module
-        init_base, init_size = get_module_init_range(module)
-        if init_size and init_base <= addr < init_base + init_size:
-            return module
+        for start, end in module_regions(module):
+            if start <= addr < end:
+                return module
     return None
 
 
@@ -1476,40 +1473,174 @@ def parse_backtraces(text):
     return frames
 
 
-def frames_by_module(frames, ranges):
+def frames_by_module(frames, ranges, areas=()):
     """
-    {module name: [frames]} for the frames whose address is in a module,
-    in the order the modules are first seen. ranges: [(name, start, end)].
+    [(module name, [frames])] for the frames whose address is in a module,
+    in the order the modules are first seen; frames in the module area but
+    in no loaded module come under UNLOADED. ranges: [(name, start, end)],
+    areas: [(start, end)] (see classify_address()).
     """
     found = {}
     order = []
     for frame in frames:
-        addr = frame[5]
-        for name, start, end in ranges:
-            if start <= addr < end:
-                if name not in found:
-                    found[name] = []
-                    order.append(name)
-                found[name].append(frame)
-                break
+        name = classify_address(frame[5], ranges, areas)
+        if name is None:
+            continue
+        if name not in found:
+            found[name] = []
+            order.append(name)
+        found[name].append(frame)
     return [(name, found[name]) for name in order]
 
 
+def module_regions(module):
+    """
+    [(start, end)] of a module's memory: one per mem[] type in use on 6.4+
+    kernels (they are separate allocations, not one range), else the core
+    and, while not freed, the init sections.
+    """
+    regions = []
+    try:
+        for t in range(len(MOD_CORE_TYPES) + len(MOD_INIT_TYPES)):
+            m = module.mem[t]
+            if int(m.size):
+                regions.append((int(m.base), int(m.base) + int(m.size)))
+        return regions
+    except Exception:
+        pass
+    base = get_module_core_base(module)
+    size = get_module_core_size(module)
+    if base and size:
+        regions.append((base, base + size))
+    init_base, init_size = get_module_init_range(module)
+    if init_base and init_size:
+        regions.append((init_base, init_base + init_size))
+    return regions
+
+
 def module_ranges():
-    """[(name, start, end)] of every module's core and init sections."""
+    """[(name, start, end)] of every loaded module's memory regions."""
     if len(module_list) == 0:
         load_module_details()
     ranges = []
     for module in module_list:
         name = str(module.name)
-        base = get_module_core_base(module)
-        size = get_module_core_size(module)
-        if base and size:
-            ranges.append((name, base, base + size))
-        init_base, init_size = get_module_init_range(module)
-        if init_base and init_size:
-            ranges.append((name, init_base, init_base + init_size))
+        for start, end in module_regions(module):
+            ranges.append((name, start, end))
     return ranges
+
+
+UNLOADED = "(freed memory in the module area)"
+
+
+def module_areas():
+    """
+    [(start, end)] of the address ranges modules have been loaded into
+    since boot: mod_tree's addr_min/addr_max (and data_addr_min/max on
+    6.4+), which only grow, so they still cover a module that has since
+    been unloaded. [] when the kernel has neither mod_tree nor
+    module_addr_min/max.
+    """
+    areas = []
+    try:
+        mod_tree = readSymbol("mod_tree")
+        for low, high in (("addr_min", "addr_max"), ("data_addr_min", "data_addr_max")):
+            try:
+                lo, hi = int(getattr(mod_tree, low)), int(getattr(mod_tree, high))
+            except Exception:
+                continue
+            if lo and hi > lo:
+                areas.append((lo, hi))
+    except Exception:
+        pass
+    if not areas:
+        try:
+            lo, hi = int(readSymbol("module_addr_min")), int(readSymbol("module_addr_max"))
+            if lo and hi > lo:
+                areas.append((lo, hi))
+        except Exception:
+            pass
+    return areas
+
+
+def _bpf_ksyms():
+    """[(name, start, end)] of the JIT-compiled BPF programs and BPF
+    trampolines on bpf_kallsyms; they are allocated in the module area."""
+    ksyms = []
+    if member_offset("struct bpf_ksym", "lnode") >= 0:
+        for ksym in readSUListFromHead(sym2addr("bpf_kallsyms"), "lnode", "struct bpf_ksym"):
+            ksyms.append((_cstr(ksym.name).split("\0")[0], int(ksym.start), int(ksym.end)))
+        return ksyms
+    # Older kernels: bpf_prog_aux.ksym_lnode, the image at prog->bpf_func.
+    for aux in readSUListFromHead(sym2addr("bpf_kallsyms"), "ksym_lnode", "struct bpf_prog_aux"):
+        prog = aux.prog
+        start = int(prog.bpf_func)
+        ksyms.append(("bpf_prog_" + _cstr(aux.name).split("\0")[0], start,
+                      start + int(prog.jited_len)))
+    return ksyms
+
+
+def other_code_ranges():
+    """
+    [(label, start, end)] of the other code the kernel allocates in the
+    module area: BPF programs and trampolines, kprobe instruction slots and
+    ftrace trampolines. Without them their addresses would look like
+    freed module memory.
+    """
+    ranges = []
+    try:
+        for name, start, end in _bpf_ksyms():
+            ranges.append(("(BPF: %s)" % name, start, end))
+    except Exception:
+        pass
+    page = 4096
+    for cache in ("kprobe_insn_slots", "kprobe_optinsn_slots"):
+        try:
+            head = sym2addr(cache) + _off("struct kprobe_insn_cache", "pages")
+            insns_off = _off("struct kprobe_insn_page", "insns")
+            list_off = _off("struct kprobe_insn_page", "list")
+            for node in _list_entries(head):
+                insns = readPtr(node - list_off + insns_off)
+                ranges.append(("(kprobe instruction slots)", insns, insns + page))
+        except Exception:
+            pass
+    try:
+        if member_offset("struct ftrace_ops", "trampoline") >= 0:
+            end = sym2addr("ftrace_list_end")
+            ops = readPtr(sym2addr("ftrace_ops_list"))
+            seen = 0
+            while ops and ops != end and seen < 1000:
+                o = readSU("struct ftrace_ops", ops)
+                tramp, size = int(o.trampoline), int(o.trampoline_size)
+                if tramp and 0 < size < (1 << 20):
+                    ranges.append(("(ftrace trampoline)", tramp, tramp + size))
+                ops = int(o.next)
+                seen = seen + 1
+    except Exception:
+        pass
+    return ranges
+
+
+def code_ranges():
+    """module_ranges() and other_code_ranges(), for classify_address()."""
+    return module_ranges() + other_code_ranges()
+
+
+def classify_address(addr, ranges, areas):
+    """
+    The label of the range in `ranges` that holds addr: a loaded module's
+    name, or a BPF program or trampoline from other_code_ranges(). UNLOADED
+    when it is in the module area but in none of them, which is what code
+    or data of an unloaded module, or freed BPF or trampoline code, looks
+    like. None otherwise.
+    """
+    for name, start, end in ranges:
+        if start <= addr < end:
+            return name
+    for start, end in areas:
+        if start <= addr < end:
+            return UNLOADED
+    return None
 
 
 def show_bt_modules(options, max_frames=8):
@@ -1521,7 +1652,7 @@ def show_bt_modules(options, max_frames=8):
         return
     frames = parse_backtraces(text)
     tasks = len(set((f[0], f[2]) for f in frames))
-    result = frames_by_module(frames, module_ranges())
+    result = frames_by_module(frames, code_ranges(), module_areas())
     print("Modules in '%s' (%d frames in %d tasks)" % (command, len(frames), tasks))
     if not result:
         print("  No frame is in module code")
@@ -1538,6 +1669,685 @@ def show_bt_modules(options, max_frames=8):
                                                                frame, func, addr))
         if len(mod_frames) > max_frames:
             print("    ... %d more" % (len(mod_frames) - max_frames))
+        if name == UNLOADED:
+            print_unloaded_hint([f[5] for f in mod_frames])
+
+
+def print_unloaded_hint(addrs=()):
+    """What an address in the module area that nothing owns may be."""
+    crashcolor.set_color(crashcolor.LIGHTYELLOW)
+    print("    In the module area, but in no loaded module, BPF program or"
+          " trampoline: code")
+    print("    or data of an unloaded module, or of a freed BPF program or"
+          " trampoline, still")
+    print("    referenced from here.")
+    last = last_unloaded_module_str()
+    if last:
+        print("    Last unloaded module: %s" % last)
+    else:
+        print("    No module has been unloaded since boot: most likely freed"
+              " BPF or trampoline code.")
+    for addr in sorted(set(addrs))[:8]:
+        print("    0x%x: %s" % (addr, "still mapped" if vmap_area(addr)
+                                 else "not mapped (freed)"))
+    crashcolor.set_color(crashcolor.RESET)
+
+
+# ============================================================================
+# Parsing crash command output (pure, see modinfo_test.py)
+# ============================================================================
+
+_RE_HEX = r'[0-9a-fA-F]{8,}'
+_RE_TIMER_LINE = re.compile(r'^\s*(-?\d+)\s+(-?\d+)\s+(%s)\s+(%s)' % (_RE_HEX, _RE_HEX))
+_RE_HRTIMER_LINE = re.compile(r'^\s*(\d+)\s+(\d+)\s+(-?\d+)\s+(%s)\s+(%s)'
+                              % (_RE_HEX, _RE_HEX))
+
+
+def parse_timer_output(text):
+    """
+    [(object, function, tte)] from 'timer' (timer_list lines: EXPIRES TTE
+    TIMER_LIST FUNCTION) and 'timer -r' (hrtimer lines: SOFTEXPIRES EXPIRES
+    TTE HRTIMER FUNCTION). tte is the time to expiry in the output's unit.
+    """
+    timers = []
+    for line in text.splitlines():
+        m = _RE_HRTIMER_LINE.match(line)
+        if m:
+            timers.append((int(m.group(4), 16), int(m.group(5), 16), int(m.group(3))))
+            continue
+        m = _RE_TIMER_LINE.match(line)
+        if m:
+            timers.append((int(m.group(3), 16), int(m.group(4), 16), int(m.group(2))))
+    return timers
+
+
+def parse_percpu_addresses(text):
+    """The per-cpu addresses in 'p <percpu variable>' output ('[3]: ffff...')."""
+    return [int(a, 16) for a in re.findall(r'\[\d+\]:\s*(%s)' % _RE_HEX, text)]
+
+
+_RE_IRQ_LINE = re.compile(r'^\s*(\d+)\s+(%s)\s+(%s)\s+"' % (_RE_HEX, _RE_HEX))
+
+def parse_irq_output(text):
+    """[(irq, irqaction)] from 'irq': the IRQs with a handler."""
+    return [(int(m.group(1)), int(m.group(3), 16))
+            for m in map(_RE_IRQ_LINE.match, text.splitlines()) if m]
+
+
+_RE_PS_LINE = re.compile(r'^>?\s*(\d+)\s+(\d+)\s+(\d+)\s+(%s)\s+(\S+)\s+[\d.]+\s+\d+\s+\d+\s+(.*)$'
+                         % _RE_HEX)
+
+def parse_ps_tasks(text):
+    """[(pid, task, comm)] from 'ps' output."""
+    return [(int(m.group(1)), int(m.group(4), 16), m.group(6).strip())
+            for m in map(_RE_PS_LINE.match, text.splitlines()) if m]
+
+
+_RE_KMEM_V_LINE = re.compile(r'^\s*(%s)\s+(?:(%s)\s+)?(%s)\s+-\s+(%s)\s+(\d+)\s*$'
+                             % (_RE_HEX, _RE_HEX, _RE_HEX, _RE_HEX))
+
+def parse_kmem_v(text):
+    """[(vm_struct or 0, start, end, size)] from 'kmem -v'."""
+    areas = []
+    for line in text.splitlines():
+        m = _RE_KMEM_V_LINE.match(line)
+        if m:
+            areas.append((int(m.group(2), 16) if m.group(2) else 0,
+                          int(m.group(3), 16), int(m.group(4), 16), int(m.group(5))))
+    return areas
+
+
+def size_with_unit(text):
+    """'8k' -> 8192, '2m' -> 2097152, '4096' -> 4096."""
+    m = re.match(r'^(\d+)([kKmMgG]?)$', text.strip())
+    if m is None:
+        return 0
+    return int(m.group(1)) * {"": 1, "k": 1 << 10, "m": 1 << 20, "g": 1 << 30}[m.group(2).lower()]
+
+
+def parse_kmem_s(text):
+    """
+    (objsize, allocated, total, slabs, slab size in bytes) from 'kmem -s
+    <cache>', or None. The line after the CACHE header holds them.
+    """
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.split()[:1] == ["CACHE"] and i + 1 < len(lines):
+            words = lines[i + 1].split()
+            if len(words) >= 7:
+                try:
+                    return (int(words[1]), int(words[2]), int(words[3]),
+                            int(words[4]), size_with_unit(words[5]))
+                except ValueError:
+                    return None
+    return None
+
+
+# ============================================================================
+# --hooks: where the kernel calls into a module
+# ============================================================================
+
+def _off(struct, member):
+    off = member_offset(struct, member)
+    if off < 0:
+        raise KeyError("%s.%s" % (struct, member))
+    return off
+
+
+_sym_cache = {}
+
+def sym_name(addr):
+    """
+    'func' or 'func+0x37' for an address, or None. addr2sym() only knows
+    the modules whose debuginfo crash loaded, and only function starts;
+    crash's 'sym' uses kallsyms, so it also names third-party modules
+    without debuginfo and addresses inside a function (return addresses).
+    """
+    if not addr:
+        return None
+    if addr in _sym_cache:
+        return _sym_cache[addr]
+    name = addr2sym(addr)
+    if not name:
+        try:
+            words = exec_crash_command("sym 0x%x" % addr).split()
+            # 'ffffffffc0ef7b87 (t) func+0x37 [onload]'
+            if len(words) >= 3 and words[1].startswith("("):
+                name = words[2]
+        except Exception:
+            name = None
+    _sym_cache[addr] = name
+    return name
+
+
+def _sym(addr):
+    if not addr:
+        return "-"
+    name = sym_name(addr)
+    return "%s (0x%x)" % (name, addr) if name else "0x%x" % addr
+
+
+def _list_entries(head, limit=100000):
+    """The node addresses of a list_head at `head` (next is at offset 0)."""
+    nodes = []
+    node = readPtr(head)
+    while node and node != head and len(nodes) < limit:
+        nodes.append(node)
+        node = readPtr(node)
+    return nodes
+
+
+def _hlist_entries(head, limit=100000):
+    """The node addresses of an hlist_head at `head` (first/next at 0)."""
+    nodes = []
+    node = readPtr(head)
+    while node and len(nodes) < limit:
+        nodes.append(node)
+        node = readPtr(node)
+    return nodes
+
+
+# Hook records: (category, address to classify, what it is, object address).
+# The function address is classified first; the object (a notifier_block, a
+# timer_list) is tried when the function is outside every module.
+
+def hooks_timers():
+    hooks = []
+    dwork_timer = sym2addr("delayed_work_timer_fn")
+    kdwork_timer = sym2addr("kthread_delayed_work_timer_fn")
+    for cmd, unit in (("timer", "jiffies"), ("timer -r", "ns")):
+        try:
+            text = exec_crash_command(cmd)
+        except Exception:
+            continue
+        for obj, func, tte in parse_timer_output(text):
+            # A delayed work's timer runs a kernel function: the work's own
+            # function is the one that matters.
+            try:
+                if dwork_timer and func == dwork_timer:
+                    dwork = obj - _off("struct delayed_work", "timer")
+                    wfunc = readPtr(dwork + _off("struct delayed_work", "work") +
+                                    _off("struct work_struct", "func"))
+                    hooks.append(("delayed work", wfunc, "delayed_work 0x%x in %d jiffies"
+                                  % (dwork, tte), dwork))
+                    continue
+                if kdwork_timer and func == kdwork_timer:
+                    dwork = obj - _off("struct kthread_delayed_work", "timer")
+                    wfunc = readPtr(dwork + _off("struct kthread_delayed_work", "work") +
+                                    _off("struct kthread_work", "func"))
+                    hooks.append(("delayed work", wfunc, "kthread_delayed_work 0x%x in %d"
+                                  " jiffies" % (dwork, tte), dwork))
+                    continue
+            except Exception:
+                pass
+            kind = "timer_list" if unit == "jiffies" else "hrtimer"
+            hooks.append(("timer" if unit == "jiffies" else "hrtimer", func,
+                          "%s 0x%x in %d %s" % (kind, obj, tte, unit), obj))
+    return hooks
+
+
+def _worker_pools():
+    pools = []
+    pool_size = struct_size("struct worker_pool")
+    try:
+        for addr in parse_percpu_addresses(exec_crash_command("p cpu_worker_pools")):
+            pools.extend([addr, addr + pool_size])        # NR_STD_WORKER_POOLS
+    except Exception:
+        pass
+    try:
+        base = sym2addr("unbound_pool_hash")
+        hash_off = _off("struct worker_pool", "hash_node")
+        for i in range(64):
+            for node in _hlist_entries(base + i * sys_info.pointersize):
+                pools.append(node - hash_off)
+    except Exception:
+        pass
+    return pools
+
+
+def hooks_workqueues():
+    hooks = []
+    entry_off = _off("struct work_struct", "entry")
+    func_off = _off("struct work_struct", "func")
+    worklist_off = _off("struct worker_pool", "worklist")
+    busy_off = _off("struct worker_pool", "busy_hash")
+    hentry_off = _off("struct worker", "hentry")
+    cur_func_off = _off("struct worker", "current_func")
+    task_off = _off("struct worker", "task")
+    for pool in _worker_pools():
+        for node in _list_entries(pool + worklist_off):
+            work = node - entry_off
+            func = readPtr(work + func_off)
+            hooks.append(("pending work", func, "work_struct 0x%x" % work, work))
+        for i in range(64):
+            for node in _hlist_entries(pool + busy_off + i * sys_info.pointersize):
+                worker = node - hentry_off
+                func = readPtr(worker + cur_func_off)
+                who = "worker 0x%x" % worker
+                try:
+                    task = readSU("struct task_struct", readPtr(worker + task_off))
+                    who = "PID %d (%s)" % (task.pid, task.comm)
+                except Exception:
+                    pass
+                hooks.append(("running work", func, who, 0))
+    return hooks
+
+
+def hooks_irqs():
+    hooks = []
+    for field in ("handler", "thread_fn", "next", "name"):
+        _off("struct irqaction", field)
+    for irq, action in parse_irq_output(exec_crash_command("irq")):
+        seen = 0
+        while action and seen < 64:
+            act = readSU("struct irqaction", action)
+            name = _cstr(act.name)
+            for field in ("handler", "thread_fn"):
+                fn = int(getattr(act, field))
+                if fn:
+                    hooks.append(("irq %s" % field.replace("_fn", ""), fn,
+                                  "IRQ %d \"%s\"" % (irq, name), action))
+            action = int(act.next)
+            seen = seen + 1
+    return hooks
+
+
+PF_KTHREAD = 0x00200000
+
+def hooks_kthreads():
+    hooks = []
+    threadfn_off = _off("struct kthread", "threadfn")
+    fields = [f for f in ("worker_private", "set_child_tid")
+              if member_offset("struct task_struct", f) >= 0]
+    flags_off = _off("struct task_struct", "flags")
+    for pid, task, comm in parse_ps_tasks(exec_crash_command("ps -k")):
+        try:
+            if not readU32(task + flags_off) & PF_KTHREAD:
+                continue
+        except Exception:
+            continue
+        for field in fields:
+            # to_kthread(): worker_private on newer kernels, set_child_tid
+            # on older ones. The right one points to a kthread whose
+            # threadfn is a text symbol.
+            try:
+                kthread = readPtr(task + member_offset("struct task_struct", field))
+                fn = readPtr(kthread + threadfn_off) if kthread else 0
+            except Exception:
+                continue
+            if fn and addr2sym(fn):
+                hooks.append(("kthread", fn, "PID %d %s" % (pid, comm), 0))
+                break
+    return hooks
+
+
+NOTIFIER_CHAINS = (
+    "netdev_chain", "inetaddr_chain", "inet6addr_chain", "inetaddr_validator_chain",
+    "inet6addr_validator_chain", "netevent_notif_chain", "reboot_notifier_list",
+    "restart_handler_list", "panic_notifier_list", "die_chain", "module_notify_list",
+    "oom_notify_list", "pm_chain_head", "keyboard_notifier_list", "vt_notifier_list",
+    "usb_notifier_list", "memory_chain", "vmap_notify_list", "task_free_notifier",
+    "munmap_notifier",
+)
+
+def hooks_notifiers():
+    hooks = []
+    call_off = _off("struct notifier_block", "notifier_call")
+    next_off = _off("struct notifier_block", "next")
+    for chain in NOTIFIER_CHAINS:
+        try:
+            nb = int(readSymbol(chain).head)
+        except Exception:
+            continue
+        seen = 0
+        while nb and seen < 1000:
+            fn = readPtr(nb + call_off)
+            hooks.append(("notifier", fn, "%s, notifier_block 0x%x" % (chain, nb), nb))
+            nb = readPtr(nb + next_off)
+            seen = seen + 1
+    return hooks
+
+
+def hooks_devices():
+    hooks = []
+    try:
+        base = sym2addr("chrdevs")
+        next_off = _off("struct char_device_struct", "next")
+        cdev_off = _off("struct char_device_struct", "cdev")
+        ops_off = _off("struct cdev", "ops")
+        for i in range(255):
+            cd = readPtr(base + i * sys_info.pointersize)
+            seen = 0
+            while cd and seen < 1000:
+                c = readSU("struct char_device_struct", cd)
+                cdev = readPtr(cd + cdev_off)
+                if cdev:
+                    fops = readPtr(cdev + ops_off)
+                    hooks.append(("char device", fops, "major %d \"%s\" (file_operations)"
+                                  % (c.major, c.name), cdev))
+                cd = readPtr(cd + next_off)
+                seen = seen + 1
+    except Exception:
+        pass
+    try:
+        for misc in readSUListFromHead(sym2addr("misc_list"), "list", "struct miscdevice"):
+            fops = int(misc.fops)
+            hooks.append(("misc device", fops, "minor %d \"%s\" (file_operations)"
+                          % (misc.minor, _cstr(misc.name)), Addr(misc)))
+    except Exception:
+        pass
+    return hooks
+
+
+NF_INET_HOOKS = ("PRE_ROUTING", "LOCAL_IN", "FORWARD", "LOCAL_OUT", "POST_ROUTING")
+
+def hooks_netfilter():
+    """Netfilter hooks of the initial network namespace."""
+    hooks = []
+    net = sym2addr("init_net")
+    nf = net + _off("struct net", "nf")
+    num_off = _off("struct nf_hook_entries", "num_hook_entries")
+    hooks_off = _off("struct nf_hook_entries", "hooks")
+    entry_size = struct_size("struct nf_hook_entry")
+    for family, count in (("ipv4", 5), ("ipv6", 5), ("arp", 3), ("bridge", 5)):
+        off = member_offset("struct netns_nf", "hooks_" + family)
+        if off < 0:
+            continue
+        for i in range(count):
+            entries = readPtr(nf + off + i * sys_info.pointersize)
+            if not entries:
+                continue
+            for j in range(readU16(entries + num_off)):
+                fn = readPtr(entries + hooks_off + j * entry_size)
+                where = NF_INET_HOOKS[i] if family != "arp" else ("IN", "OUT", "FORWARD")[i]
+                hooks.append(("netfilter", fn, "%s %s" % (family, where), 0))
+    return hooks
+
+
+def hooks_kprobes():
+    hooks = []
+    base = sym2addr("kprobe_table")
+    hlist_off = _off("struct kprobe", "hlist")
+    kretprobe_pre = sym2addr("pre_handler_kretprobe")
+    for i in range(64):
+        for node in _hlist_entries(base + i * sys_info.pointersize):
+            kp = readSU("struct kprobe", node - hlist_off)
+            where = sym_name(int(kp.addr)) or "0x%x" % int(kp.addr)
+            for field in ("pre_handler", "post_handler"):
+                fn = int(getattr(kp, field))
+                if not fn:
+                    continue
+                if kretprobe_pre and fn == kretprobe_pre:
+                    # struct kretprobe starts with its kprobe.
+                    rp = readSU("struct kretprobe", Addr(kp))
+                    for rfield in ("handler", "entry_handler"):
+                        rfn = int(getattr(rp, rfield))
+                        if rfn:
+                            hooks.append(("kretprobe", rfn, "%s on %s" % (rfield, where),
+                                          Addr(kp)))
+                    continue
+                hooks.append(("kprobe", fn, "%s on %s" % (field, where), Addr(kp)))
+    return hooks
+
+
+def hooks_ftrace():
+    hooks = []
+    end = sym2addr("ftrace_list_end")
+    func_off = _off("struct ftrace_ops", "func")
+    next_off = _off("struct ftrace_ops", "next")
+    ops = readPtr(sym2addr("ftrace_ops_list"))
+    seen = 0
+    while ops and ops != end and seen < 1000:
+        fn = readPtr(ops + func_off)
+        hooks.append(("ftrace ops", fn, "ftrace_ops 0x%x" % ops, ops))
+        ops = readPtr(ops + next_off)
+        seen = seen + 1
+    return hooks
+
+
+HOOK_COLLECTORS = (
+    ("timers", hooks_timers),
+    ("workqueues", hooks_workqueues),
+    ("IRQ handlers", hooks_irqs),
+    ("kthreads", hooks_kthreads),
+    ("notifier chains", hooks_notifiers),
+    ("char and misc devices", hooks_devices),
+    ("netfilter hooks", hooks_netfilter),
+    ("kprobes", hooks_kprobes),
+    ("ftrace ops", hooks_ftrace),
+)
+
+
+def hooks_by_module(hooks, ranges, areas):
+    """
+    {module name (or UNLOADED): [(category, function, where)]} for the
+    hooks whose function, or failing that whose object, is in module
+    memory.
+    """
+    found = {}
+    for category, addr, where, obj in hooks:
+        name = classify_address(addr, ranges, areas) if addr else None
+        if name is None and obj:
+            name = classify_address(obj, ranges, areas)
+            if name is not None:
+                where = where + " [object in %s]" % (
+                    "unloaded module memory" if name == UNLOADED else name)
+        if name is not None:
+            found.setdefault(name, []).append((category, addr, where))
+    return found
+
+
+def group_hooks(refs):
+    """[(category, function, [where])] with the same category and function
+    together, in category order."""
+    groups = {}
+    order = []
+    for category, addr, where in refs:
+        key = (category, addr)
+        if key not in groups:
+            groups[key] = []
+            order.append(key)
+        groups[key].append(where)
+    order.sort(key=lambda k: (k[0], k[1]))
+    return [(k[0], k[1], groups[k]) for k in order]
+
+
+def print_hook_groups(refs, shown=4):
+    for category, addr, wheres in group_hooks(refs):
+        if len(wheres) == 1:
+            print("    %-14s %s  %s" % (category, _sym(addr), wheres[0]))
+            continue
+        print("    %-14s %s  x%d" % (category, _sym(addr), len(wheres)))
+        more = "  ... %d more" % (len(wheres) - shown) if len(wheres) > shown else ""
+        print("    %-14s   %s%s" % ("", "; ".join(wheres[:shown]), more))
+
+
+def show_module_hooks(options):
+    target = options.module_hooks
+    ranges = code_ranges()
+    areas = module_areas()
+    if target != "all":
+        module = find_module(target)
+        if module is None:
+            print("The module %s does not exist" % target)
+            return
+        target = str(module.name)
+    hooks = []
+    failed = []
+    for label, collect in HOOK_COLLECTORS:
+        try:
+            hooks.extend(collect())
+        except Exception as e:
+            failed.append("%s (%s)" % (label, e))
+    found = hooks_by_module(hooks, ranges, areas)
+    if target == "all":
+        names = sorted(found, key=lambda n: (n == UNLOADED, -len(found[n]), n))
+    else:
+        names = [target] + ([UNLOADED] if UNLOADED in found else [])
+    print("Kernel references into %s, from %d checked in: %s"
+          % ("module memory" if target == "all" else target, len(hooks),
+             ", ".join(label for label, _ in HOOK_COLLECTORS)))
+    for name in names:
+        refs = found.get(name, [])
+        crashcolor.set_color(crashcolor.LIGHTRED if name == UNLOADED else crashcolor.BLUE)
+        print("\n%s: %d" % (name, len(refs)))
+        crashcolor.set_color(crashcolor.RESET)
+        print_hook_groups(refs)
+        if name == UNLOADED and refs:
+            print_unloaded_hint([addr for _, addr, _ in refs])
+    if target == "all" and not found:
+        print("\nNothing checked points into module memory")
+    if failed:
+        print("\nNot checked: %s" % "; ".join(failed))
+
+
+# ============================================================================
+# --mem: memory a module holds
+# ============================================================================
+
+def vmalloc_by_module(ranges, areas):
+    """
+    {module name or UNLOADED: [(caller, bytes)]}: the vmalloc areas whose
+    vm_struct->caller, the code that asked for them, is in module memory.
+    A module's own code and data are allocated by the module loader, so
+    they are not counted here.
+    """
+    caller_off = _off("struct vm_struct", "caller")
+    found = {}
+    for vm, start, end, size in parse_kmem_v(exec_crash_command("kmem -v")):
+        if not vm:
+            continue
+        try:
+            caller = readPtr(vm + caller_off)
+        except Exception:
+            continue
+        name = classify_address(caller, ranges, areas)
+        if name is not None:
+            found.setdefault(name, []).append((caller, size))
+    return found
+
+
+def slab_caches_by_module(ranges, areas):
+    """
+    {module name or UNLOADED: [(cache address, cache name)]}: the slab
+    caches whose constructor is module code. A cache without a constructor
+    has no field naming its creator; see slab_caches_named().
+    """
+    found = {}
+    for cache in readSUListFromHead(sym2addr("slab_caches"), "list", "struct kmem_cache"):
+        try:
+            ctor = int(cache.ctor)
+        except Exception:
+            continue
+        name = classify_address(ctor, ranges, areas) if ctor else None
+        if name is not None:
+            found.setdefault(name, []).append((Addr(cache), _cstr(cache.name)))
+    return found
+
+
+def slab_caches_named(module_name):
+    """[(cache address, name)] of the caches whose name starts with the
+    module's name: a likely, not certain, owner."""
+    caches = []
+    prefixes = (module_name + "_", module_name + "-", module_name + ":")
+    for cache in readSUListFromHead(sym2addr("slab_caches"), "list", "struct kmem_cache"):
+        name = _cstr(cache.name)
+        if name == module_name or name.startswith(prefixes):
+            caches.append((Addr(cache), name))
+    return caches
+
+
+def cache_usage(cache_addr):
+    """(objsize, allocated objects, slab memory in bytes) or None."""
+    try:
+        usage = parse_kmem_s(exec_crash_command("kmem -s 0x%x" % cache_addr))
+    except Exception:
+        return None
+    if usage is None:
+        return None
+    objsize, allocated, total, slabs, ssize = usage
+    return objsize, allocated, slabs * ssize
+
+
+def _mb(n):
+    return "%.1f MB" % (n / 1048576.0) if n >= 1048576 else "%d KB" % (n // 1024)
+
+
+def print_cache_rows(caches):
+    total = 0
+    for addr, name in caches:
+        usage = cache_usage(addr)
+        if usage is None:
+            print("      %-28s (no usage from kmem -s)" % name)
+            continue
+        objsize, allocated, memory = usage
+        total = total + memory
+        print("      %-28s %8d objects of %6d bytes  %10s" % (name, allocated, objsize, _mb(memory)))
+    return total
+
+
+def show_module_mem(options):
+    target = options.module_mem
+    ranges = code_ranges()
+    areas = module_areas()
+    module = None
+    if target != "all":
+        module = find_module(target)
+        if module is None:
+            print("The module %s does not exist" % target)
+            return
+        target = str(module.name)
+    vmalloc = vmalloc_by_module(ranges, areas)
+    slabs = slab_caches_by_module(ranges, areas)
+
+    if module is None:
+        rows = []
+        for name in set(vmalloc) | set(slabs):
+            vbytes = sum(size for _, size in vmalloc.get(name, []))
+            caches = slabs.get(name, [])
+            sbytes = sum((cache_usage(addr) or (0, 0, 0))[2] for addr, _ in caches)
+            rows.append((name, len(vmalloc.get(name, [])), vbytes, sbytes, caches))
+        rows.sort(key=lambda r: -(r[2] + r[3]))
+        print("Memory allocated by module code: vmalloc areas whose caller is in the"
+              " module,\nand slab caches whose constructor is")
+        print("%-24s %8s %10s %10s  %s" % ("MODULE", "VMALLOCS", "VMALLOC", "SLAB",
+                                           "SLAB CACHES"))
+        for name, count, vbytes, sbytes, caches in rows:
+            print("%-24s %8d %10s %10s  %s" % (name, count, _mb(vbytes), _mb(sbytes),
+                                               ", ".join(c[1] for c in caches) or "-"))
+        if not rows:
+            print("  none found")
+        if UNLOADED in vmalloc or UNLOADED in slabs:
+            print_unloaded_hint([c for c, _ in vmalloc.get(UNLOADED, [])])
+        return
+
+    core = get_module_core_size(module)
+    print("Memory held by %s" % target)
+    print("  module memory   %10s  (its code and data)" % _mb(core))
+    areas_of = sorted(vmalloc.get(target, []), key=lambda a: -a[1])
+    vbytes = sum(size for _, size in areas_of)
+    print("  vmalloc         %10s  in %d areas allocated from %s code"
+          % (_mb(vbytes), len(areas_of), target))
+    by_caller = {}
+    for caller, size in areas_of:
+        count, total = by_caller.get(caller, (0, 0))
+        by_caller[caller] = (count + 1, total + size)
+    for caller, (count, total) in sorted(by_caller.items(), key=lambda c: -c[1][1])[:10]:
+        print("      %10s  %5d areas  %s" % (_mb(total), count, _sym(caller)))
+    owned = slabs.get(target, [])
+    print("  slab caches     %d with a constructor in %s" % (len(owned), target))
+    slab_total = print_cache_rows(owned)
+    named = [c for c in slab_caches_named(target) if c not in owned]
+    if named:
+        print("  slab caches     %d more named like %s (no constructor to tell)"
+              % (len(named), target))
+        slab_total = slab_total + print_cache_rows(named)
+    print("  total           %10s" % _mb(core + vbytes + slab_total))
+    if UNLOADED in vmalloc:
+        unloaded = sum(size for _, size in vmalloc[UNLOADED])
+        print("\n  vmalloc from freed module-area code: %s in %d areas"
+              % (_mb(unloaded), len(vmalloc[UNLOADED])))
+        print_unloaded_hint([c for c, _ in vmalloc[UNLOADED]])
 
 
 def modinfo():
@@ -1561,10 +2371,24 @@ def modinfo():
     op.add_option("-b", "--bt", dest="bt_modules", default=False,
                   action="store_true",
                   help="Show the modules whose code is in the backtraces of"
-                       " the active tasks ('bt -a')")
+                       " the active tasks ('bt -a'); BPF programs, trampolines"
+                       " and freed memory in the module area are shown too")
     op.add_option("--bt-all", dest="bt_all", default=False,
                   action="store_true",
                   help="Like -b, for every task ('foreach bt'; can be slow)")
+    op.add_option("--hooks", dest="module_hooks", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="Show where the kernel calls into a module ('all' for"
+                       " every module): timers, delayed, pending and running"
+                       " works, IRQ handlers, kthreads, notifier chains, char"
+                       " and misc devices, netfilter hooks, kprobes, ftrace"
+                       " ops. References into freed memory in the module area"
+                       " are listed too")
+    op.add_option("--mem", dest="module_mem", default=None, metavar="MODULE",
+                  action="store", type="string",
+                  help="Show the memory a module holds ('all' for every"
+                       " module): its own size, vmalloc areas its code"
+                       " allocated, and slab caches it created")
     op.add_option("-c", "--contents", dest="show_contents", default=False,
                   action="store_true",
                   help="Show contents of each symbols")
@@ -1614,11 +2438,20 @@ def modinfo():
     # 'modinfo <module>' is 'modinfo --details <module>'.
     if args and o.module_detail is None and o.disasm_module is None and \
        o.module_params is None and o.module_deps is None and \
+       o.module_hooks is None and o.module_mem is None and \
        o.batch_run is None and o.module_addr is None:
         o.module_detail = args[0]
 
     if o.bt_modules or o.bt_all:
         show_bt_modules(o)
+        sys.exit(0)
+
+    if o.module_hooks is not None:
+        show_module_hooks(o)
+        sys.exit(0)
+
+    if o.module_mem is not None:
+        show_module_mem(o)
         sys.exit(0)
 
     if o.module_params is not None:
