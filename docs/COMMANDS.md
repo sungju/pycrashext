@@ -137,6 +137,14 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | `-P` | `--pss` | Show memory usage by tasks as PSS, read from each process's page tables (slower than `-u`) |
 | `-n` | `--nogroup` | Show data in individual tasks (not grouped) |
 | `--shared` | | Split memory into private and shared, each shared page counted once (with `-u`, `-P` or `-O`) |
+| `--tree` | | Show processes as a parent/child tree with each one's RSS and its subtree's total (with `-u` or `-O`; `--oom-tree` still works) |
+| `--ascii` | | Use ASCII instead of Unicode glyphs in `--tree` (`--oom-ascii` still works) |
+
+`--tree` shows the 10 biggest processes (`-O`: `--oom-top`) with the
+ancestors that connect them, or every process with `-a`. An ancestor not
+in the list (the process list for `-u`, the task dump for `-O`) is shown
+with `-` for its RSS. With `-u` it shows RSS, so `-P` and `--shared` are
+not used with it.
 
 `--shared` and `-P` read each process's page tables and every mapped page's
 `_mapcount`, the way `/proc/<pid>/smaps` does; the crash task context is left
@@ -169,8 +177,7 @@ and shows what was read so far.
 | `--oom-summary` | | | Show OOM summary dashboard with pattern analysis |
 | `--oom-count` | | `N` | Limit number of OOM events to display |
 | `--oom-top` | | `N` | Show top N memory consumers (default: 10) |
-| `--oom-tree` | | | Show the OOM task dump as a process tree |
-| `--oom-ascii` | | | Use ASCII instead of Unicode glyphs in `--oom-tree` |
+| `--tree` | | | Show the OOM task dump as a process tree (see Per-Task Memory) |
 | `--process-filter` | | `<name>` | Filter OOM events by process name (comma-separated or regex) |
 | `--shared` | | | Split each process of the OOM task dump into private and shared memory |
 
@@ -181,7 +188,7 @@ RHEL's dump prints only `rss`, so the processes still in the vmcore (same
 PID and name) are measured from their page tables, as `-u --shared` does;
 `-` marks a process that is gone. That is exact when `vm.panic_on_oom` made
 the dump at the last OOM; for earlier OOMs the output says the split is as
-of the dump. `--oom-tree` ignores `--shared`.
+of the dump. `--tree` ignores `--shared`.
 
 #### Page & TLB Analysis
 

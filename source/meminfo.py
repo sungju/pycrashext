@@ -1705,6 +1705,11 @@ def show_tasks_memusage(options):
     account_shared = getattr(options, 'account_shared', False)
     use_pss = getattr(options, 'memusage_pss', False)
     scan_pages = account_shared or use_pss
+    if scan_pages and getattr(options, 'tree', False):
+        crashcolor.set_color(crashcolor.YELLOW)
+        print("--tree shows RSS: -P and --shared are not used with it")
+        crashcolor.set_color(crashcolor.RESET)
+        scan_pages = False
 
     if scan_pages:
         crashcolor.set_color(crashcolor.YELLOW)
@@ -1730,6 +1735,7 @@ def show_tasks_memusage(options):
 
     # First pass: collect all tasks with RSS
     task_list = []  # List of (pname, task_addr, rss_kb)
+    tree_rows = []  # --tree: {'pid', 'name', 'rss' in bytes}
     seen_mm_structs = set()  # Track unique mm_struct addresses to avoid counting threads twice
 
     for i in range(1, len(result_lines)):
@@ -1767,6 +1773,7 @@ def show_tasks_memusage(options):
 
         if not is_unique_process:
             continue
+        tree_rows.append({'pid': int(pid), 'name': cmd, 'rss': rss * 1024})
         if scan_pages:
             task_list.append((pname, task_addr, rss))
         total_rss = total_rss + rss
@@ -1774,6 +1781,11 @@ def show_tasks_memusage(options):
             mem_usage_dict[pname] = mem_usage_dict.get(pname, 0) + rss
         if not options.all:
             pid_count_dict[pname] = pid_count_dict.get(pname, 0) + 1
+
+    if getattr(options, 'tree', False) and \
+       show_process_tree(options, tree_rows, total_rss * 1024, 10,
+                         "the process list"):
+        return
 
     # Second pass: read the page tables
     shared_info = None
@@ -5273,13 +5285,19 @@ def build_oom_tree(oom_rows, pid_ppid, pid_name=None):
     return nodes, roots
 
 
-def show_oom_process_tree(op, oom_rows, total_usage):
+def show_process_tree(op, oom_rows, total_usage, min_number, listed_in):
     """
-    Render the OOM task dump as a process tree using parent links recovered
-    from the dump's task list.
+    Render processes ({'pid', 'name', 'rss'} rows, rss in bytes) as a tree,
+    using parent links recovered from the dump's task list: the OOM task
+    dump for -O, the live processes for -u.  The min_number biggest are
+    shown with their ancestors, or all of them with -a.  listed_in names
+    where the rows came from, for the note on ancestors that were not.
+
+    Returns False, printing nothing but a warning, when the task list
+    cannot be read.
     """
     if not oom_rows:
-        return
+        return True
 
     pid_ppid, pid_name = get_pid_ppid_map()
     if not pid_ppid:
@@ -5287,11 +5305,7 @@ def show_oom_process_tree(op, oom_rows, total_usage):
         print("Could not read the task list from this dump -"
               " cannot build a process tree.")
         crashcolor.set_color(crashcolor.RESET)
-        fallback = {}
-        for row in oom_rows:
-            fallback[row['name']] = fallback.get(row['name'], 0) + row['rss']
-        show_oom_memory_usage(op, fallback, total_usage)
-        return
+        return False
 
     nodes, roots = build_oom_tree(oom_rows, pid_ppid, pid_name)
     orphans = sum(1 for n in nodes.values() if n['orphan'])
@@ -5311,7 +5325,6 @@ def show_oom_process_tree(op, oom_rows, total_usage):
     # them.  Capping roots instead would be meaningless now that a tree
     # usually hangs off a single synthesised pid 1.
     real_pids = [n['pid'] for n in nodes.values() if not n['synthetic']]
-    min_number = getattr(op, 'oom_top', 10)
     if op.all or min_number >= len(real_pids):
         keep = set(nodes)
     else:
@@ -5383,14 +5396,15 @@ def show_oom_process_tree(op, oom_rows, total_usage):
         print("\tNotes) %.2f percent from total system memory(%s)" %
               (total_percentage, get_size_str(system_total_mem_bytes, True)))
     if synthetic > 0:
-        print("\t%d parent task(s) shown with '-' were not in the OOM dump;"
-              " they connect the tasks that were" % synthetic)
+        print("\t%d parent task(s) shown with '-' were not in %s;"
+              " they connect the tasks that were" % (synthetic, listed_in))
     if orphans > 0:
         crashcolor.set_color(crashcolor.YELLOW)
         print("\t%d task(s) marked '*' were not in the dump's task list -"
               " shown as roots" % orphans)
         crashcolor.set_color(crashcolor.RESET)
     crashcolor.set_color(crashcolor.RESET)
+    return True
 
 
 def get_live_tasks():
@@ -5922,8 +5936,15 @@ def show_oom_events(op):
                     for key in cgroup_dict:
                         print("  " + cgroup_dict[key])
 
-                if getattr(op, 'oom_tree', False):
-                    show_oom_process_tree(op, oom_rows, total_usage)
+                if getattr(op, 'tree', False):
+                    if not show_process_tree(op, oom_rows, total_usage,
+                                             getattr(op, 'oom_top', 10),
+                                             "the OOM dump"):
+                        fallback = {}
+                        for row in oom_rows:
+                            fallback[row['key']] = fallback.get(row['key'], 0) + \
+                                row['rss']
+                        show_oom_memory_usage(op, fallback, total_usage)
                 else:
                     shared_info = None
                     if getattr(op, 'account_shared', False):
@@ -6272,11 +6293,13 @@ OPTION_EXAMPLES = {
         "meminfo -O --process-filter java,mysqld",
     ],
     "--oom-count": ["meminfo -O --oom-count 3"],
-    "--oom-tree": [
-        "meminfo -O --oom-tree",
-        "meminfo -O --oom-tree --oom-ascii",
+    "--tree": [
+        "meminfo -u --tree",
+        "meminfo -u --tree -a",
+        "meminfo -O --tree",
+        "meminfo -O --tree --ascii",
     ],
-    "--oom-ascii": ["meminfo -O --oom-tree --oom-ascii"],
+    "--ascii": ["meminfo -u --tree --ascii", "meminfo -O --tree --ascii"],
     "--oom-top": ["meminfo -O --oom-top 20"],
     "-P": ["meminfo -P", "meminfo -P --shared", "meminfo -P -a"],
     "-p": ["meminfo -p 0x2f1c0 -t u64"],
@@ -6379,12 +6402,13 @@ def meminfo():
     op.add_option("--oom-count", dest="oom_count", default=0,
                   action="store", type="int",
                   help="Limit number of OOM events to display")
-    op.add_option("--oom-tree", dest="oom_tree", default=0,
+    # --oom-tree and --oom-ascii are the old names, kept for scripts
+    op.add_option("--tree", "--oom-tree", dest="tree", default=0,
                   action="store_true",
-                  help="show the OOM task dump as a process tree")
-    op.add_option("--oom-ascii", dest="ascii_mode", default=0,
+                  help="Show processes as a tree (with -u or -O)")
+    op.add_option("--ascii", "--oom-ascii", dest="ascii_mode", default=0,
                   action="store_true",
-                  help="use ASCII instead of Unicode glyphs in --oom-tree")
+                  help="Use ASCII instead of Unicode glyphs in --tree")
     op.add_option("--oom-top", dest="oom_top", default=10,
                   action="store", type="int",
                   help="Show top N memory consumers (default: 10)")
