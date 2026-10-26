@@ -50,7 +50,7 @@ Commands are registered by 'regext.py' which reads 'config.json' in this directo
 
 ## Provided commands ##
 
-Every command accepts '-h' to show the available options, except 'git', which takes 'git log --help', 'git show --help' or 'git find --help'. [docs/COMMANDS.md](../docs/COMMANDS.md) lists every option of every command; the sections below walk through some of them with real output.
+Every command accepts '-h' to show the available options and '-hh' to show each option with example command lines. 'git -h' lists its subcommands, and 'git log --help', 'git show --help' and 'git find --help' (or 'git <subcommand> -hh') give each one's options. [docs/COMMANDS.md](../docs/COMMANDS.md) lists every option of every command; the sections below walk through some of them with real output.
 
 | Command | Description |
 |---|---|

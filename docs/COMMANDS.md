@@ -1,6 +1,6 @@
 # Pycrashext Command Reference
 
-Pycrashext is a PyKdump-based extension suite for the Linux crash utility. It provides 37 commands for kernel crash dump analysis covering memory, CPU, storage, networking, filesystem, processes, locking, tracing, and more.
+Pycrashext is a PyKdump-based extension suite for the Linux crash utility. It provides 38 commands for kernel crash dump analysis covering memory, CPU, storage, networking, filesystem, processes, locking, tracing, and more.
 
 All commands are invoked inside the crash utility as `epython <command>.py [options]` or directly by name if registered via `install.sh`.
 
@@ -421,11 +421,11 @@ pstree -A                # ASCII mode for terminals without Unicode
 
 ### hangcheck
 
+Detect and analyze processes in D-state (uninterruptible sleep) and zombie state.
+
 `hangcheck -g` groups the D-state tasks by where they wait (the first two
 frames below the scheduler, e.g. `io_schedule < blk_mq_get_tag`) from one
 `foreach UN bt`, with one example backtrace per top group as printed.
-
-Detect and analyze processes in D-state (uninterruptible sleep) and zombie state.
 
 **Usage:** `hangcheck [options]`
 
@@ -437,6 +437,7 @@ Detect and analyze processes in D-state (uninterruptible sleep) and zombie state
 | `-f` | `--files` | | Show open files for each task |
 | `-b` | `--backtrace` | | Show kernel backtrace for each D-state task |
 | `-t` | `--threshold` | `N` | Only show tasks in D state longer than N seconds |
+| `-g` | `--group` | | Group D-state tasks by where they wait (the frames below the scheduler) |
 | `-z` | `--zombie` | | Show zombie (ZO) processes |
 
 #### Examples
@@ -448,6 +449,7 @@ hangcheck -b             # Show with backtraces
 hangcheck -d -f          # Show details and open files
 hangcheck -t 60          # Only D-state tasks stuck > 60 seconds
 hangcheck -n 5           # Show top 5 longest D-state
+hangcheck -g             # Group D-state tasks by where they wait
 hangcheck -z             # Show zombie processes
 ```
 
@@ -1501,8 +1503,11 @@ Execute `git log` and `git show` against remote kernel source repositories, and 
 | Option | Argument | Description |
 |--------|----------|-------------|
 | `--repos` | `<repos>` | Comma-separated list of repos (e.g., rhel9,linux,upstream) |
+| `--all` | | `log`/`show` only: include commits older than the running kernel |
 | `--timeout` | `N` | Request timeout in seconds (default: 3600) |
 | `--verbose` | | Show verbose output |
+
+Any other option is passed to git as is; the common ones are `-S<string>`, `--grep=<pattern>`, `--max-count=<n>`, `--oneline` and `--stat` for `log`, and `--stat`, `--name-only` and `--pretty=<format>` for `show`.
 
 #### `git find` options
 
@@ -1518,7 +1523,7 @@ Execute `git log` and `git show` against remote kernel source repositories, and 
 | `--no-message` | | Show only the subject, not the message body |
 | `--no-backport` | | Skip the backport cross-check |
 | `--no-tags` | | Skip the release-tag lookup (much faster) |
-| `--patch`, `--stat` | | Show the diff / diffstat of each match |
+| `--patch`, `-p` / `--stat` | | Show the diff / diffstat of each match |
 | `--update` | | Fetch the latest branch and tags into every repo first |
 
 The query type is detected automatically: 7-40 hex characters are a commit ID, anything else is subject text, which does not need quoting.
@@ -1547,8 +1552,14 @@ transport errors, MCE/EDAC, hypervisor. For each: count, first and last
 as `log` prints them. A panic made by a detection sysctl
 (`softlockup_panic`, `hung_task_panic`, `panic_on_oom`) gets a reroute note.
 
-**Usage:** `logscan [-a]` (`-a` prints every matching line). The catalogue is
-`source/logsig.py`, which also runs on a saved log: `python3 source/logsig.py <file>`.
+**Usage:** `logscan [-a]`
+
+| Option | Long Form | Description |
+|---|---|---|
+| `-a` | `--all` | Print every matching line, not only the first and last |
+
+The catalogue is `source/logsig.py`, which also runs on a saved log:
+`python3 source/logsig.py <file>`.
 
 ---
 
@@ -1587,12 +1598,12 @@ chain and at the end.
     `member` inside `struct type`; the member may be nested
     (`@se.group_node`), so continue the path after it with `->`
 
-| Option | Description |
-|---|---|
-| `-a` | Also dump every structure on the way |
-| `-n` | Only the chain, no dump of the last member |
-| `-o` | Member offsets in the dumps (`struct -o`) |
-| `-x` / `-d` | Hexadecimal / decimal dumps |
+| Option | Long Form | Description |
+|---|---|---|
+| `-a` | `--all` | Also dump every structure on the way |
+| `-n` | `--no-dump` | Only the chain, no dump of the last member |
+| `-o` | `--offsets` | Member offsets in the dumps (`struct -o`) |
+| `-x` / `-d` | `--hex` / `--dec` | Hexadecimal / decimal dumps |
 
 #### Examples
 
@@ -1611,8 +1622,19 @@ pdata -a file 0xffff95a04b6e1200 f_inode.i_sb.s_type
 Decodes `preempt_count`: preempt-disable depth, serving a softirq, bottom
 halves disabled, hardirq nesting, NMI, and whether that is atomic context.
 
-**Usage:** `preempt <value>...` or `preempt -l` (every preempt_count the kernel
-log prints, each after its line). Also `python3 source/preemptcount.py <value>...`.
+**Usage:** `preempt [-l] [<value>...]`. Also `python3 source/preemptcount.py <value>...`.
+
+| Option | Long Form | Description |
+|---|---|---|
+| `-l` | `--log` | Decode every preempt_count the kernel log prints, each after its line |
+
+#### Examples
+
+```
+preempt 0x10200          # Decode one value
+preempt -l               # Every preempt_count in the kernel log
+preempt -l 0x10200       # Both
+```
 
 ---
 
@@ -1660,8 +1682,13 @@ Every section fails on its own, so it is safe in a crash startup script. The
 last line, `SYSINFO platform=... kind=... rhel=... arch=... cpus=... mem=...
 taint=... thirdparty=...`, is for scripts.
 
-**Usage:** `sysinfo [-v]` (`-v` adds every DMI field, the whole boot command
-line, every interface and tainted module). The rules are `source/sysenv.py`,
+**Usage:** `sysinfo [-v]`
+
+| Option | Long Form | Description |
+|---|---|---|
+| `-v` | `--verbose` | Every DMI field, the whole boot command line, every interface and tainted module |
+
+The rules are `source/sysenv.py`,
 checked by `python3 source/sysenv_test.py`.
 
 ---
