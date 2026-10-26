@@ -5162,6 +5162,10 @@ def get_pid_ppid_map():
 
     The name map is needed for ancestors that are not themselves in the dump
     but are required to connect the tasks that are.
+
+    The parent is real_parent's tgid, as pstree shows it: a process started
+    by a thread has that thread as real_parent, and a thread is not on the
+    task list, so its own pid would show up as an unknown root.
     """
     pid_ppid = {}
     pid_name = {}
@@ -5179,7 +5183,7 @@ def get_pid_ppid_map():
         if parent is None:
             parent = getattr(task, "parent", None)
         try:
-            pid_ppid[pid] = int(parent.pid) if parent is not None else 0
+            pid_ppid[pid] = int(parent.tgid) if parent is not None else 0
         except:
             pid_ppid[pid] = 0
         try:
