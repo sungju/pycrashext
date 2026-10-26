@@ -137,8 +137,8 @@ Memory information and analysis. Provides comprehensive memory subsystem inspect
 | `-P` | `--pss` | Show memory usage by tasks as PSS, read from each process's page tables (slower than `-u`) |
 | `-n` | `--nogroup` | Show data in individual tasks (not grouped) |
 | `--shared` | | Split memory into private and shared, each shared page counted once (with `-u`, `-P` or `-O`) |
-| `--tree` | | Show processes as a parent/child tree with each one's RSS and its subtree's total (with `-u` or `-O`; `--oom-tree` still works) |
-| `--ascii` | | Use ASCII instead of Unicode glyphs in `--tree` (`--oom-ascii` still works) |
+| `--tree` | | Show processes as a parent/child tree with each one's RSS and its subtree's total (with `-u` or `-O`) |
+| `--ascii` | | Use ASCII instead of Unicode glyphs in `--tree` |
 
 `--tree` shows the 10 biggest processes (`-O`: `--oom-top`) with the
 ancestors that connect them, or every process with `-a`. An ancestor not

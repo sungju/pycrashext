@@ -6406,11 +6406,10 @@ def meminfo():
     op.add_option("--oom-count", dest="oom_count", default=0,
                   action="store", type="int",
                   help="Limit number of OOM events to display")
-    # --oom-tree and --oom-ascii are the old names, kept for scripts
-    op.add_option("--tree", "--oom-tree", dest="tree", default=0,
+    op.add_option("--tree", dest="tree", default=0,
                   action="store_true",
                   help="Show processes as a tree (with -u or -O)")
-    op.add_option("--ascii", "--oom-ascii", dest="ascii_mode", default=0,
+    op.add_option("--ascii", dest="ascii_mode", default=0,
                   action="store_true",
                   help="Use ASCII instead of Unicode glyphs in --tree")
     op.add_option("--oom-top", dest="oom_top", default=10,

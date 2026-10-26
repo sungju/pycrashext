@@ -1376,8 +1376,8 @@ Options:
                         regex)
   --oom-count=OOM_COUNT
                         Limit number of OOM events to display
-  --tree, --oom-tree    Show processes as a tree (with -u or -O)
-  --ascii, --oom-ascii  Use ASCII instead of Unicode glyphs in --tree
+  --tree                Show processes as a tree (with -u or -O)
+  --ascii               Use ASCII instead of Unicode glyphs in --tree
   --oom-top=OOM_TOP     Show top N memory consumers (default: 10)
   -P, --pss             Show memory usages(pss) by tasks
   -p PERCPU, --percpu=PERCPU
