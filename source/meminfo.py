@@ -1211,6 +1211,10 @@ _PTE_PSE = 0x080          # huge page at PMD/PUD level
 _PTE_PROTNONE = 0x100     # present for the kernel, not for the CPU (NUMA hinting)
 _PTE_SPECIAL = 0x200      # zero page, VM_PFNMAP: not counted in RSS
 
+_EVEN_BYTES = bytes(range(0, 256, 2))
+# Pages this close are read with one readmem of their struct pages
+CLUSTER_GAP = 64
+
 
 class PageScanner:
     """Walks a task's page tables and reads the mapcount of every page."""
@@ -1247,6 +1251,7 @@ class PageScanner:
         self.zero_pfn = self._read_symbol("zero_pfn", -1)
         self.huge_zero_pfn = self._read_symbol("huge_zero_pfn", -1)
         self.max_pfn = self._read_symbol("max_pfn", 0)
+        self.invert_protnone = False
 
         if self.walk_tables:
             if self._read_symbol("__pgtable_l5_enabled", 0):
@@ -1256,7 +1261,30 @@ class PageScanner:
             physical_mask = self._read_symbol("physical_mask", (1 << 52) - 1)
             sme_me_mask = self._read_symbol("sme_me_mask", 0)
             self.pfn_mask = physical_mask & ~sme_me_mask & ~0xfff
+            # The L1TF fix (RHEL 7.6 and later) stores the PFN of a
+            # PROT_NONE entry inverted
+            self.invert_protnone = symbol_exists("l1tf_mitigation")
         self.table_cache = {}
+
+        # x86_64 keeps struct pages in one virtual array (vmemmap), so the
+        # mapcounts of physically contiguous pages are read in one go
+        self.vmemmap = 0
+        if self.walk_tables and self.page_struct_size % 8 == 0 and \
+           self.mapcount_off % 4 == 0:
+            vmemmap = self._read_symbol("vmemmap_base", 0)
+            try:
+                sample = max(1, self.max_pfn // 2)
+                if vmemmap and crash.phys_to_page(sample << 12) == \
+                   vmemmap + sample * self.page_struct_size:
+                    self.vmemmap = vmemmap
+            except:
+                pass
+        self.mapcount_index = self.mapcount_off // 4
+        self.int_stride = self.page_struct_size // 4
+        self.head_index = -1
+        if self.compound_head_off >= 0 and self.compound_head_off % 8 == 0 \
+           and self.huge_mapcount_off != self.mapcount_off:
+            self.head_index = self.compound_head_off // 8
 
     @staticmethod
     def _read_symbol(name, default):
@@ -1291,34 +1319,36 @@ class PageScanner:
             return 1
         return count if count > 0 else 1
 
-    def _read_table(self, addr, physical):
-        table = self.table_cache.get(addr)
+    def _read_table(self, addr, physical, cache):
+        table = self.table_cache.get(addr) if cache else None
         if table is None:
             if physical:
                 data = crash.readmem(addr, 4096, crash.PHYSADDR)
             else:
                 data = readmem(addr, 4096)
             table = struct.unpack("<512Q", data)
-            self.table_cache[addr] = table
+            if cache:
+                self.table_cache[addr] = table
         return table
 
     def _entry_pfn(self, entry):
-        pfn = (entry & self.pfn_mask) >> 12
-        if not entry & _PTE_PRESENT:
-            # L1TF: kernels store a PROT_NONE entry's PFN inverted
-            inverted = (~entry & self.pfn_mask) >> 12
-            if self.max_pfn == 0 or inverted < self.max_pfn:
-                pfn = inverted
-        return pfn
+        if not entry & _PTE_PRESENT and self.invert_protnone:
+            entry = ~entry
+        return (entry & self.pfn_mask) >> 12
 
-    def _walk(self, table_addr, physical, level, start, end, out):
+    def _walk(self, table_addr, physical, level, start, end, counts):
         shift = self.level_shifts[level]
         last = (level == len(self.level_shifts) - 1)
-        table = self._read_table(table_addr, physical)
+        # A PTE table is read once; keeping them all would take GBs for a
+        # process with hundreds of GB mapped
+        table = self._read_table(table_addr, physical, not last)
         span = 1 << shift
         first_idx = (start >> shift) & 511
         last_idx = ((end - 1) >> shift) & 511
         base = start & ~((span << 9) - 1)
+        if last:
+            self._count_ptes(table, first_idx, last_idx, counts)
+            return
         for idx in range(first_idx, last_idx + 1):
             entry = table[idx]
             if entry == 0:
@@ -1326,32 +1356,96 @@ class PageScanner:
             vaddr = base + idx * span
             sub_start = max(start, vaddr)
             sub_end = min(end, vaddr + span)
-            if last:
-                if not entry & (_PTE_PRESENT | _PTE_PROTNONE):
-                    continue    # swap entry
-                if entry & _PTE_SPECIAL:
-                    continue
-                pfn = self._entry_pfn(entry)
-                if pfn != self.zero_pfn:
-                    out.append((pfn, 1, False))
-            elif entry & _PTE_PSE:
+            if entry & _PTE_PSE:
                 if not entry & (_PTE_PRESENT | _PTE_PROTNONE):
                     continue
                 pfn = self._entry_pfn(entry)
                 if pfn != self.huge_zero_pfn:
-                    pages = (sub_end - sub_start) >> 12
                     # the head page holds the mapcount
-                    out.append((pfn, pages, True))
+                    counts.add(pfn, (sub_end - sub_start) >> 12,
+                               self.page_mapcount(pfn, True))
             elif entry & _PTE_PRESENT:
                 self._walk(entry & self.pfn_mask, True, level + 1,
-                           sub_start, sub_end, out)
+                           sub_start, sub_end, counts)
 
-    def vma_pages(self, task_addr, pgd, vma_addr, start, end):
-        """[(pfn, pages, huge)] for the pages mapped in [start, end)."""
-        out = []
+    def _count_ptes(self, table, first_idx, last_idx, counts):
+        """Counts the pages one PTE table maps."""
+        entries = table[first_idx:last_idx + 1]
+        mask = self.pfn_mask
+        # Present or PROT_NONE (NUMA balancing leaves many), not special:
+        # swap entries, the zero page and VM_PFNMAP pages are not in RSS.
+        # One list comprehension, in table order so that physically
+        # contiguous pages stay one run, keeps this fast for processes
+        # with hundreds of GB.
+        if self.invert_protnone:
+            pfns = [((entry if entry & _PTE_PRESENT else ~entry) & mask) >> 12
+                    for entry in entries
+                    if entry & (_PTE_PRESENT | _PTE_SPECIAL) == _PTE_PRESENT or
+                    entry & (_PTE_PRESENT | _PTE_PROTNONE | _PTE_SPECIAL) ==
+                    _PTE_PROTNONE]
+        else:
+            pfns = [(entry & mask) >> 12 for entry in entries
+                    if entry & (_PTE_PRESENT | _PTE_SPECIAL) == _PTE_PRESENT or
+                    entry & (_PTE_PRESENT | _PTE_PROTNONE | _PTE_SPECIAL) ==
+                    _PTE_PROTNONE]
+        if self.zero_pfn in pfns:
+            pfns = [pfn for pfn in pfns if pfn != self.zero_pfn]
+        if not pfns:
+            return
+        first = pfns[0]
+        if pfns[-1] - first == len(pfns) - 1 and \
+           pfns == list(range(first, first + len(pfns))):
+            self._count_cluster(pfns, counts)
+            return
+        # Fragmented memory: one PTE table often maps a few physical
+        # streams.  Sorted, near pages share one read of their struct pages.
+        pfns.sort()
+        cluster_start = 0
+        for i in range(1, len(pfns)):
+            if pfns[i] - pfns[i - 1] > CLUSTER_GAP:
+                self._count_cluster(pfns[cluster_start:i], counts)
+                cluster_start = i
+        self._count_cluster(pfns[cluster_start:], counts)
+
+    def _count_cluster(self, pfns, counts):
+        """Pages each mapped by a PTE; pfns are sorted and close together."""
+        if self.vmemmap:
+            size = self.page_struct_size
+            first = pfns[0]
+            window = pfns[-1] - first + 1
+            try:
+                data = memoryview(readmem(self.vmemmap + first * size,
+                                          window * size))
+                mapcounts = data.cast("i")[self.mapcount_index::
+                                           self.int_stride].tolist()
+                tails = False
+                if self.head_index >= 0:
+                    # bit 0 of compound_head marks a tail page of a THP
+                    heads = data.cast("B")[self.compound_head_off::size]
+                    heads = heads.tobytes()
+                    tails = bool(heads.translate(None, _EVEN_BYTES))
+                    if tails and window != len(pfns):
+                        tails = any(heads[pfn - first] & 1 for pfn in pfns)
+                if not tails:
+                    if window != len(pfns):
+                        mapcounts = [mapcounts[pfn - first] for pfn in pfns]
+                    if not any(mapcounts):
+                        counts.add_private(len(pfns))   # each mapped once
+                        return
+                    for pfn, value in zip(pfns, mapcounts):
+                        counts.add(pfn, 1, max(1, value + 1))
+                    return
+            except Exception:
+                pass
+        # pieces of a THP, or no vmemmap: one page at a time
+        for pfn in pfns:
+            counts.add(pfn, 1, self.page_mapcount(pfn, False))
+
+    def count_vma(self, task_addr, pgd, vma_addr, start, end, counts):
+        """Adds the pages mapped in [start, end) to counts."""
         if self.walk_tables:
-            self._walk(pgd, False, 0, start, end, out)
-            return out
+            self._walk(pgd, False, 0, start, end, counts)
+            return
         # Other architectures: let crash translate each page
         result = exec_crash_command("vm -P %s %s" % (vma_addr, task_addr))
         for line in result.splitlines():
@@ -1363,23 +1457,22 @@ class PageScanner:
                 physical = int(words[1], 16)
             except ValueError:
                 continue
-            out.append((physical >> self.page_shift, 1, False))
-        return out
+            pfn = physical >> self.page_shift
+            counts.add(pfn, 1, self.page_mapcount(pfn, False))
 
-    def scan_task(self, task_addr, all_vmas, shared_keys=None):
+    def scan_task(self, task_addr, all_vmas, shared_keys=None, progress=None):
         """
         Counts the pages a task maps.  all_vmas=False looks only at the
         mappings other processes can share: VM_SHARED and file-backed ones.
         A page whose mapcount is above one counts as shared; with
         shared_keys (a dict), each shared page is added to it once, so the
-        caller can count shared memory once over all tasks.
+        caller can count shared memory once over all tasks.  progress(pages)
+        is called now and then with the pages counted so far.
 
         Returns the pages scanned, shared and the PSS, all in pages.
         """
         self.table_cache = {}
-        scanned = 0
-        shared = 0
-        pss = 0.0
+        counts = PageCounts(shared_keys, progress)
         task = readSU("struct task_struct", int(task_addr, 16))
         pgd = int(task.mm.pgd)
 
@@ -1405,18 +1498,48 @@ class PageScanner:
             if not all_vmas and not (vm_flags & VM_SHARED) and \
                (filename == "" or filename.startswith("[")):
                 continue
+            self.count_vma(task_addr, pgd, vma_addr, start, end, counts)
 
-            for pfn, pages, huge in self.vma_pages(task_addr, pgd, vma_addr,
-                                                   start, end):
-                count = self.page_mapcount(pfn, huge)
-                scanned += pages
-                pss += float(pages) / count
-                if count > 1:
-                    shared += pages
-                    if shared_keys is not None:
-                        shared_keys[pfn] = pages
+        self.table_cache = {}
+        return counts.scanned, counts.shared, counts.pss
 
-        return scanned, shared, pss
+
+class PageCounts:
+    """Running totals of a page scan."""
+
+    PROGRESS_PAGES = 1 << 18    # report every 1 GiB of 4K pages
+
+    def __init__(self, shared_keys=None, progress=None):
+        self.scanned = 0
+        self.shared = 0
+        self.private = 0
+        self.pss = 0.0
+        self.shared_keys = shared_keys
+        self.progress = progress
+        self.next_report = self.PROGRESS_PAGES
+
+    def add_private(self, pages):
+        self.scanned += pages
+        self.private += pages
+        self.pss += pages
+        if self.progress is not None and self.scanned >= self.next_report:
+            self._report()
+
+    def add(self, pfn, pages, count):
+        if count <= 1:
+            self.add_private(pages)
+            return
+        self.scanned += pages
+        self.shared += pages
+        self.pss += float(pages) / count
+        if self.shared_keys is not None:
+            self.shared_keys[pfn] = pages
+        if self.progress is not None and self.scanned >= self.next_report:
+            self._report()
+
+    def _report(self):
+        self.next_report = self.scanned + self.PROGRESS_PAGES
+        self.progress(self.scanned)
 
 
 def collect_shared_mappings_global(task_list, all_vmas=False,
@@ -1489,14 +1612,19 @@ def collect_shared_mappings_global(task_list, all_vmas=False,
             sys.stdout.write("\r" + _progress_msg)
             sys.stdout.flush()
 
+            def show_task_progress(pages, _msg=_progress_msg, _rss_kb=rss_kb):
+                sys.stdout.write("\r%s %s/%s" % (
+                    _msg, get_size_str(pages * scanner.page_size),
+                    get_size_str(_rss_kb * 1024)))
+                sys.stdout.flush()
+
             if cache is not None and task_addr in cache:
                 scanned, shared, pss, task_keys = cache[task_addr]
             else:
                 task_keys = {} if shared_keys is not None else None
                 try:
-                    scanned, shared, pss = scanner.scan_task(task_addr,
-                                                             all_vmas,
-                                                             task_keys)
+                    scanned, shared, pss = scanner.scan_task(
+                        task_addr, all_vmas, task_keys, show_task_progress)
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
@@ -2579,22 +2707,14 @@ def show_percpu(options):
 
 def show_vm_details(scanner, task_addr, pgd, words):
     """[private, shared] pages of one mapping, by each page's mapcount."""
-    private_mem_pages = 0
-    shared_mem_pages = 0
-
     start = int(words[1], 16)
     end = int(words[2], 16)
     # device memory has no struct page to read a mapcount from
     if int(words[3], 16) & (VM_IO | VM_PFNMAP):
         return [0, 0]
-    for pfn, pages, huge in scanner.vma_pages(task_addr, pgd, words[0],
-                                              start, end):
-        if scanner.page_mapcount(pfn, huge) > 1:
-            shared_mem_pages = shared_mem_pages + pages
-        else:
-            private_mem_pages = private_mem_pages + pages
-
-    return [private_mem_pages, shared_mem_pages]
+    counts = PageCounts()
+    scanner.count_vma(task_addr, pgd, words[0], start, end, counts)
+    return [counts.private, counts.shared]
 
 
 def show_all_vm(options):

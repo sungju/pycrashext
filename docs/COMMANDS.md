@@ -155,9 +155,11 @@ while the RSS sum counts a shared page once per process.
   copy-on-write pages shared after `fork()`.
 
 hugetlbfs and `VM_IO`/`VM_PFNMAP` mappings are skipped (they are not in RSS).
-x86_64 walks the page tables directly; other architectures use `vm -P` for
-each mapping, which is much slower. Ctrl-C stops the scan and shows what was
-read so far.
+x86_64 walks the page tables directly and reads the `struct page`s of
+physically close pages together (a vmcore with 746 GiB in user processes
+took under 5 minutes); other architectures use `vm -P` for each mapping, which is much
+slower. A big process shows its progress in GiB, and Ctrl-C stops the scan
+and shows what was read so far.
 
 #### OOM Analysis
 
