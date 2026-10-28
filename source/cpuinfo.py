@@ -887,7 +887,15 @@ def show_cpuidle_state_table(options):
 
         for dev_addr in cpuidle_devices:
             try:
-                dev = readSU("struct cpuidle_device", dev_addr)
+                # cpuidle_devices is DEFINE_PER_CPU(struct cpuidle_device *),
+                # so the per-cpu slot holds a pointer rather than the struct.
+                # Dereference it first, as the cpufreq_cpu_data reads above
+                # already do; readSU() on the slot address returned a struct
+                # built from the pointer itself.
+                dev_ptr = readULong(dev_addr)
+                if not dev_ptr:
+                    continue
+                dev = readSU("struct cpuidle_device", dev_ptr)
                 states_usage = []
                 for i, su in enumerate(dev.states_usage):
                     if i >= num_states:

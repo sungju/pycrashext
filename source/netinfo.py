@@ -111,7 +111,8 @@ def get_proto_list():
 
 
 def show_network_protocols(options):
-    int_size =getSizeOf("int")
+    int_size = getSizeOf("int")
+    long_size = getSizeOf("long")
     for idx, proto in get_proto_list().items():
         print("0x%x : %s (inuse_idx = %d)" %
               (proto, proto.name, proto.inuse_idx))
@@ -119,9 +120,18 @@ def show_network_protocols(options):
                            "wmem" : proto.sysctl_wmem,
                            "rmem" : proto.sysctl_rmem}.items():
             if addr > 0:
-                min_val = readUInt(addr)
-                default_val = readUInt(addr + int_size)
-                max_val = readUInt(addr + int_size * 2)
+                # struct proto declares 'long *sysctl_mem' but
+                # 'int *sysctl_wmem' and 'int *sysctl_rmem'. Reading mem
+                # with an int stride returned the two halves of mem[0]
+                # followed by the low half of mem[1].
+                if name == "mem":
+                    read_val, stride = readULong, long_size
+                else:
+                    read_val, stride = readUInt, int_size
+
+                min_val = read_val(addr)
+                default_val = read_val(addr + stride)
+                max_val = read_val(addr + stride * 2)
             else:
                 min_val = default_val = max_val = 0
 
