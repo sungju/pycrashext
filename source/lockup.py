@@ -337,19 +337,23 @@ include/asm-generic/qspinlock_types.h
     qspinlock = readSU("struct qspinlock", int(options.qspinlock, 16))
     get_nr_cpus()
 
-    lock_val = qspinlock.val.counter
+    # val is an atomic_t (signed int); mask so bit 31 does not arrive negative.
+    lock_val = qspinlock.val.counter & 0xffffffff
     print("spinlock status".center(26))
     print("=" * 26)
     print("%12s : 0x%x" % ("value", lock_val))
     print()
     print("%12s : %d" % ("locked", (lock_val & 0xff)))
     print("%12s : %d" % ("pending", (1 if (lock_val & 0x100) == 0x100 else 0)))
-    if NR_CPUS < 16000:
+    # Layout must match lockdecode.qspinlock_layout(): the tail cpu field
+    # is 14 bits at offset 18 below CONFIG_NR_CPUS = 1 << 14, and 21 bits
+    # at offset 11 above it.
+    if NR_CPUS < (1 << 14):
         print("%12s : %d" % ("tail index", ((lock_val >> 16) & 0x3)))
-        print("%12s : %d" % ("tail cpu", (((lock_val >> 18) & 0x7ff) - 1)))
+        print("%12s : %d" % ("tail cpu", (((lock_val >> 18) & 0x3fff) - 1)))
     else:
         print("%12s : %d" % ("tail index", ((lock_val >> 9) & 0x3)))
-        print("%12s : %d" % ("tail cpu", (((lock_val >> 11) & 0x3fffff) - 1)))
+        print("%12s : %d" % ("tail cpu", (((lock_val >> 11) & 0x1fffff) - 1)))
 
 
 

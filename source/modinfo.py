@@ -947,17 +947,17 @@ STT_TLS     = 6
 
 def get_sym_type_str(sym_type):
     sym_type = sym_type & 0xf
-    if sym_type == (1 << STT_OBJECT):
+    if sym_type == STT_OBJECT:
         return "DATA"
-    elif sym_type == (1 << STT_FUNC):
+    elif sym_type == STT_FUNC:
         return "FUNCTION"
-    elif sym_type == (1 << STT_SECTION):
+    elif sym_type == STT_SECTION:
         return "SECTION"
-    elif sym_type == (1 << STT_FILE):
+    elif sym_type == STT_FILE:
         return "FILE"
-    elif sym_type == (1 << STT_COMMON):
+    elif sym_type == STT_COMMON:
         return "COMMON"
-    elif sym_type == (1 << STT_TLS):
+    elif sym_type == STT_TLS:
         return "TLS"
 
     return "NOTYPE"
@@ -1016,12 +1016,12 @@ def show_manual_module_detail(options, module):
 
 
 def show_symbol_detail(options, sym_type, sym_data):
-    if sym_type == (1 << STT_FUNC) and options.reverse_disasm:
+    if sym_type == STT_FUNC and options.reverse_disasm:
         print("\t", end="")
         print(sym_data)
         show_disasm(sym_data.st_value, sym_data.st_size)
         print()
-    elif sym_type == (1 << STT_OBJECT) and options.show_contents:
+    elif sym_type == STT_OBJECT and options.show_contents:
         print("\t", end="")
         print(sym_data)
         show_variable(sym_data.st_value, sym_data.st_size)

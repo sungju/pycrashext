@@ -2165,7 +2165,7 @@ def show_slabtop(options):
 
 def show_full_slab(options, kmem_cache, addr, slab_addr, offset):
     page = readSU("struct page", slab_addr)
-    total_slab = page.objects & 0xff # Make sure it only uses a byte
+    total_slab = page.objects & 0x7fff # SLUB 'struct page' has objects:15
     alloc_item = True
     if kmem_cache.max.x != total_slab:
         print("kmem_cache.max.x = %d" % (kmem_cache.max.x))
@@ -3187,7 +3187,7 @@ def print_slab_layout(kmem_cache, offset):
 
 def show_alloc_track(options, kmem_cache, addr, slab_addr, offset):
     page = readSU("struct page", slab_addr)
-    total_slab = page.objects & 0xff # Make sure it only uses a byte
+    total_slab = page.objects & 0x7fff # SLUB 'struct page' has objects:15
     alloc_item = True
 
     if options.debug:
