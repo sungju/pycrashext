@@ -1270,16 +1270,19 @@ def show_open_files(options):
             total_files = total_files + file_cnt
             open_files_dict[all_files[0].split()[2]] = file_cnt
 
+    # Always descending: 'reverse=not options.all' made -a list the fewest
+    # open files first, which combined with the len-1 cap below hid the one
+    # process the command exists to find.
     sorted_open_files = sorted(open_files_dict.items(),
-                               key=operator.itemgetter(1), reverse=not options.all)
+                               key=operator.itemgetter(1), reverse=True)
     print("=" * 70)
     print("%14s %-s" % ("[ Open files ]", "[ task_struct  ] (comm)"))
     print("=" * 70)
     min_number = 10
     if (options.all):
-        min_number = len(sorted_open_files) - 1
+        min_number = len(sorted_open_files)
 
-    print_count = min(len(sorted_open_files) - 1, min_number)
+    print_count = min(len(sorted_open_files), min_number)
 
     for i in range(0, print_count):
         task = readSU("struct task_struct", int(sorted_open_files[i][0], 16))
@@ -1288,7 +1291,7 @@ def show_open_files(options):
                  sorted_open_files[i][0],
                  task.comm))
 
-    if print_count < len(sorted_open_files) - 1:
+    if print_count < len(sorted_open_files):
         print("\t<...>")
     print("=" * 70)
     print("\tTotal open files = %s" % (f"{total_files:,}"))

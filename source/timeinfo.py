@@ -26,7 +26,7 @@ def get_vmcore_date_time():
     if xtime_sec == None:
         if member_offset('struct timekeeper', 'xtime') > -1:
             xtime_sec = timekeeper.xtime.tv_sec
-        if member_offset('struct timekeeper', 'xtime_sec') > -1:
+        elif member_offset('struct timekeeper', 'xtime_sec') > -1:
             xtime_sec = timekeeper.xtime_sec
         else:
             try:
@@ -36,10 +36,11 @@ def get_vmcore_date_time():
 
     # only works when the 'crash' started with 'TZ=GMT'
     sys_tz = readSymbol("sys_tz")
-    if sys_tz.tz_minuteswest != 0:
-        xtime_sec = xtime_sec - sys_tz.tz_minuteswest * 60
+    # Correct into a local: xtime_sec is a cached global, so applying the
+    # offset to it made every repeated call drift by another tz_minuteswest.
+    adjusted = xtime_sec - sys_tz.tz_minuteswest * 60
 
-    return datetime.datetime.fromtimestamp(xtime_sec).strftime('%c')
+    return datetime.datetime.fromtimestamp(adjusted).strftime('%c')
 
 
 def show_vmcore_date_time():

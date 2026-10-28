@@ -379,9 +379,13 @@ def show_grace_period(options):
 
 
 def try_get_hz():
+    # HZ is not a symbol. tick_nsec is nanoseconds per tick, not ticks per
+    # second: returning it divided every jiffies delta by 1,000,000 instead
+    # of 1,000, so a 60-second stall was reported as 0.06 seconds.
     try:
-        return readSymbol("tick_nsec")
-        # Actually, HZ is not directly a symbol. Let's compute from jiffies info.
+        hz = sys_info.HZ
+        if hz > 0:
+            return hz
     except:
         pass
     try:
