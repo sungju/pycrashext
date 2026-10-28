@@ -64,7 +64,8 @@ def run_rule(basic_data):
     try:
         pcpu_nr_populated = rh.get_symbol("pcpu_nr_populated")
         pcpu_nr_units = rh.get_symbol("pcpu_nr_units")
-        total_used_kb = pcpu_nr_populated * pcpu_nr_units * 4
+        total_used_kb = pcpu_nr_populated * pcpu_nr_units * \
+                        (rh.get_page_size() // 1024)
         total_physical_mem_kb = get_total_physical_mem_kb()
         if total_physical_mem_kb <= 0:
             return None

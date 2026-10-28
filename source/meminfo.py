@@ -29,7 +29,6 @@ from crashhelper import *
 debug_mode = False
 
 page_size = 4096
-page_shift = 12
 
 # Bar chart width constants
 ITEM_BAR_WIDTH = 20   # Width for individual process/slab bars
@@ -759,9 +758,10 @@ def get_meminfo():
         meminfo['MemAvailable'] = si_mem_available()
 
     vmalloctotal, vmallocused, vmallocchunk = get_vmalloc_info()
-    meminfo['VmallocTotal'] = vmalloctotal
-    meminfo['VmallocUsed'] = vmallocused
-    meminfo['VmallocChunk'] = vmallocchunk
+    # get_vmalloc_info() works in bytes; every consumer labels these " kB".
+    meminfo['VmallocTotal'] = vmalloctotal // 1024
+    meminfo['VmallocUsed'] = vmallocused // 1024
+    meminfo['VmallocChunk'] = vmallocchunk // 1024
 
     if symbol_exists("pcpu_nr_populated") and symbol_exists("pcpu_nr_units"):
         pcpu_nr_populated = readSymbol("pcpu_nr_populated")
@@ -3693,7 +3693,7 @@ def get_shmem_swap_usage(vma, task):
         task_list.append(task)
         shm_swap_task_dict[info] = task_list
 
-        return swapped << page_shift
+        return swapped << get_page_shift()
 
     return get_shmem_partial_swap_usage(mapping,
                                         linear_page_index(vma, vma.vm_start),
@@ -3822,7 +3822,7 @@ def show_swap_usage(options):
     for shminfo in shm_swap_task_dict:
         task_list = shm_swap_task_dict[shminfo]
         shared_count = len(task_list)
-        swapped_size = shminfo.swapped << page_shift
+        swapped_size = shminfo.swapped << get_page_shift()
         bytes_per_task = swapped_size / shared_count
         remove_bytes_from_task = swapped_size - bytes_per_task
 
