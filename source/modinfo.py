@@ -3280,14 +3280,19 @@ def modinfo():
                 sys.stdout = open(target_file, 'w')
 
             error_origin = set_error("redirect")
-            batch_run_all(o)
-            print()
-            print("\t%s %s %s\n" % ("="*10, "vmcore information", "="*10))
-            print(sys_info)
-            set_error(error_origin)
-            if o.target_dir is not None:
-                sys.stdout.close()
-                sys.stdout = orig_stdout
+            # Restore stdout even when batch_run_all() raises: without the
+            # finally, an exception left sys.stdout bound to the open file
+            # and every later command in the crash session printed into it.
+            try:
+                batch_run_all(o)
+                print()
+                print("\t%s %s %s\n" % ("="*10, "vmcore information", "="*10))
+                print(sys_info)
+            finally:
+                set_error(error_origin)
+                if o.target_dir is not None:
+                    sys.stdout.close()
+                    sys.stdout = orig_stdout
             print("Done\n")
         sys.exit(0)
 

@@ -230,6 +230,7 @@ def lockup_display(reverse_sort, show_tasks, options):
             watchdog_thresh = 10
         except:
             watchdog_thresh = -1
+            softlockup_thresh = -1
 
     for rq in rqsorted:
         try:

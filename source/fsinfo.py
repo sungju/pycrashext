@@ -2731,6 +2731,8 @@ def show_ext4_inode_cache(options):
         lines = exec_crash_command("kmem -S ext4_inode_cache")
         for line in lines.splitlines():
             words = line.split()
+            if len(words) == 0:
+                continue
             if words[0] == "SLAB":
                 slab_coming = True
             elif slab_coming == True:

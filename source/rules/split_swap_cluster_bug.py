@@ -17,7 +17,7 @@ def is_major():
 
 
 def description():
-    return "Checking delay in nft_rbtree_walk()."
+    return "RHEL8: Kernel panics in split_swap_cluster() routine"
 
 
 def add_rule(sysinfo):

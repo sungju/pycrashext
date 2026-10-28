@@ -115,7 +115,7 @@ def set_color(color_mix):
         color_ansi_code = color_list[color]
 
     # Set text mode
-    for cur_mode in range(MIN_MODE, MAX_MODE, MIN_MODE):
+    for cur_mode in range(MIN_MODE, MAX_MODE + 1, MIN_MODE):
         cur_color = mode & cur_mode
         if cur_color in color_list:
             color_ansi_code = color_ansi_code + color_list[cur_color]

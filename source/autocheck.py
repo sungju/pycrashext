@@ -34,6 +34,10 @@ def get_system_info():
     resultlines = exec_crash_command("sys").splitlines()
     for line in resultlines:
         words = line.split(":", 1)
+        # A colonless line (blank, wrapped, or a pykdump warning) used to
+        # raise IndexError here and abort autocheck before any rule ran.
+        if len(words) < 2:
+            continue
         sysinfo[words[0].strip()] = words[1].strip()
 
 

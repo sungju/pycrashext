@@ -7,6 +7,7 @@ Written by Sungju Kwon <sungju.kwon@gmail.com>
 from pykdump.API import *
 from LinuxDump.inet import *
 from LinuxDump.inet import proto, netdevice
+from LinuxDump import Tasks
 
 import sys
 import collections
