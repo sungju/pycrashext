@@ -18,6 +18,7 @@ import base64
 import tempfile
 from io import StringIO
 import re
+import shlex
 
 import crashcolor
 import crashhelper
@@ -83,7 +84,7 @@ def read_ai_questions():
 
 
 def is_command_exist(name):
-    result_str = crashhelper.run_gdb_command("!which %s" % (name))
+    result_str = crashhelper.run_gdb_command("!which %s" % shlex.quote(name))
     if result_str.find(":") >= 0:
         return False
     return True
@@ -238,7 +239,8 @@ except:
             script_path = fp.name
 
         rendered = crashhelper.run_gdb_command("!python3 %s %s" % \
-                                               (script_path, data_path))
+                                               (shlex.quote(script_path),
+                                                shlex.quote(data_path)))
         print(rendered)
     except:
         print(result_str)
@@ -249,16 +251,72 @@ except:
             pass
 
 
+# Engines the operator has already approved in this crash session, so the
+# confirmation appears once rather than on every 'ai' invocation.
+egress_approved = set()
+
+# Set when the engine was picked by detect_local_engine() rather than by an
+# explicit -e, so the prompt can say why this engine was chosen.
+engine_autodetected = False
+
+ENGINE_VENDOR = {
+    "claude": "Anthropic",
+    "gemini": "Google",
+}
+
+
+def confirm_external_send(engine, byte_count):
+    """Ask once per session before handing vmcore-derived text to a
+    third-party AI CLI.
+
+    A crash dump routinely carries customer hostnames, process command
+    lines and raw kernel memory, so sending it off the box has to be a
+    deliberate act rather than a side effect of the vendor CLI happening
+    to be on $PATH. Returns True when the send may go ahead.
+    """
+    if engine in egress_approved:
+        return True
+
+    vendor = ENGINE_VENDOR.get(engine, engine)
+
+    crashcolor.set_color(crashcolor.LIGHTRED)
+    print("\n  This sends %s of vmcore-derived text to the local '%s'"
+          % (f"{byte_count:,} bytes", engine))
+    print("  CLI, which uploads it to %s." % vendor)
+    crashcolor.set_color(crashcolor.RESET)
+    if engine_autodetected:
+        print("  '%s' was chosen automatically because it is on $PATH."
+              % engine)
+    print("  Crash data can contain hostnames, process arguments and")
+    print("  kernel memory. Do not send customer data without approval.")
+
+    try:
+        answer = input("  Send to %s? [y/N]: " % vendor).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+
+    if answer not in ("y", "yes"):
+        print("  Not sent.")
+        return False
+
+    egress_approved.add(engine)
+    return True
+
+
 def ai_send_local(prompt_data, engine, model=""):
     model_opt = ""
     if model != "":
-        model_opt = " -m " + model
+        model_opt = " -m " + shlex.quote(model)
 
     prompt_data = truncate_content(prompt_data)
     prompt_data = prompt_data + \
             "\n\nIMPORTANT: Start your response with exactly '" + \
             RESPONSE_START_MARKER + "' on its own line and end with " + \
             "exactly '" + RESPONSE_END_MARKER + "' on its own line."
+
+    if not confirm_external_send(engine, len(prompt_data.encode())):
+        return
 
     temp_path = ""
     try:
@@ -269,10 +327,14 @@ def ai_send_local(prompt_data, engine, model=""):
         print("Error writing temp file:", e)
         return
 
+    # No --skip-trust: the vendor CLI's own trust prompt is a second,
+    # independent check on sending this data and should not be suppressed.
+    quoted_path = shlex.quote(temp_path)
     if engine == "claude":
-        cmd = "!cat %s | claude -p %s 2>/dev/null" % (temp_path, model_opt)
+        cmd = "!cat %s | claude -p %s" % (quoted_path, model_opt)
     else:
-        cmd = "!cat %s | gemini --skip-trust -p 'Analyze the following' %s 2>/dev/null" % (temp_path, model_opt)
+        cmd = "!cat %s | gemini -p 'Analyze the following' %s" % \
+                (quoted_path, model_opt)
 
     result_str = crashhelper.run_gdb_command(cmd)
     try:
@@ -344,15 +406,18 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
         print("Can't find ai_send.py in path")
         return
 
+    # These are interpolated into a shell command below, so quote them.
+    # Unquoted, 'ai -t "1; rm -rf ~/cases"' executed the rm, and a model
+    # name containing a space was silently split.
     cmd_options = ""
     if o.ai_engine != "":
-        cmd_options = cmd_options + " -e " + o.ai_engine
+        cmd_options = cmd_options + " -e " + shlex.quote(o.ai_engine)
 
     if o.taskid != "":
-        cmd_options = cmd_options + " -t " + o.taskid
+        cmd_options = cmd_options + " -t " + shlex.quote(o.taskid)
 
     if o.ai_model != "":
-        cmd_options = cmd_options + " -m " + o.ai_model
+        cmd_options = cmd_options + " -m " + shlex.quote(o.ai_model)
 
     if o.reset:
         cmd_options = cmd_options + " -r "
@@ -363,14 +428,18 @@ def ai_send(o, args, cmd_path_list, local_engine=""):
             try:
                 with tempfile.NamedTemporaryFile(delete=False) as fp:
                     fp.write(result_str.encode())
-                    cmd_options = cmd_options + " -i " + fp.name
+                    cmd_options = cmd_options + " -i " + shlex.quote(fp.name)
                     result_str = ""
             except Exception as e:
                 print("Error", e)
                 pass
 
-            result_str = crashhelper.run_gdb_command("!echo '%s' | %s %s %s" % \
-                                                (result_str, python_cmd, \
+            # result_str is normally emptied above, but if the temp file
+            # could not be written it still holds crash output. Wrapping it
+            # in bare single quotes broke on any apostrophe in the log text.
+            result_str = crashhelper.run_gdb_command("!echo %s | %s %s %s" % \
+                                                (shlex.quote(result_str), \
+                                                 python_cmd, \
                                                  ai_send_path, cmd_options))
             print(result_str)
             break
@@ -449,6 +518,8 @@ def ai():
     if o.taskid == "":
         o.taskid = get_taskid()
 
+    global engine_autodetected
+
     local_engine = ""
     if o.ai_engine in ("claude", "gemini"):
         if is_command_exist(o.ai_engine):
@@ -458,6 +529,7 @@ def ai():
             return
     elif o.ai_engine == "":
         local_engine = detect_local_engine()
+        engine_autodetected = local_engine != ""
         if local_engine == "" and (encode_url == None or encode_url == ""):
             print("No AI server or local CLI (claude, gemini) is available")
             return
