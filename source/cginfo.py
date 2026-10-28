@@ -1454,7 +1454,7 @@ def show_cgroup_tree(options):
         cpuset_cgrp_subsys = readSymbol("cpuset_cgrp_subsys")
         subsys_flags = cpuset_cgrp_subsys.root.flags
         if (key_enabled != 0 or
-                (subsys_lags & CGRP_ROOT_CPUSET_V2_MODE) == CGRP_ROOT_CPUSET_V2_MODE):
+                (subsys_flags & CGRP_ROOT_CPUSET_V2_MODE) == CGRP_ROOT_CPUSET_V2_MODE):
             show_cgroup2_tree(options)
             return
     except Exception as e:

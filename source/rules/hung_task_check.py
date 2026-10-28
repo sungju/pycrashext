@@ -78,7 +78,7 @@ def run_rule(basic_data):
         result_dict["KCS_URL"] = "https://access.redhat.com/solutions/31453"
         result_dict["RESOLUTION"] = "Please check long blocked tasks.\n" \
                 "\tCurrent hung_task_timeout_secs is %d seconds" % \
-                (readSymbol("sysctl_hung_task_timeout_secs"))
+                (rh.get_symbol("sysctl_hung_task_timeout_secs"))
 
         return [result_dict]
     except Exception as e:
