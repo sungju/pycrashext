@@ -134,12 +134,15 @@ SEND_SHUTDOWN = 2
 
 def get_sk_shutdown_str(sk_shutdown):
     shutdown_type = sk_shutdown & SHUTDOWN_MASK
-    if shutdown_type == RCV_SHUTDOWN:
-        return "RCV_SHUTDOWN"
-    elif shutdown_type == SEND_SHUTDOWN:
-        return "SEND_SHUTDOWN"
-    else:
-        return "NO SHUTDOWN"
+    # RCV_SHUTDOWN|SEND_SHUTDOWN == SHUTDOWN_MASK, so a fully shut-down
+    # socket matches neither single value and used to report NO SHUTDOWN.
+    names = []
+    if shutdown_type & RCV_SHUTDOWN:
+        names.append("RCV_SHUTDOWN")
+    if shutdown_type & SEND_SHUTDOWN:
+        names.append("SEND_SHUTDOWN")
+
+    return "|".join(names) if names else "NO SHUTDOWN"
 
 
 SOCK_ASYNC_NOSPACE = 1 << 0
@@ -151,18 +154,20 @@ SOCK_EXTERNALLY_ALLOCATED = 1 << 5
 
 def get_sk_socket_flags(sk_socket_flags):
     sk_socket_flags = sk_socket_flags & 0x3f
-    try:
-        return {
-            SOCK_ASYNC_NOSPACE : "SOCK_ASYNC_NOSPACE",
-            SOCK_ASYNC_WAITDATA : "SOCK_ASYNC_WAITDATA",
-            SOCK_NOSPACE : "SOCK_NOSPACE",
-            SOCK_PASSCRED : "SOCK_PASSCRED",
-            SOCK_PASSSEC : "SOCK_PASSSEC",
-            SOCK_EXTERNALLY_ALLOCATED : "SOCK_EXTERNALLY_ALLOCATED",
-            0 : "NONE"
-        }[sk_socket_flags]
-    except:
-        return "NONE"
+    # These are independent bits, so decode them as a set. Matching the
+    # composite value against a dict of single bits returned "NONE" for
+    # every socket with more than one flag set.
+    flag_names = [
+        (SOCK_ASYNC_NOSPACE, "SOCK_ASYNC_NOSPACE"),
+        (SOCK_ASYNC_WAITDATA, "SOCK_ASYNC_WAITDATA"),
+        (SOCK_NOSPACE, "SOCK_NOSPACE"),
+        (SOCK_PASSCRED, "SOCK_PASSCRED"),
+        (SOCK_PASSSEC, "SOCK_PASSSEC"),
+        (SOCK_EXTERNALLY_ALLOCATED, "SOCK_EXTERNALLY_ALLOCATED"),
+    ]
+    names = [name for bit, name in flag_names if sk_socket_flags & bit]
+
+    return "|".join(names) if names else "NONE"
 
 
 TCP_ESTABLISHED = 1
@@ -253,7 +258,11 @@ def show_unix_sock(options, sock):
 
 
 def ip2str(ipnum):
-    return socket.inet_ntoa(struct.pack('!L', ipnum))
+    # skc_daddr/skc_rcv_saddr are __be32 and pykdump hands them back as a
+    # host-order int, so pack natively to recover the original bytes.
+    # Packing with '!L' byte-swapped a second time: 192.168.1.10 printed
+    # as 10.1.168.192.
+    return socket.inet_ntoa(struct.pack('=L', ipnum))
 
 
 def show_inet_sock(options, sock):
@@ -261,8 +270,9 @@ def show_inet_sock(options, sock):
     print(inet_sock)
     print("\tsrc addr = %s:%d" % (ip2str(sock.__sk_common.skc_rcv_saddr),
                                 sock.__sk_common.skc_num))
+    # skc_num is host order, but skc_dport is __be16 and needs ntohs().
     print("\tdst addr = %s:%d" % (ip2str(sock.__sk_common.skc_daddr),
-                                 sock.__sk_common.skc_dport))
+                                 socket.ntohs(sock.__sk_common.skc_dport)))
 
     show_sock_status(sock)
 
