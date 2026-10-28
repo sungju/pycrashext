@@ -115,10 +115,13 @@ def set_color(color_mix):
         color_ansi_code = color_list[color]
 
     # Set text mode
-    for cur_mode in range(MIN_MODE, MAX_MODE + 1, MIN_MODE):
-        cur_color = mode & cur_mode
-        if cur_color in color_list:
-            color_ansi_code = color_ansi_code + color_list[cur_color]
+    # Modes are single bits, so step by doubling: a linear step visited
+    # 0x300, 0x500, ... and appended the same mode code more than once.
+    cur_mode = MIN_MODE
+    while cur_mode <= MAX_MODE:
+        if mode & cur_mode and cur_mode in color_list:
+            color_ansi_code = color_ansi_code + color_list[cur_mode]
+        cur_mode = cur_mode << 1
 
     if len(color_ansi_code) > 0:
         run_ansi_code(color_ansi_code)

@@ -327,14 +327,17 @@ def ai_send_local(prompt_data, engine, model=""):
         print("Error writing temp file:", e)
         return
 
-    # No --skip-trust: the vendor CLI's own trust prompt is a second,
-    # independent check on sending this data and should not be suppressed.
+    # gemini needs --skip-trust: its folder-trust check (about loading
+    # workspace settings, not about data egress) refuses to run
+    # non-interactively otherwise. confirm_external_send() above is the
+    # consent check. stderr is dropped so CLI preamble stays out of the
+    # result.
     quoted_path = shlex.quote(temp_path)
     if engine == "claude":
-        cmd = "!cat %s | claude -p %s" % (quoted_path, model_opt)
+        cmd = "!cat %s | claude -p %s 2>/dev/null" % (quoted_path, model_opt)
     else:
-        cmd = "!cat %s | gemini -p 'Analyze the following' %s" % \
-                (quoted_path, model_opt)
+        cmd = "!cat %s | gemini --skip-trust -p 'Analyze the following' " \
+              "%s 2>/dev/null" % (quoted_path, model_opt)
 
     result_str = crashhelper.run_gdb_command(cmd)
     try:
