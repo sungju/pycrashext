@@ -213,13 +213,39 @@ def get_useconds(dto):
 
 
 
+def get_task_runtime(task):
+    """
+    Returns (runtime in usec, "D HH:MM:SS.mmm" text) of a task from 'ps -m',
+    or (-1, "") when it can't be read.
+    """
+    try:
+        task_time = exec_crash_command("ps -m 0x%x" % (task)).splitlines()[0]
+        task_time = task_time.split("]")[0][1:].strip()
+        days_str, time_str = task_time.split()
+        dto = datetime.strptime(time_str, "%H:%M:%S.%f")
+        date_info = (int(days_str), dto.hour, dto.minute, dto.second, dto.microsecond)
+        return get_useconds(date_info), task_time
+    except Exception:
+        return -1, ""
+
+
 def lockup_display(reverse_sort, show_tasks, options):
     rqlist = Tasks.getRunQueues()
-    rqsorted = sorted(rqlist, key=getKey, reverse=reverse_sort)
-    if (reverse_sort):
-        now = rqsorted[0].Timestamp
+    now = max(rq.Timestamp for rq in rqlist)
+
+    # With -d, sort by how long the current task has been running ('ps -m')
+    # instead of by how far the runqueue clock is behind.
+    runtimes = {}
+    if options.details:
+        for rq in rqlist:
+            try:
+                runtimes[rq.cpu] = get_task_runtime(rq.curr)
+            except Exception:
+                runtimes[rq.cpu] = (-1, "")
+        rqsorted = sorted(rqlist, key=lambda rq: runtimes[rq.cpu][0],
+                          reverse=not reverse_sort)
     else:
-        now = rqsorted[-1].Timestamp
+        rqsorted = sorted(rqlist, key=getKey, reverse=reverse_sort)
 
     try:
         watchdog_thresh = readSymbol("watchdog_thresh")
@@ -260,13 +286,7 @@ def lockup_display(reverse_sort, show_tasks, options):
 
         task_pid = curr
         if options.details:
-            task_time = exec_crash_command("ps -m 0x%x" % (task_pid)).splitlines()[0]
-            task_time = task_time.split("]")[0][1:]
-            days_str, time_str = task_time.split()
-            dto = datetime.strptime(time_str, "%H:%M:%S.%f")
-
-            date_info = (int(days_str), dto.hour, dto.minute, dto.second, dto.microsecond)
-            runtime = get_useconds(date_info)
+            runtime, task_time = runtimes[rq.cpu]
             if runtime >= 2 * 60 * 1000000:
                 crashcolor.set_color(crashcolor.LIGHTRED)
             elif runtime >= 60 * 1000000:
@@ -592,6 +612,7 @@ def show_smp_call_data(cfd_addr, csd_addr=None):
 
 OPTION_EXAMPLES = {
     "-c": ["lockup -c", "lockup -c -b"],
+    "-d": ["lockup -d", "lockup -cdb", "lockup -r -cdb"],
     "-r": ["lockup -r", "lockup -r -c"],
     "-q": ["lockup -q 0xffff8881234abcd0"],
     "--smp-call": ["lockup --smp-call ffff9caa268f4a00,ffff9caa2633ae60"],
@@ -609,7 +630,8 @@ def lockup():
                   help="Exclude swapper/* from the list")
     op.add_option("-d", "--details", dest="details", default=0,
                   action="store_true",
-                  help="show task details")
+                  help="show task details (runtime from 'ps -m') and "
+                       "sort CPUs by that runtime")
     op.add_option("-r", "--reverse", dest="reverse_sort", default=0,
                   action="store_true",
                   help="show longest holder at top")

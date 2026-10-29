@@ -322,7 +322,7 @@ CPU lockup detection and runqueue analysis. Identifies which CPUs are locked up 
 |--------|-----------|----------|-------------|
 | `-b` | `--backtrace` | | Show backtrace for locked CPUs |
 | `-c` | `--compact` | | Show compact output |
-| `-d` | `--details` | | Show detailed information |
+| `-d` | `--details` | | Show the current task's runtime (`ps -m`) and sort CPUs by it instead of by runqueue time |
 | `-r` | `--reverse` | | Show longest holder at top |
 | `-t` | `--tasks` | | Show tasks in each runqueue |
 | `-s` | `--rt` | | Show RT scheduling information |
@@ -335,7 +335,8 @@ CPU lockup detection and runqueue analysis. Identifies which CPUs are locked up 
 ```
 lockup                 # Show CPU lockup summary
 lockup -r              # Show with longest holder first
-lockup -d              # Show detailed lockup info
+lockup -d              # Show ps -m runtime, CPUs sorted by it
+lockup -cdb            # Same, without swapper, with backtraces
 lockup -t              # Show tasks in runqueues
 lockup -b              # Show backtraces for locked CPUs
 lockup -q 0xffff...    # Examine qspinlock at address
@@ -466,7 +467,7 @@ Filesystem information including dentries, inodes, page caches, swap, and open f
 | Option | Long Form | Argument | Description |
 |--------|-----------|----------|-------------|
 | `-a` | `--all` | | Show all |
-| `-d` | `--details` | | Show detailed information |
+| `-d` | `--details` | | Show the current task's runtime (`ps -m`) and sort CPUs by it instead of by runqueue time |
 | `-c` | `--caches` | | Show dentry/inode caches |
 | `-C` | `--CACHED` | | Show CACHED details |
 | `-f` | `--file` | `<addr>` | Show detailed file info for `struct file` address |
